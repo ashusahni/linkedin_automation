@@ -1,0 +1,17 @@
+Checking Phantom ID: 6916181421927761
+✅ Exports directory ready
+Agent Name: Untitled LinkedIn Message Sender
+--- Saved Arguments in Dashboard ---
+{
+  "spreadsheetUrlExclusionList": [],
+  "sessionCookie": "AQEDASdWjsAEykCmAAABnBzmPv4AAAGcQPLC_lYAbIVKCnMOarEquWJEGGitWjCuFgwvX0Surm6KAG7kL9b18ePuKJYuTKcI77omK2NPmieM96XQ09kgofml220Lutu60DcpBeGrNOLM5P0k9DbayRp0",
+  "enableScraping": false,
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+  "spreadsheetUrl": "https://cache1.phantombooster.com/XoyBe7YlH7Q/B0xiVd5GDcyNaDvwhD4N1Q/result.csv",
+  "messageColumnName": "message",
+  "message": "hi #firstName#",
+  "profilesPerLaunch": 3
+}
+
+✅ sessionCookie IS present in dashboard config.
+   The backend will use this and SKIP sending the .env cookie.

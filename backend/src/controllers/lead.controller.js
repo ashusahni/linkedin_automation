@@ -1,0 +1,1498 @@
+import { processPhantomResults } from "../services/leadPipeline.service.js";
+import pool from "../db.js";
+import { parse } from 'csv-parse/sync';
+import fs from 'fs';
+import { INDUSTRY_KEYWORDS } from '../config/industries.js';
+
+// ============================================================================
+// CONTACT SCRAPING INTEGRATION (PHASE 6)
+// ============================================================================
+
+/**
+ * Trigger contact scraping for newly approved leads
+ * Runs asynchronously in the background - does NOT block approval
+ */
+async function triggerContactScrapingForApprovedLeads(leadIds) {
+  if (!leadIds || leadIds.length === 0) {
+    return;
+  }
+
+  console.log(`\n🔍 ============================================`);
+  console.log(`🔍 AUTO-SCRAPING CONTACTS FOR APPROVED LEADS`);
+  console.log(`🔍 Leads: ${leadIds.length}`);
+  console.log(`🔍 ============================================\n`);
+
+  try {
+    // Check if LinkedIn session cookie is configured
+    const sessionCookie = process.env.LINKEDIN_SESSION_COOKIE;
+    if (!sessionCookie) {
+      console.warn('⚠️  LINKEDIN_SESSION_COOKIE not configured - skipping contact scraping');
+      return;
+    }
+
+    // Dynamic import to avoid loading puppeteer at startup
+    const { default: contactScraperService } = await import('../services/contact-scraper.service.js');
+
+    // Initialize scraper if needed
+    await contactScraperService.initialize(sessionCookie);
+
+    // Trigger scraping (this runs in background)
+    const result = await contactScraperService.scrapeApprovedLeads(leadIds);
+
+    console.log(`✅ Contact scraping initiated: ${result.jobId || 'unknown'}`);
+    if (result.alreadyComplete) {
+      console.log(`   All ${leadIds.length} leads already have contact info`);
+    } else {
+      console.log(`   Scraping ${result.needsScraping || 0} new profiles`);
+      console.log(`   Already cached: ${result.alreadyCached || 0}`);
+    }
+
+  } catch (error) {
+    console.error('❌ Failed to trigger contact scraping:', error.message);
+    // Don't throw - we don't want to fail the approval if scraping fails
+  }
+}
+
+
+// ============================================================================
+// ADVANCED FILTER CLAUSE BUILDER (Sales Navigator-style enhancements)
+// ============================================================================
+// Builds SQL WHERE clause from JSON filter structure
+// Supports: AND/OR groups, Include/Exclude, multi-value conditions
+function buildAdvancedFilterClause(filterJSON, params) {
+  if (!filterJSON || !filterJSON.groups || filterJSON.groups.length === 0) return '';
+
+  const groupConditions = [];
+
+  for (const group of filterJSON.groups) {
+    if (!group.conditions || group.conditions.length === 0) continue;
+
+    const conditions = [];
+    for (const cond of group.conditions) {
+      const { field, operator, value, exclude } = cond;
+      let clause = '';
+
+      // Field mapping & handling
+      if (field === 'industry') {
+        const pIdx = params.length + 1;
+        // Industry infers from company or title (simplified version of simpler filter logic)
+        // If we wanted exact parity with config-based logic it would be complex, 
+        // so we treat it as a text search on relevant columns for "contains"/"equals".
+        if (operator === 'contains' || operator === 'equals') {
+          clause = `(company ILIKE $${pIdx} OR title ILIKE $${pIdx})`;
+          params.push(`%${value}%`);
+        } else if (operator === 'not_equals') {
+          clause = `(company NOT ILIKE $${pIdx} AND title NOT ILIKE $${pIdx})`;
+          params.push(`%${value}%`);
+        } else if (operator === 'starts_with') {
+          clause = `(company ILIKE $${pIdx} OR title ILIKE $${pIdx})`;
+          params.push(`${value}%`);
+        }
+      } else {
+        // Standard columns
+        let dbCol = field;
+        if (field === 'hasEmail') dbCol = 'email';
+        else if (field === 'hasLinkedin') dbCol = 'linkedin_url';
+        else if (field === 'title') dbCol = 'title';
+        else if (field === 'company') dbCol = 'company';
+        else if (field === 'location') dbCol = 'location';
+        else if (field === 'status') dbCol = 'status';
+        else if (field === 'source') dbCol = 'source';
+        else if (field === 'review_status') dbCol = 'review_status'; // PHASE 4: Review status
+        else if (field === 'created_at') dbCol = 'created_at';
+
+        const pIdx = params.length + 1;
+
+        switch (operator) {
+          case 'contains':
+            clause = `${dbCol} ILIKE $${pIdx}`;
+            params.push(`%${value}%`);
+            break;
+          case 'not_contains':
+            clause = `${dbCol} NOT ILIKE $${pIdx}`;
+            params.push(`%${value}%`);
+            break;
+          case 'equals':
+            if (dbCol === 'status' || dbCol === 'source') {
+              clause = `${dbCol} = $${pIdx}`;
+              params.push(value);
+            } else {
+              clause = `${dbCol} ILIKE $${pIdx}`; // Case insensitive for text
+              params.push(value);
+            }
+            break;
+          case 'not_equals':
+            if (dbCol === 'status' || dbCol === 'source') {
+              clause = `${dbCol} != $${pIdx}`;
+              params.push(value);
+            } else {
+              clause = `${dbCol} NOT ILIKE $${pIdx}`;
+              params.push(value);
+            }
+            break;
+          case 'starts_with':
+            clause = `${dbCol} ILIKE $${pIdx}`;
+            params.push(`${value}%`);
+            break;
+          case 'includes': // Location-specific
+            clause = `${dbCol} ILIKE $${pIdx}`;
+            params.push(`%${value}%`);
+            break;
+          case 'excludes': // Location-specific negative
+            clause = `${dbCol} NOT ILIKE $${pIdx}`;
+            params.push(`%${value}%`);
+            break;
+          case 'exists': // Boolean fields (hasEmail, hasLinkedin)
+            clause = `(${dbCol} IS NOT NULL AND ${dbCol} != '')`;
+            break;
+          case 'not_exists': // Boolean fields negative
+            clause = `(${dbCol} IS NULL OR ${dbCol} = '')`;
+            break;
+          // Legacy operators (backward compatibility)
+          case 'is_true':
+            clause = `(${dbCol} IS NOT NULL AND ${dbCol} != '')`;
+            break;
+          case 'is_false':
+            clause = `(${dbCol} IS NULL OR ${dbCol} = '')`;
+            break;
+          // Date operators
+          case 'after':
+            clause = `${dbCol} > $${pIdx}`;
+            params.push(value);
+            break;
+          case 'before':
+            clause = `${dbCol} < $${pIdx}`;
+            params.push(value);
+            break;
+        }
+      }
+
+      // Apply EXCLUDE logic (Sales Navigator-style)
+      // Exclude wraps the condition in NOT
+      if (clause) {
+        if (exclude) {
+          clause = `NOT (${clause})`;
+        }
+        conditions.push(clause);
+      }
+    }
+
+    if (conditions.length > 0) {
+      groupConditions.push(`(${conditions.join(' AND ')})`);
+    }
+  }
+
+  if (groupConditions.length === 0) return '';
+  return `(${groupConditions.join(' OR ')})`;
+}
+
+// GET /api/leads
+// Supports basic → advanced filters via query params:
+// - filters: JSON string for advanced logic
+// - OR legacy simple params (source, status, etc.)
+export async function getLeads(req, res) {
+  try {
+    const {
+      page = 1,
+      limit = 50,
+      filters, // New JSON param
+      // Legacy params
+      source,
+      status,
+      review_status, // PHASE 4: Review status filter
+      hasEmail,
+      hasLinkedin,
+      search,
+      title,
+      location,
+      company,
+      industry,
+      quality, // 'primary', 'secondary', 'tertiary'
+      createdFrom,
+      createdTo,
+    } = req.query;
+
+    const pageNumber = parseInt(page, 10) || 1;
+    const pageLimit = parseInt(limit, 10) || 50;
+    const offset = (pageNumber - 1) * pageLimit;
+
+    const conditionClauses = [];
+    const params = [];
+
+    // Check for Advanced Filters first
+    if (filters) {
+      try {
+        const filterJSON = JSON.parse(filters);
+        const advancedClause = buildAdvancedFilterClause(filterJSON, params);
+        if (advancedClause) {
+          conditionClauses.push(advancedClause);
+        }
+      } catch (e) {
+        console.error("Failed to parse filters JSON", e);
+        // Fallback or error? For now, we'll continue and maybe matching other params will happen (unlikely to mix)
+      }
+    } else {
+      // --- Legacy / Simple Filter Logic ---
+
+      // Simple equality filters
+      if (source && source !== 'all') {
+        conditionClauses.push(`source = $${params.length + 1}`);
+        params.push(source);
+      }
+
+      if (status && status !== 'all') {
+        conditionClauses.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+
+      // PHASE 4: Review status filter
+      if (review_status && review_status !== 'all') {
+        conditionClauses.push(`review_status = $${params.length + 1}`);
+        params.push(review_status);
+      }
+
+      // Boolean-style filters
+      if (hasEmail === "true") {
+        conditionClauses.push(`email IS NOT NULL AND email != ''`);
+      }
+
+      if (hasLinkedin === "true") {
+        conditionClauses.push(`linkedin_url IS NOT NULL AND linkedin_url != ''`);
+      }
+
+      // Lead Search–style meta filters (same fields as Lead Search page)
+      if (title && title.trim()) {
+        conditionClauses.push(`title ILIKE $${params.length + 1}`);
+        params.push(`%${title.trim()}%`);
+      }
+      if (location && location.trim()) {
+        conditionClauses.push(`location ILIKE $${params.length + 1}`);
+        params.push(`%${location.trim()}%`);
+      }
+      if (company && company.trim()) {
+        conditionClauses.push(`company ILIKE $${params.length + 1}`);
+        params.push(`%${company.trim()}%`);
+      }
+
+      // Complex Industry Logic (preserved for Simple Mode)
+      if (industry && industry.trim()) {
+        const industryName = industry.trim();
+        const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        if (industryName === 'Other') {
+          const allKeywords = Object.values(INDUSTRY_KEYWORDS).flat();
+          if (allKeywords.length > 0) {
+            const allRegex = allKeywords.map(k => escapeRegExp(k)).join('|');
+            conditionClauses.push(`(COALESCE(company, '') || ' ' || COALESCE(title, '')) !~* $${params.length + 1}`);
+            params.push(`(${allRegex})`);
+          }
+        } else if (INDUSTRY_KEYWORDS[industryName]) {
+          const industryKeys = Object.keys(INDUSTRY_KEYWORDS);
+          const targetIndex = industryKeys.indexOf(industryName);
+          const currentKeywords = INDUSTRY_KEYWORDS[industryName];
+          const currentRegex = currentKeywords.map(k => escapeRegExp(k)).join('|');
+
+          conditionClauses.push(`(COALESCE(company, '') || ' ' || COALESCE(title, '')) ~* $${params.length + 1}`);
+          params.push(`(${currentRegex})`);
+
+          if (targetIndex > 0) {
+            const priorIndustries = industryKeys.slice(0, targetIndex);
+            const priorKeywords = priorIndustries.flatMap(k => INDUSTRY_KEYWORDS[k]);
+            if (priorKeywords.length > 0) {
+              const priorRegex = priorKeywords.map(k => escapeRegExp(k)).join('|');
+              conditionClauses.push(`(COALESCE(company, '') || ' ' || COALESCE(title, '')) !~* $${params.length + 1}`);
+              params.push(`(${priorRegex})`);
+            }
+          }
+        } else {
+          conditionClauses.push(
+            `(company ILIKE $${params.length + 1} OR title ILIKE $${params.length + 1})`
+          );
+          params.push(`%${industryName}%`);
+        }
+      }
+
+      // Date range filters
+      if (createdFrom) {
+        conditionClauses.push(`created_at >= $${params.length + 1}`);
+        params.push(createdFrom);
+      }
+
+      if (createdTo) {
+        conditionClauses.push(`created_at <= $${params.length + 1}`);
+        params.push(createdTo);
+      }
+    }
+
+    // Global Search (applies on top of filters)
+    if (search && search.trim()) {
+      conditionClauses.push(
+        `(full_name ILIKE $${params.length + 1} OR company ILIKE $${params.length + 1} OR title ILIKE $${params.length + 1})`
+      );
+      params.push(`%${search.trim()}%`);
+    }
+
+    const whereClause = conditionClauses.length ? ` WHERE ${conditionClauses.join(" AND ")}` : "";
+
+    const dataQuery = `
+      SELECT *
+      FROM leads
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT $${params.length + 1}
+      OFFSET $${params.length + 2}
+    `;
+
+    const dataParams = [...params, pageLimit, offset];
+    const result = await pool.query(dataQuery, dataParams);
+
+    // Lead Scoring & Quality Tier Filtering
+    if (quality) {
+      // Get user preferred keywords from env
+      const preferredKeywords = (process.env.PREFERRED_COMPANY_KEYWORDS || '')
+        .toLowerCase()
+        .split(',')
+        .map(k => k.trim())
+        .filter(Boolean);
+
+      // Build scoring SQL expression
+      // 50 points for title/company match
+      let scoreExp = '0';
+      if (preferredKeywords.length > 0) {
+        // Escape single quotes in keywords to prevent SQL errors
+        const likes = preferredKeywords.map(k => {
+          const safeK = k.replace(/'/g, "''");
+          return `(COALESCE(company, '') ILIKE '%${safeK}%' OR COALESCE(title, '') ILIKE '%${safeK}%')`;
+        }).join(' OR ');
+        scoreExp += ` + (CASE WHEN ${likes} THEN 50 ELSE 0 END)`;
+      }
+
+      // Calculate score for ALL matching leads to return correct set
+      // We'll use a CTE to score and rank.
+
+      const qualityQuery = `
+         WITH scored_leads AS (
+           SELECT *,
+             (${scoreExp}) AS score
+           FROM leads
+           ${whereClause}
+         ),
+         ranked_leads AS (
+            SELECT *,
+              PERCENT_RANK() OVER (ORDER BY score DESC, created_at DESC) as pct_rank
+            FROM scored_leads
+         )
+         SELECT * FROM ranked_leads
+         WHERE 
+           CASE 
+             WHEN $${params.length + 1} = 'primary' THEN pct_rank <= 0.20
+             WHEN $${params.length + 1} = 'secondary' THEN pct_rank > 0.20 AND pct_rank <= 0.50
+             WHEN $${params.length + 1} = 'tertiary' THEN pct_rank > 0.50
+           END
+         ORDER BY score DESC, created_at DESC
+         LIMIT $${params.length + 2}
+         OFFSET $${params.length + 3}
+       `;
+
+      const qualityCountQuery = `
+         WITH scored_leads AS (
+           SELECT *,
+             (${scoreExp}) AS score
+           FROM leads
+           ${whereClause}
+         ),
+         ranked_leads AS (
+            SELECT pct_rank
+            FROM (
+                SELECT PERCENT_RANK() OVER (ORDER BY score DESC, created_at DESC) as pct_rank
+                FROM scored_leads
+            ) sub
+         )
+         SELECT COUNT(*) as count FROM ranked_leads
+         WHERE 
+           CASE 
+             WHEN $${params.length + 1} = 'primary' THEN pct_rank <= 0.20
+             WHEN $${params.length + 1} = 'secondary' THEN pct_rank > 0.20 AND pct_rank <= 0.50
+             WHEN $${params.length + 1} = 'tertiary' THEN pct_rank > 0.50
+           END
+       `;
+
+      const qualityParams = [...params, quality];
+      const qualityDataParams = [...qualityParams, pageLimit, offset];
+
+      const qResult = await pool.query(qualityQuery, qualityDataParams);
+      const qCountResult = await pool.query(qualityCountQuery, qualityParams);
+
+      return res.json({
+        leads: qResult.rows,
+        pagination: {
+          total: parseInt(qCountResult.rows[0].count, 10),
+          page: pageNumber,
+          limit: pageLimit,
+        },
+      });
+    }
+
+    const countQuery = `
+      SELECT COUNT(*) AS count
+      FROM leads
+      ${whereClause}
+    `;
+
+    const countResult = await pool.query(countQuery, params);
+
+    return res.json({
+      leads: result.rows,
+      pagination: {
+        total: parseInt(countResult.rows[0].count, 10),
+        page: pageNumber,
+        limit: pageLimit,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/leads/search
+export async function searchLeads(req, res) {
+  try {
+    const { query } = req.query;
+    if (!query) return res.status(400).json({ error: "Query parameter is required" });
+
+    const searchTerm = `%${query}%`;
+    const result = await pool.query(
+      `SELECT * FROM leads 
+       WHERE full_name ILIKE $1 
+       OR company ILIKE $1 
+       OR title ILIKE $1 
+       OR email ILIKE $1
+       OR location ILIKE $1
+       OR notes ILIKE $1
+       ORDER BY created_at DESC`,
+      [searchTerm]
+    );
+
+    return res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/leads/:id
+export async function getLeadById(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await pool.query("SELECT * FROM leads WHERE id = $1", [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    return res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// PUT /api/leads/:id
+export async function updateLead(req, res) {
+  try {
+    const { id } = req.params;
+    const { 
+      status, 
+      title, 
+      company, 
+      first_name, 
+      last_name, 
+      // Mapping camelCase to snake_case if sent from frontend
+      firstName, 
+      lastName,
+      // Additional fields
+      email,
+      phone,
+      location,
+      linkedin_url,
+      source,
+      notes,
+      profile_image,
+      connection_degree,
+      review_status,
+      rejected_reason
+    } = req.body;
+
+    // Handle loose mapping
+    const finalFirstName = first_name || firstName;
+    const finalLastName = last_name || lastName;
+
+    const result = await pool.query(
+      `UPDATE leads 
+       SET status = COALESCE($1, status),
+           title = COALESCE($2, title),
+           company = COALESCE($3, company),
+           first_name = COALESCE($4, first_name),
+           last_name = COALESCE($5, last_name),
+           email = COALESCE($6, email),
+           phone = COALESCE($7, phone),
+           location = COALESCE($8, location),
+           linkedin_url = COALESCE($9, linkedin_url),
+           source = COALESCE($10, source),
+           notes = COALESCE($11, notes),
+           profile_image = COALESCE($12, profile_image),
+           connection_degree = COALESCE($13, connection_degree),
+           review_status = COALESCE($14, review_status),
+           rejected_reason = COALESCE($15, rejected_reason),
+           updated_at = NOW()
+       WHERE id = $16
+       RETURNING *`,
+      [
+        status, 
+        title, 
+        company, 
+        finalFirstName, 
+        finalLastName,
+        email,
+        phone,
+        location,
+        linkedin_url,
+        source,
+        notes,
+        profile_image,
+        connection_degree,
+        review_status,
+        rejected_reason,
+        id
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    return res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Update lead error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads
+export async function createLead(req, res) {
+  try {
+    const { 
+      full_name,
+      first_name, 
+      last_name, 
+      firstName, 
+      lastName,
+      company, 
+      title, 
+      email,
+      phone,
+      linkedin_url,
+      location,
+      source,
+      notes,
+      profile_image
+    } = req.body;
+
+    const finalFirstName = first_name || firstName;
+    const finalLastName = last_name || lastName;
+    const finalFullName = full_name || `${finalFirstName || ''} ${finalLastName || ''}`.trim();
+
+    const result = await pool.query(
+      `INSERT INTO leads (
+         full_name, first_name, last_name, company, title, 
+         email, phone, linkedin_url, location, source, 
+         notes, profile_image, status, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'new', NOW(), NOW())
+       RETURNING *`,
+      [
+        finalFullName, finalFirstName, finalLastName, company, title,
+        email, phone, linkedin_url, location, source || 'manual',
+        notes, profile_image
+      ]
+    );
+
+    return res.status(201).json(result.rows[0]);
+  } catch (err) {
+    // Handle unique constraint violation for linkedin_url
+    if (err.code === '23505') {
+       return res.status(409).json({ error: "Lead with this LinkedIn URL already exists." });
+    }
+    console.error("Create lead error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// DELETE /api/leads/:id
+export async function deleteLead(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await pool.query("DELETE FROM leads WHERE id = $1 RETURNING *", [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    return res.json({ success: true, message: "Lead deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/leads/stats
+export async function getStats(req, res) {
+  try {
+    const totalLeads = await pool.query("SELECT COUNT(*) FROM leads");
+    const statusBreakdown = await pool.query(
+      "SELECT status, COUNT(*) FROM leads GROUP BY status"
+    );
+    const sourceBreakdown = await pool.query(
+      "SELECT source, COUNT(*) FROM leads GROUP BY source"
+    );
+
+    // Count duplicates (leads with same linkedin_url)
+    const duplicatesResult = await pool.query(
+      `SELECT COUNT(*) - COUNT(DISTINCT linkedin_url) as duplicates 
+       FROM leads 
+       WHERE linkedin_url IS NOT NULL AND linkedin_url != ''`
+    );
+
+    const stats = {
+      totalLeads: parseInt(totalLeads.rows[0].count),
+      statusCount: statusBreakdown.rows.reduce((acc, row) => {
+        acc[row.status] = parseInt(row.count);
+        return acc;
+      }, {}),
+      sourceCount: sourceBreakdown.rows.reduce((acc, row) => {
+        acc[row.source || 'unknown'] = parseInt(row.count);
+        return acc;
+      }, {}),
+      duplicates: parseInt(duplicatesResult.rows[0]?.duplicates || 0)
+    };
+
+    return res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// DELETE /api/leads/all - Danger: wipes all leads & related data
+export async function deleteAllLeads(req, res) {
+  try {
+    // Optional: simple safeguard via query flag
+    const { confirm } = req.query;
+    if (confirm !== "true") {
+      return res.status(400).json({
+        error: "This is a destructive operation. Call with ?confirm=true to proceed."
+      });
+    }
+
+    // Delete dependent rows first (FKs with ON DELETE CASCADE handle most of this,
+    // but being explicit keeps things clear and future-proof)
+    await pool.query("DELETE FROM lead_enrichment");
+    await pool.query("DELETE FROM campaign_leads");
+
+    // Finally, delete all leads
+    const result = await pool.query("DELETE FROM leads");
+    const deletedCount = result.rowCount || 0;
+
+    console.log(`🧹 Deleted all leads. Count: ${deletedCount}`);
+
+    return res.json({
+      success: true,
+      message: `Deleted ${deletedCount} leads and cleared related data.`,
+      deleted: deletedCount
+    });
+  } catch (err) {
+    console.error("❌ Error deleting all leads:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/leads/imports
+export async function getImports(req, res) {
+  try {
+    const { limit = 100 } = req.query;
+    const result = await pool.query(
+      "SELECT * FROM import_logs ORDER BY timestamp DESC LIMIT $1",
+      [parseInt(limit)]
+    );
+    return res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching imports:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/import
+export async function importLeads(req, res) {
+  try {
+    const { resultUrl, source } = req.body || {};
+
+    if (!resultUrl) {
+      return res.status(400).json({ error: "resultUrl is required" });
+    }
+
+    const response = await fetch(resultUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch result: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const summary = await processPhantomResults(data, { source });
+
+    return res.json({
+      success: true,
+      source,
+      ...summary
+    });
+
+  } catch (err) {
+    console.error("❌ Lead import error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/:id/enrich
+export async function enrichLead(req, res) {
+  try {
+    const { id } = req.params;
+
+    // Import enrichment service
+    const { default: enrichmentService } = await import('../services/enrichment.service.js');
+
+    // Trigger enrichment (async process)
+    const result = await enrichmentService.enrichLead(id);
+
+    return res.json({
+      success: result.success,
+      message: result.source === 'mock'
+        ? 'Lead enrichment completed (using mock data - configure PROFILE_SCRAPER_PHANTOM_ID for real enrichment)'
+        : 'Lead enrichment completed successfully',
+      source: result.source,
+      leadId: result.leadId
+    });
+  } catch (err) {
+    console.error('Enrich lead error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/enrich-batch
+// Enrich multiple selected leads (from Phantom imports or CSV) in one request
+export async function enrichLeadsBatch(req, res) {
+  try {
+    const { leadIds } = req.body || {};
+
+    if (!Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({
+        error: "leadIds must be a non-empty array of lead IDs",
+      });
+    }
+
+    // Import enrichment service lazily to avoid circular deps on startup
+    const { default: enrichmentService } = await import(
+      "../services/enrichment.service.js"
+    );
+
+    const results = await enrichmentService.enrichLeads(leadIds);
+
+    return res.json({
+      success: true,
+      count: leadIds.length,
+      results,
+    });
+  } catch (err) {
+    console.error("Enrich leads batch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/leads/:id/enrichment
+export async function getLeadEnrichment(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await pool.query("SELECT * FROM lead_enrichment WHERE lead_id = $1", [id]);
+    return res.json(result.rows[0] || null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/:id/generate-message
+// Generate a personalized message using profile scraping (enrichment) data and AI
+export async function generatePersonalizedMessage(req, res) {
+  try {
+    const { id } = req.params;
+    const { type = 'connection_request', tone, length, focus } = req.body || {};
+
+    const leadResult = await pool.query("SELECT * FROM leads WHERE id = $1", [id]);
+    const lead = leadResult.rows[0];
+    if (!lead) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    const enrichmentResult = await pool.query("SELECT * FROM lead_enrichment WHERE lead_id = $1", [id]);
+    const enrichment = enrichmentResult.rows[0] || null;
+
+    const AIService = (await import("../services/ai.service.js")).default;
+    const options = { tone: tone || 'professional', length: length || 'medium', focus: focus || 'general' };
+
+    let message;
+    if (type === 'follow_up') {
+      message = await AIService.generateFollowUpMessage(lead, enrichment, [], options);
+    } else {
+      message = await AIService.generateConnectionRequest(lead, enrichment, options);
+    }
+
+    return res.json({ message, hasEnrichment: !!enrichment });
+  } catch (err) {
+    console.error("Generate personalized message error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/leads/enriched - Get all enriched leads
+export async function getEnrichedLeads(req, res) {
+  try {
+    const { limit = 50 } = req.query;
+    const result = await pool.query(`
+      SELECT 
+        l.id,
+        l.full_name,
+        l.company,
+        l.title,
+        l.linkedin_url,
+        l.email,
+        le.bio,
+        le.interests,
+        le.mutual_connections_count,
+        le.recent_posts,
+        le.company_news,
+        le.last_enriched_at
+      FROM leads l
+      INNER JOIN lead_enrichment le ON l.id = le.lead_id
+      ORDER BY le.last_enriched_at DESC
+      LIMIT $1
+    `, [parseInt(limit)]);
+    return res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/bulk-enrich-personalize
+export async function bulkEnrichAndPersonalize(req, res) {
+  try {
+    const { leadIds, campaignId } = req.body || {};
+
+    if (!Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ error: "leadIds is required" });
+    }
+
+    if (!campaignId) {
+      return res.status(400).json({ error: "campaignId is required" });
+    }
+
+    // Ensure leads are in the campaign
+    const existingLeads = await pool.query(
+      "SELECT lead_id FROM campaign_leads WHERE campaign_id = $1 AND lead_id = ANY($2)",
+      [campaignId, leadIds]
+    );
+    const existingIds = new Set(existingLeads.rows.map(r => r.lead_id));
+    const newLeads = leadIds.filter(id => !existingIds.has(id));
+
+    // Add new leads to campaign
+    if (newLeads.length > 0) {
+      console.log(`📝 Adding ${newLeads.length} new leads to campaign ${campaignId}`);
+      for (const leadId of newLeads) {
+        await pool.query(
+          "INSERT INTO campaign_leads (campaign_id, lead_id, status) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+          [campaignId, leadId, 'new']
+        );
+      }
+    }
+
+    // Fetch campaign details for context
+    const campaignResult = await pool.query('SELECT goal, type, description, target_audience FROM campaigns WHERE id = $1', [campaignId]);
+    const campaign = campaignResult.rows[0] || null;
+    const campaignContext = campaign ? {
+      goal: campaign.goal,
+      type: campaign.type,
+      description: campaign.description,
+      target_audience: campaign.target_audience
+    } : null;
+
+    // Get campaign's first sequence step to determine message type
+    const sequenceResult = await pool.query(`
+      SELECT type FROM sequences 
+      WHERE campaign_id = $1 
+      ORDER BY step_order ASC 
+      LIMIT 1
+    `, [campaignId]);
+
+    const stepType = sequenceResult.rows[0]?.type || 'message';
+
+    // Import services
+    const { default: enrichmentService } = await import('../services/enrichment.service.js');
+    const { default: AIService } = await import('../services/ai.service.js');
+    const { ApprovalService } = await import('../services/approval.service.js');
+
+    // Get lead details
+    const leadsResult = await pool.query(
+      `SELECT id, first_name, last_name, linkedin_url, title, company 
+       FROM leads 
+       WHERE id = ANY($1)`,
+      [leadIds]
+    );
+
+    const leads = leadsResult.rows.filter(l => l.linkedin_url && l.linkedin_url.trim().length > 0);
+
+    if (leads.length === 0) {
+      return res.status(400).json({
+        error: 'No leads with LinkedIn URLs found'
+      });
+    }
+
+    const results = {
+      enriched: 0,
+      generated: 0,
+      failed: [],
+      skipped: [],
+      total: leads.length
+    };
+
+    // Process each lead
+    for (let index = 0; index < leads.length; index++) {
+      const lead = leads[index];
+      try {
+        // Check if already has pending approval
+        const existingApproval = await pool.query(
+          `SELECT id FROM approval_queue 
+           WHERE campaign_id = $1 AND lead_id = $2 AND status = 'pending'`,
+          [campaignId, lead.id]
+        );
+
+        if (existingApproval.rows.length > 0) {
+          console.log(`⏭️  Lead ${lead.id} already has pending approval, skipping`);
+          results.generated++;
+          continue;
+        }
+
+        // STEP 1: Enrich the lead
+        console.log(`🔍 [${index + 1}/${leads.length}] Enriching lead: ${lead.first_name} ${lead.last_name} (ID: ${lead.id})`);
+        let enrichmentData = null;
+        try {
+          const enrichResult = await enrichmentService.enrichLead(lead.id);
+          if (enrichResult && enrichResult.success) {
+            results.enriched++;
+            enrichmentData = enrichResult.enrichmentData;
+            console.log(`   ✅ Enriched (source: ${enrichResult.source || 'unknown'})`);
+          }
+        } catch (enrichError) {
+          console.error(`   ⚠️  Enrichment failed: ${enrichError.message}`);
+          // Try to fetch existing enrichment
+          const dbEnrichment = await enrichmentService.getEnrichment(lead.id);
+          if (dbEnrichment) {
+            enrichmentData = {
+              bio: dbEnrichment.bio,
+              interests: dbEnrichment.interests,
+              recent_posts: dbEnrichment.recent_posts
+            };
+          }
+        }
+
+        // STEP 2: Generate AI message with enrichment data and campaign context
+        console.log(`   🤖 Generating AI message (stepType: ${stepType})...`);
+        let personalizedMessage;
+        try {
+          const options = campaignContext ? { campaign: campaignContext } : {};
+          if (enrichmentData) {
+            if (stepType === 'connection_request') {
+              personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, options);
+            } else {
+              personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], options);
+            }
+          } else {
+            personalizedMessage = await AIService.generatePersonalizedMessage(
+              lead.id,
+              '',
+              stepType
+            );
+          }
+        } catch (aiError) {
+          console.error(`   ⚠️  AI generation failed: ${aiError.message}`);
+          if (enrichmentData && enrichmentData.bio) {
+            const bioSnippet = enrichmentData.bio.substring(0, 100);
+            personalizedMessage = `Hi ${lead.first_name}, I noticed your background in ${lead.title || 'your field'}. ${bioSnippet} I'd love to connect and explore how we might work together.`;
+          } else {
+            personalizedMessage = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+          }
+        }
+
+        if (!personalizedMessage || personalizedMessage.trim().length === 0) {
+          personalizedMessage = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+        }
+
+        console.log(`   📝 Message generated (${personalizedMessage.length} chars)`);
+
+        // STEP 3: Add to approval queue
+        const queueResult = await ApprovalService.addToQueue(
+          parseInt(campaignId),
+          lead.id,
+          stepType,
+          personalizedMessage
+        );
+
+        if (!queueResult || !queueResult.id) {
+          throw new Error('Failed to add message to approval queue');
+        }
+
+        results.generated++;
+        console.log(`   ✅ Complete! Approval Queue ID: ${queueResult.id}`);
+
+        // Delay to avoid rate limiting (2 seconds between leads)
+        if (index < leads.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+      } catch (error) {
+        console.error(`   ❌ ERROR processing lead ${lead.id}:`, error.message);
+        results.failed.push({
+          leadId: lead.id,
+          name: `${lead.first_name} ${lead.last_name}`,
+          error: error.message
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Processed ${results.generated} leads. ${results.enriched} enriched, ${results.failed.length} failed.`,
+      results
+    });
+
+  } catch (err) {
+    console.error("Bulk enrich and personalize error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// Helper to respect DB column length limits
+function safeTruncate(value, maxLength) {
+  if (value === null || value === undefined) return null;
+  const str = String(value);
+  return str.length > maxLength ? str.slice(0, maxLength) : str;
+}
+
+// POST /api/leads/import-csv
+export async function importLeadsFromCSV(req, res) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No CSV file uploaded" });
+    }
+
+    // Read the uploaded CSV file
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+
+    // Parse CSV
+    const records = parse(fileContent, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true
+    });
+
+    if (records.length === 0) {
+      // Clean up the uploaded file
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "CSV file is empty" });
+    }
+
+    let saved = 0;
+    let duplicates = 0;
+    let errors = 0;
+    const errorDetails = [];
+
+    // Process each record
+    for (const record of records) {
+      try {
+        // Map CSV columns to database fields (flexible mapping)
+        const leadData = {
+          full_name: record.full_name || record.fullName || record.name || record['Full Name'] || null,
+          first_name: record.first_name || record.firstName || record['First Name'] || null,
+          last_name: record.last_name || record.lastName || record['Last Name'] || null,
+          title: record.title || record.jobTitle || record['Job Title'] || null,
+          company: record.company || record.companyName || record['Company'] || null,
+          location: record.location || record.Location || null,
+          linkedin_url: record.linkedin_url || record.linkedinUrl || record.profileUrl || record['LinkedIn URL'] || null,
+          email: record.email || record.Email || null,
+          phone: record.phone || record.Phone || null,
+          source: record.source || 'csv_import',
+          status: 'new'
+        };
+
+        // Skip if no meaningful data
+        if (!leadData.full_name && !leadData.first_name && !leadData.linkedin_url) {
+          errors++;
+          errorDetails.push({ row: record, reason: 'Missing required fields (name or LinkedIn URL)' });
+          continue;
+        }
+
+        // Apply DB-safe truncation to respect column sizes
+        const values = [
+          safeTruncate(leadData.full_name, 255),      // full_name VARCHAR(255)
+          safeTruncate(leadData.first_name, 100),     // first_name VARCHAR(100)
+          safeTruncate(leadData.last_name, 100),      // last_name VARCHAR(100)
+          safeTruncate(leadData.title, 255),          // title VARCHAR(255)
+          safeTruncate(leadData.company, 255),        // company VARCHAR(255)
+          safeTruncate(leadData.location, 255),       // location VARCHAR(255)
+          safeTruncate(leadData.linkedin_url, 500),   // linkedin_url VARCHAR(500)
+          safeTruncate(leadData.email, 255),          // email VARCHAR(255)
+          safeTruncate(leadData.phone, 50),           // phone VARCHAR(50)
+          safeTruncate(leadData.source, 100),         // source VARCHAR(100)
+          leadData.status                             // status VARCHAR(50) default 'new'
+        ];
+
+        // Try to insert, handle duplicates
+        const result = await pool.query(
+          `INSERT INTO leads (
+            full_name, first_name, last_name, title, company, 
+            location, linkedin_url, email, phone, source, status
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT (linkedin_url) DO NOTHING
+          RETURNING id`,
+          values
+        );
+
+        if (result.rows.length > 0) {
+          saved++;
+        } else {
+          duplicates++;
+        }
+      } catch (err) {
+        errors++;
+        errorDetails.push({ row: record, reason: err.message });
+        console.error('Error inserting lead:', err.message);
+      }
+    }
+
+    // Clean up the uploaded file
+    fs.unlinkSync(req.file.path);
+
+    // Log import to database (optional)
+    try {
+      await pool.query(
+        `INSERT INTO import_logs (source, total_leads, saved, duplicates, timestamp)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        ['csv_import', records.length, saved, duplicates]
+      );
+    } catch (err) {
+      console.error('Failed to log import:', err.message);
+    }
+
+    return res.json({
+      success: true,
+      summary: {
+        totalLeads: records.length,
+        saved,
+        duplicates,
+        errors,
+        errorDetails: errorDetails.length > 0 ? errorDetails.slice(0, 10) : []
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ CSV import error:", err.message);
+
+    // Clean up the file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// DELETE /api/leads/csv-imports
+export async function deleteCSVLeads(req, res) {
+  try {
+    // Count leads before deletion
+    const countResult = await pool.query(
+      "SELECT COUNT(*) FROM leads WHERE source = $1",
+      ['csv_import']
+    );
+    const count = parseInt(countResult.rows[0].count, 10);
+
+    if (count === 0) {
+      return res.json({
+        success: true,
+        message: "No CSV imported leads found",
+        deleted: 0
+      });
+    }
+
+    // Delete all leads with source = 'csv_import'
+    const result = await pool.query(
+      "DELETE FROM leads WHERE source = $1",
+      ['csv_import']
+    );
+
+    console.log(`🗑️ Deleted ${count} CSV imported leads`);
+
+    return res.json({
+      success: true,
+      message: `Successfully deleted ${count} CSV imported leads`,
+      deleted: count
+    });
+
+  } catch (err) {
+    console.error("❌ Error deleting CSV leads:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// ============================================================================
+// PHASE 4: Lead Review & Approval Endpoints
+// ============================================================================
+
+// Helper function to log status changes to audit table
+async function logStatusChange(leadId, previousStatus, newStatus, changedBy, reason = null) {
+  try {
+    await pool.query(
+      `INSERT INTO lead_review_audit (lead_id, previous_status, new_status, changed_by, reason)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [leadId, previousStatus, newStatus, changedBy, reason]
+    );
+  } catch (err) {
+    console.error('Failed to log status change:', err);
+    // Don't throw - audit logging failure shouldn't block the operation
+  }
+}
+
+// POST /api/leads/bulk-approve
+// Approve multiple leads for campaigns and export
+export async function bulkApproveLeads(req, res) {
+  try {
+    const { leadIds } = req.body;
+
+    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ error: 'leadIds array is required' });
+    }
+
+    // Get current status for audit logging
+    const currentLeads = await pool.query(
+      `SELECT id, review_status FROM leads WHERE id = ANY($1)`,
+      [leadIds]
+    );
+
+    // Update leads to approved
+    const result = await pool.query(
+      `UPDATE leads 
+       SET review_status = 'approved',
+           approved_at = CURRENT_TIMESTAMP,
+           approved_by = $1,
+           rejected_reason = NULL,
+           rejected_at = NULL,
+           rejected_by = NULL
+       WHERE id = ANY($2)
+       RETURNING id`,
+      [req.user?.id || null, leadIds]
+    );
+
+
+    // Log audit trail
+    for (const lead of currentLeads.rows) {
+      if (lead.review_status !== 'approved') {
+        await logStatusChange(lead.id, lead.review_status, 'approved', req.user?.id || null);
+      }
+    }
+
+    console.log(`✅ Approved ${result.rowCount} leads`);
+
+    // 🆕 PHASE 6: Trigger contact scraping asynchronously (non-blocking)
+    // This runs in the background and doesn't delay the approval response
+    triggerContactScrapingForApprovedLeads(leadIds).catch(err => {
+      console.error('⚠️  Background contact scraping error:', err.message);
+      // Don't fail the approval if scraping fails
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully approved ${result.rowCount} leads`,
+      count: result.rowCount,
+      scrapingTriggered: true // Indicate that scraping was initiated
+    });
+
+  } catch (err) {
+    console.error('❌ Bulk approve error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/bulk-reject
+// Reject multiple leads with optional reason
+export async function bulkRejectLeads(req, res) {
+  try {
+    const { leadIds, reason } = req.body;
+
+    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ error: 'leadIds array is required' });
+    }
+
+    // Validate reason if provided
+    const validReasons = ['not_icp', 'low_quality', 'duplicate', 'wrong_geography', 'other'];
+    if (reason && !validReasons.includes(reason)) {
+      return res.status(400).json({
+        error: 'Invalid reason. Must be one of: ' + validReasons.join(', ')
+      });
+    }
+
+    // Get current status for audit logging
+    const currentLeads = await pool.query(
+      `SELECT id, review_status FROM leads WHERE id = ANY($1)`,
+      [leadIds]
+    );
+
+    // Update leads to rejected
+    const result = await pool.query(
+      `UPDATE leads 
+       SET review_status = 'rejected',
+           rejected_reason = $1,
+           rejected_at = CURRENT_TIMESTAMP,
+           rejected_by = $2,
+           approved_at = NULL,
+           approved_by = NULL
+       WHERE id = ANY($3)
+       RETURNING id`,
+      [reason || 'other', req.user?.id || null, leadIds]
+    );
+
+    // Log audit trail
+    for (const lead of currentLeads.rows) {
+      if (lead.review_status !== 'rejected') {
+        await logStatusChange(lead.id, lead.review_status, 'rejected', req.user?.id || null, reason);
+      }
+    }
+
+    console.log(`❌ Rejected ${result.rowCount} leads (reason: ${reason || 'not specified'})`);
+
+    res.json({
+      success: true,
+      message: `Successfully rejected ${result.rowCount} leads`,
+      count: result.rowCount
+    });
+
+  } catch (err) {
+    console.error('❌ Bulk reject error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/move-to-review
+// Move leads back to review status (from approved or rejected)
+export async function moveToReview(req, res) {
+  try {
+    const { leadIds, reset_all } = req.body;
+
+    // RESET WORKFLOW: Move all approved leads to review and change default
+    if (reset_all) {
+      console.log('🔄 Resetting workflow: Changing default and moving leads...');
+
+      // 1. Change default
+      await pool.query("ALTER TABLE leads ALTER COLUMN review_status SET DEFAULT 'to_be_reviewed'");
+
+      // 2. Move leads
+      const result = await pool.query(`
+        UPDATE leads 
+        SET review_status = 'to_be_reviewed' 
+        WHERE review_status = 'approved' OR review_status IS NULL
+      `);
+
+      return res.status(200).json({
+        success: true,
+        message: `Workflow reset: ${result.rowCount} leads moved to review queue`,
+        count: result.rowCount
+      });
+    }
+
+    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ error: 'leadIds array is required' });
+    }
+
+    // Get current status for audit logging
+    const currentLeads = await pool.query(
+      `SELECT id, review_status FROM leads WHERE id = ANY($1)`,
+      [leadIds]
+    );
+
+    // Update leads to to_be_reviewed
+    const result = await pool.query(
+      `UPDATE leads 
+       SET review_status = 'to_be_reviewed',
+           approved_at = NULL,
+           approved_by = NULL,
+           rejected_reason = NULL,
+           rejected_at = NULL,
+           rejected_by = NULL
+       WHERE id = ANY($1)
+       RETURNING id`,
+      [leadIds]
+    );
+
+    // Log audit trail
+    for (const lead of currentLeads.rows) {
+      if (lead.review_status !== 'to_be_reviewed') {
+        await logStatusChange(lead.id, lead.review_status, 'to_be_reviewed', req.user?.id || null);
+      }
+    }
+
+    console.log(`↩ Moved ${result.rowCount} leads back to review`);
+
+    res.json({
+      success: true,
+      message: `Successfully moved ${result.rowCount} leads to review`,
+      count: result.rowCount
+    });
+
+  } catch (err) {
+    console.error('❌ Move to review error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/leads/review-stats
+// Get counts for each review status
+export async function getReviewStats(req, res) {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        review_status,
+        COUNT(*) as count
+      FROM leads
+      GROUP BY review_status
+    `);
+
+    // Format response with default values
+    const stats = {
+      to_be_reviewed: 0,
+      approved: 0,
+      rejected: 0,
+      total: 0
+    };
+
+    result.rows.forEach(row => {
+      const status = row.review_status || 'approved'; // Default for null
+      stats[status] = parseInt(row.count, 10);
+      stats.total += parseInt(row.count, 10);
+    });
+
+    res.json({ reviewStats: stats });
+
+  } catch (err) {
+    console.error('❌ Review stats error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}

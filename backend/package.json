@@ -1,0 +1,34 @@
+{
+  "name": "linkedin-reach-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "check-api": "node src/scripts/check-api.js",
+    "check-search-export": "node src/scripts/check-search-export.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.975.0",
+    "@sendgrid/mail": "^8.1.6",
+    "axios": "^1.6.0",
+    "cors": "^2.8.6",
+    "csv-parse": "^6.1.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "node-fetch": "^3.3.2",
+    "openai": "^6.16.0",
+    "pg": "^8.11.3",
+    "psql": "^0.0.1",
+    "puppeteer": "^24.36.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "rss-parser": "^3.13.0",
+    "undici": "^7.18.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

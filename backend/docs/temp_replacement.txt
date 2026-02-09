@@ -1,0 +1,69 @@
+// Temporary file to help with the replacement
+// Lines 204-223 need to be replaced
+
+// OLD CODE (to be removed):
+      // Parse output to find JSON URL
+      const output = outputData.output;
+      const jsonUrlMatch = output.match(/JSON saved at (https:\/\/[^\s]+\.json)/);
+      
+      if (!jsonUrlMatch) {
+        console.warn("⚠️ No JSON URL found in output");
+        console.log("Output sample:", output.substring(output.length - 500)); // Last 500 chars
+        return [];
+      }
+
+      const jsonUrl = jsonUrlMatch[1];
+      console.log("📥 Downloading result from:", jsonUrl);
+
+      // Download JSON from S3
+      const response = await axios.get(jsonUrl, { timeout: 30000 });
+      
+      console.log("✅ Result data downloaded successfully");
+      console.log(`📊 Found ${Array.isArray(response.data) ? response.data.length : 'unknown'} records`);
+      
+      return this.parseResultData(response.data);
+
+// NEW CODE (to replace with):
+      // Parse output to find CSV URL (contains ALL data, not just new)
+      const output = outputData.output;
+      const csvUrlMatch = output.match(/CSV saved at (https:\/\/[^\s]+\.csv)/);
+      const jsonUrlMatch = output.match(/JSON saved at (https:\/\/[^\s]+\.json)/);
+      
+      // Try CSV first (has all historical data)
+      let dataUrl = null;
+      let dataType = null;
+      
+      if (csvUrlMatch) {
+        dataUrl = csvUrlMatch[1];
+        dataType = 'CSV';
+      } else if (jsonUrlMatch) {
+        dataUrl = jsonUrlMatch[1];
+        dataType = 'JSON';
+      }
+      
+      if (!dataUrl) {
+        console.warn("⚠️ No data URL found in output");
+        console.log("Output sample:", output.substring(output.length - 500));
+        return [];
+      }
+
+      console.log(`📥 Downloading ${dataType} from:`, dataUrl);
+
+      // Download data from S3
+      const response = await axios.get(dataUrl, { 
+        timeout: 60000,
+        responseType: dataType === 'CSV' ? 'text' : 'json'
+      });
+      
+      console.log("✅ Result data downloaded successfully");
+      
+      // Parse CSV to JSON if needed
+      if (dataType === 'CSV') {
+        const csvData = response.data;
+        const jsonData = this.parseCSVToJSON(csvData);
+        console.log(`📊 Found ${jsonData.length} records in CSV`);
+        return this.parseResultData(jsonData);
+      } else {
+        console.log(`📊 Found ${Array.isArray(response.data) ? response.data.length : 'unknown'} records`);
+        return this.parseResultData(response.data);
+      }
