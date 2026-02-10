@@ -4,9 +4,9 @@ You have chosen a hybrid deployment: **Frontend on Vercel** and **Backend on Ren
 
 ## 1. Backend Deployment (Render)
 
-The `render.yaml` file has been updated to deploy **only the backend**.
+The `render.yaml` file has been updated to use a **Root Context** build strategy (`dockerContext: .`) with a dedicated `backend/render.Dockerfile`. This ensures Render can always locate your project files.
 
-1.  **Push Code**: Ensure your latest changes (including the updated `render.yaml`) are pushed to GitHub.
+1.  **Push Code**: Commit and push the new `render.Dockerfile` and updated `render.yaml`.
 2.  **Create Blueprint**:
     -   Go to [Render Dashboard](https://dashboard.render.com).
     -   Click **New +** -> **Blueprint**.

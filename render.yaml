@@ -12,7 +12,10 @@ services:
     env: docker
     plan: free
     region: ohio
-    dockerContext: backend
+    # CRITICAL CHANGE: Use root context (.) so Render can definitely find the Dockerfile
+    dockerContext: .
+    # Point to our special Dockerfile
+    dockerfilePath: backend/render.Dockerfile
     envVars:
       - key: PORT
         value: 5000
