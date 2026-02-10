@@ -601,41 +601,7 @@ export default function DashboardPage() {
                                             </div>
                                         </div>
 
-                                        {/* With phone - Blue */}
-                                        <div className="space-y-2">
-                                            <div className="flex items-center justify-between text-sm">
-                                                <span className="font-medium text-foreground">With phone</span>
-                                                <span className="font-bold text-blue-500">{ls.leadsWithPhone || 0}</span>
-                                            </div>
-                                            <div className="w-full h-8 bg-muted/50 rounded-full overflow-hidden relative">
-                                                <div
-                                                    className="h-full bg-blue-500 transition-all duration-1000 ease-out rounded-full flex items-center justify-end pr-3"
-                                                    style={{
-                                                        width: `${ls.totalLeads > 0 ? ((ls.leadsWithPhone || 0) / ls.totalLeads) * 85 : 0}%`
-                                                    }}
-                                                >
-                                                    <span className="text-xs font-semibold text-white">{ls.leadsWithPhone || 0}</span>
-                                                </div>
-                                            </div>
-                                        </div>
 
-                                        {/* With email - Blue */}
-                                        <div className="space-y-2">
-                                            <div className="flex items-center justify-between text-sm">
-                                                <span className="font-medium text-foreground">With email</span>
-                                                <span className="font-bold text-blue-500">{ls.leadsWithEmail || 0}</span>
-                                            </div>
-                                            <div className="w-full h-8 bg-muted/50 rounded-full overflow-hidden relative">
-                                                <div
-                                                    className="h-full bg-blue-500 transition-all duration-1000 ease-out rounded-full flex items-center justify-end pr-3"
-                                                    style={{
-                                                        width: `${ls.totalLeads > 0 ? ((ls.leadsWithEmail || 0) / ls.totalLeads) * 85 : 0}%`
-                                                    }}
-                                                >
-                                                    <span className="text-xs font-semibold text-white">{ls.leadsWithEmail || 0}</span>
-                                                </div>
-                                            </div>
-                                        </div>
                                     </div>
                                 )
                             }
