@@ -1,10 +1,17 @@
+databases:
+  - name: linkedin-db
+    databaseName: linkedin_reach
+    user: linkedin_user
+    plan: free # Be aware: Render Free Postgres expires after 90 days
+    region: ohio
+
 services:
   # Backend Service (Node.js + Puppeteer)
   - type: web
     name: linkedin-automation-backend
     env: docker
     plan: free
-    region: ohio # common default
+    region: ohio
     dockerContext: backend
     envVars:
       - key: PORT
@@ -14,7 +21,9 @@ services:
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
         value: true
       - key: DATABASE_URL
-        sync: false # User must set this manually in Render dashboard
+        fromDatabase:
+          name: linkedin-db
+          property: connectionString
       - key: OPENAI_API_KEY
         sync: false
       - key: PHANTOMBUSTER_API_KEY

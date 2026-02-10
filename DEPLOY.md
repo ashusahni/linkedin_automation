@@ -13,12 +13,14 @@ The `render.yaml` file has been updated to deploy **only the backend**.
     -   Connect your repository.
     -   Render will detect the `linkedin-automation-backend` service.
 3.  **Configure Environment Variables**:
-    Render will ask for these values during setup (or you can add them in the "Environment" tab later):
-    -   `DATABASE_URL`: Connection string for your Production Postgres Database.
-        -   *Tip: You can create a Managed Postgres on Render and use its Internal Connection URL.*
-    -   `PHANTOMBUSTER_API_KEY`: Your API Key.
-    -   `OPENAI_API_KEY`: Your OpenAI Key.
-    -   ... and all your Phantom IDs (SEARCH_EXPORT_PHANTOM_ID, etc.).
+    Render will ask for these values during setup (since they are marked `sync: false`):
+    -   `PHANTOMBUSTER_API_KEY`
+    -   `OPENAI_API_KEY`
+    -   ... and your Phantom IDs.
+
+    **Note:** You do **NOT** need to provide `DATABASE_URL` manually anymore. The blueprint now includes a managed PostgreSQL database (`linkedin-db`) and automatically links it to your backend.
+
+    *Warning: Render's Free Tier PostgreSQL expires after 90 days. For long-term production use, you may need to upgrade to a paid instance ($7/month).*
 
 4.  **Deploy**: Click **Apply**. Wait for the build to finish.
 5.  **Get Backend URL**: Once deployed, copy the service URL (e.g., `https://linkedin-automation-backend.onrender.com`).
