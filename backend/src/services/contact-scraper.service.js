@@ -18,9 +18,13 @@ class ContactScraperService {
 
     async initialize(sessionCookie) {
         // Skip if already initialized with same session
-        if (this.initialized && this.browser) {
-            console.log('📌 Contact scraper already initialized');
+        if (this.initialized && this.browser && this.sessionCookie === sessionCookie) {
+            console.log('📌 Contact scraper already initialized with same session');
             return;
+        }
+
+        if (this.initialized && this.browser && this.sessionCookie !== sessionCookie) {
+             console.log('hz Reloading contact scraper with new session cookie...');
         }
 
         console.log('🚀 Initializing contact scraper...');
@@ -116,6 +120,7 @@ class ContactScraperService {
             throw new Error('Failed to authenticate with LinkedIn. Check your session cookie.');
         }
 
+        this.sessionCookie = sessionCookie;
         this.initialized = true;
         console.log('✅ Contact scraper initialized and authenticated');
     }
