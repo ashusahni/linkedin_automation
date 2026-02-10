@@ -1,50 +1,43 @@
 services:
-  # -------------------------------------
-  # 1. BACKEND SERVICE (Node + Puppeteer)
-  # -------------------------------------
+  # Backend Service (Node.js + Puppeteer)
   - type: web
-    name: linkedin-backend
+    name: linkedin-automation-backend
     env: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    plan: starter
-    autoDeploy: true
+    plan: free
+    region: ohio # common default
+    dockerContext: backend
     envVars:
       - key: PORT
-        value: 5000  
+        value: 5000
+      - key: NODE_ENV
+        value: production
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: true
       - key: DATABASE_URL
-        fromDatabase:
-          name: linkedin-db
-          property: connectionString
-      - key: LINKEDIN_SESSION_COOKIE
-        sync: false
+        sync: false # User must set this manually in Render dashboard
       - key: OPENAI_API_KEY
         sync: false
       - key: PHANTOMBUSTER_API_KEY
         sync: false
-      - key: SEARCH_EXPORT_PHANTOM_ID
-        sync: false
       - key: CONNECTIONS_EXPORT_PHANTOM_ID
         sync: false
+      - key: SEARCH_EXPORT_PHANTOM_ID
+        sync: false
+      - key: MESSAGE_SENDER_PHANTOM_ID
+        sync: false
+      # Add other Phantom IDs as needed
 
-  # -------------------------------------
-  # 2. FRONTEND SERVICE (React + Nginx)
-  # -------------------------------------
-  - type: web
-    name: linkedin-frontend
-    env: docker
-    dockerfilePath: ./frontend/Dockerfile
-    dockerContext: ./frontend
-    autoDeploy: true
+  # Frontend Service (React + Vite)
+  - type: static
+    name: linkedin-automation-frontend
+    env: static
+    plan: free
+    region: ohio
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_URL
-        value: "https://CHANGE_ME_AFTER_DEPLOY.onrender.com" # Placeholder
-
-# -------------------------------------
-# 3. DATABASE (PostgreSQL)
-# -------------------------------------
-databases:
-  - name: linkedin-db
-    databaseName: linkedin_leads
-    user: linkedin_user
-    plan: starter
+        fromService:
+          type: web
+          name: linkedin-automation-backend
+          property: url # Automatically sets backend URL
