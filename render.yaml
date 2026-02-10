@@ -26,18 +26,3 @@ services:
       - key: MESSAGE_SENDER_PHANTOM_ID
         sync: false
       # Add other Phantom IDs as needed
-
-  # Frontend Service (React + Vite)
-  - type: static
-    name: linkedin-automation-frontend
-    env: static
-    plan: free
-    region: ohio
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
-    envVars:
-      - key: VITE_API_URL
-        fromService:
-          type: web
-          name: linkedin-automation-backend
-          property: url # Automatically sets backend URL
