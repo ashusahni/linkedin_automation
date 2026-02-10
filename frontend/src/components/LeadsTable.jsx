@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import PageGuide from './PageGuide';
 import axios from 'axios';
-import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone } from 'lucide-react';
+import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -61,6 +62,7 @@ export default function LeadsTable() {
         location: '',
         industry: searchParams.get('industry') || '',
         company: '',
+        connectionDegree: searchParams.get('connection_degree') || '',
         quality: searchParams.get('quality') || '', // primary, secondary, tertiary
         // Status and source
         status: 'all',
@@ -93,6 +95,7 @@ export default function LeadsTable() {
             if (metaFilters.industry) conditions.push({ field: 'industry', operator: 'contains', value: metaFilters.industry });
             if (metaFilters.location) conditions.push({ field: 'location', operator: 'contains', value: metaFilters.location });
             if (metaFilters.company) conditions.push({ field: 'company', operator: 'contains', value: metaFilters.company });
+            if (metaFilters.connectionDegree) conditions.push({ field: 'connection_degree', operator: 'contains', value: metaFilters.connectionDegree });
             if (metaFilters.status !== 'all') conditions.push({ field: 'status', operator: 'equals', value: metaFilters.status });
             if (metaFilters.source !== 'all') conditions.push({ field: 'source', operator: 'equals', value: metaFilters.source });
             if (metaFilters.hasEmail) conditions.push({ field: 'hasEmail', operator: 'is_true', value: 'true' });
@@ -154,8 +157,8 @@ export default function LeadsTable() {
 
     // Fetch data on mount
     useEffect(() => {
-        // If industry or quality param is present, expand filters automatically
-        if (searchParams.get('industry') || searchParams.get('quality')) {
+        // If industry or quality or connection param is present, expand filters automatically
+        if (searchParams.get('industry') || searchParams.get('quality') || searchParams.get('connection_degree')) {
             setShowMetaFilters(true);
             setExpandedSections((prev) => ({
                 ...prev,
@@ -318,6 +321,9 @@ export default function LeadsTable() {
             if (filtersToUse.industry?.trim()) {
                 params.set('industry', filtersToUse.industry.trim());
             }
+            if (filtersToUse.connectionDegree?.trim()) {
+                params.set('connection_degree', filtersToUse.connectionDegree.trim());
+            }
             if (filtersToUse.quality?.trim()) {
                 params.set('quality', filtersToUse.quality.trim());
             }
@@ -460,6 +466,7 @@ export default function LeadsTable() {
             location: '',
             industry: '',
             company: '',
+            connectionDegree: '',
             status: 'all',
             source: 'all',
             hasEmail: false,
@@ -965,6 +972,17 @@ export default function LeadsTable() {
                                                                 placeholder="e.g. Google, Startup"
                                                                 value={metaFilters.company}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, company: e.target.value }))}
+                                                                className="h-9"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                                                                <UserPlus className="h-3 w-3" /> Connection Degree
+                                                            </label>
+                                                            <Input
+                                                                placeholder="e.g. 1st, 2nd"
+                                                                value={metaFilters.connectionDegree}
+                                                                onChange={(e) => setMetaFilters((f) => ({ ...f, connectionDegree: e.target.value }))}
                                                                 className="h-9"
                                                             />
                                                         </div>
@@ -1547,6 +1565,8 @@ export default function LeadsTable() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <PageGuide pageKey="leads" />
         </div >
     );
 }

@@ -22,7 +22,10 @@ import {
     X,
     Info,
     Sparkles,
-    MoveRight
+    MoveRight,
+    Upload,
+    CheckCircle2,
+    AlertCircle
 } from 'lucide-react';
 import {
     PieChart,
@@ -37,7 +40,8 @@ import {
     Legend,
     FunnelChart,
     Funnel,
-    LabelList
+    LabelList,
+    Sector
 } from 'recharts';
 import {
     Tooltip,
@@ -50,6 +54,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { cn } from '../lib/utils';
+import PageGuide from '../components/PageGuide';
 
 const PERIODS = [
     { value: 'daily', label: 'Daily' },
@@ -155,6 +160,11 @@ export default function DashboardPage() {
     const [preferencesLoading, setPreferencesLoading] = useState(false);
     const [showPreferenceSuccess, setShowPreferenceSuccess] = useState(false);
 
+    // CSV Import State
+    const [uploading, setUploading] = useState(false);
+    const [uploadResult, setUploadResult] = useState(null);
+    const fileInputRef = useRef(null);
+
     useEffect(() => {
         fetchAnalytics();
     }, [period]);
@@ -205,6 +215,57 @@ export default function DashboardPage() {
             setAnalytics(null);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleFileSelect = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileUpload = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        if (!file.name.endsWith('.csv')) {
+            setUploadResult({
+                success: false,
+                message: 'Please upload a CSV file'
+            });
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('csvFile', file);
+
+        try {
+            setUploading(true);
+            setUploadResult(null);
+            
+            const res = await axios.post('/api/leads/import-csv', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            setUploadResult({
+                success: true,
+                message: 'Import completed successfully!',
+                summary: res.data.summary
+            });
+
+            // Refresh data
+            fetchAnalytics();
+        } catch (error) {
+            console.error('Upload failed:', error);
+            let errorMessage = 'Failed to upload CSV file';
+            if (error.response?.data?.error) errorMessage = error.response.data.error;
+            else if (error.message) errorMessage = error.message;
+            
+            setUploadResult({
+                success: false,
+                message: errorMessage
+            });
+        } finally {
+            setUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
 
@@ -429,26 +490,81 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Preferences Button Row */}
-                <div className="flex justify-end">
-                    <Button
-                        variant={preferencesApplied ? "default" : "outline"}
-                        size="sm"
-                        onClick={handleTogglePreferences}
-                        disabled={preferencesLoading || !hasProfileUrl}
-                        className={cn(
-                            "gap-2 transition-all duration-500",
-                            preferencesApplied ? "ring-2 ring-primary/20 shadow-lg scale-105" : "hover:bg-primary/5",
-                            !hasProfileUrl && "opacity-50 cursor-not-allowed"
-                        )}
-                    >
-                        {preferencesLoading ? (
-                            <Sparkles className="h-4 w-4 animate-spin" />
-                        ) : (
-                            <Sparkles className={cn("h-4 w-4", preferencesApplied ? "fill-current" : "text-muted-foreground")} />
-                        )}
-                        {preferencesLoading ? "Applying..." : preferencesApplied ? "Preferences Active" : "Apply Preferences"}
-                        {!hasProfileUrl && <span className="text-xs ml-1 opacity-70">(Set profile URL first)</span>}
-                    </Button>
+                <div className="flex flex-col items-end gap-3">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                    />
+                    
+                    <div className="flex flex-col gap-2 w-full sm:w-auto">
+                        <Button
+                            variant={preferencesApplied ? "default" : "outline"}
+                            size="sm"
+                            onClick={handleTogglePreferences}
+                            disabled={preferencesLoading || !hasProfileUrl}
+                            className={cn(
+                                "gap-2 transition-all duration-500 w-full",
+                                preferencesApplied ? "ring-2 ring-primary/20 shadow-lg scale-105" : "hover:bg-primary/5",
+                                !hasProfileUrl && "opacity-50 cursor-not-allowed"
+                            )}
+                        >
+                            {preferencesLoading ? (
+                                <Sparkles className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <Sparkles className={cn("h-4 w-4", preferencesApplied ? "fill-current" : "text-muted-foreground")} />
+                            )}
+                            {preferencesLoading ? "Applying..." : preferencesApplied ? "Preferences Active" : "Apply Preferences"}
+                            {!hasProfileUrl && <span className="text-xs ml-1 opacity-70">(Set profile URL first)</span>}
+                        </Button>
+
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleFileSelect}
+                            disabled={uploading}
+                            className="gap-2 border-primary/20 hover:bg-primary/5 font-bold tracking-widest w-full"
+                        >
+                            <Upload className="h-4 w-4" />
+                            {uploading ? "IMPORTING..." : "IMPORTS"}
+                        </Button>
+                    </div>
+
+                    {/* Upload Result Alert */}
+                    {uploadResult && (
+                        <div className={cn(
+                            "w-full max-w-md animate-in slide-in-from-top-2 fade-in duration-300 rounded-lg border p-4 shadow-sm",
+                            uploadResult.success ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
+                        )}>
+                            <div className="flex items-start gap-3">
+                                {uploadResult.success ? (
+                                    <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5" />
+                                ) : (
+                                    <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
+                                )}
+                                <div className="flex-1">
+                                    <div className="flex items-center justify-between">
+                                        <p className={cn("font-medium text-sm", uploadResult.success ? "text-green-800" : "text-red-800")}>
+                                            {uploadResult.message}
+                                        </p>
+                                        <button onClick={() => setUploadResult(null)} className="text-muted-foreground hover:text-foreground">
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                    {uploadResult.summary && (
+                                        <div className="mt-2 text-xs text-green-700 grid grid-cols-2 gap-x-4 gap-y-1">
+                                            <p>Leads: {uploadResult.summary.totalLeads}</p>
+                                            <p>Saved: {uploadResult.summary.saved}</p>
+                                            <p>Duplicates: {uploadResult.summary.duplicates}</p>
+                                            {uploadResult.summary.errors > 0 && <p>Errors: {uploadResult.summary.errors}</p>}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* —— Search & Lead Scraping —— */}
@@ -543,13 +659,75 @@ export default function DashboardPage() {
                             )}
                         </div>
 
-                        {/* Lead Metrics - Horizontal Bar Chart */}
+                        {/* Connection Type - Moved Up */}
+                        <div className="rounded-lg border bg-muted/20 p-4 transition-all hover:bg-muted/30">
+                            <div className="flex items-center justify-between mb-4">
+                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                                    <UserCheck className="h-3.5 w-3.5 text-primary" />
+                                    Connection Type
+                                    <InfoTooltip content="Distribution of 1st, 2nd, and 3rd degree connections." />
+                                </p>
+                            </div>
+                            {loading ? (
+                                <div className="h-20 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div 
+                                        className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
+                                        onClick={() => navigate('/leads?connection_degree=1st')}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1.5 rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                                                <UserCheck className="h-4 w-4" />
+                                            </div>
+                                            <span className="font-medium text-foreground">1st degree</span>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-lg font-bold block leading-none">{connectionData.firstDegree}</span>
+                                            <span className="text-xs text-muted-foreground">{connectionPercentages.firstDegree}%</span>
+                                        </div>
+                                    </div>
+                                    <div 
+                                        className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
+                                        onClick={() => navigate('/leads?connection_degree=2nd')}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1.5 rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                                                <UserPlus className="h-4 w-4" />
+                                            </div>
+                                            <span className="font-medium text-foreground">2nd degree</span>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-lg font-bold block leading-none">{connectionData.secondDegree}</span>
+                                            <span className="text-xs text-muted-foreground">{connectionPercentages.secondDegree}%</span>
+                                        </div>
+                                    </div>
+                                    <div 
+                                        className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
+                                        onClick={() => navigate('/leads?connection_degree=3rd')}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1.5 rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                                                <Users className="h-4 w-4" />
+                                            </div>
+                                            <span className="font-medium text-foreground">3rd degree</span>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-lg font-bold block leading-none">{connectionData.thirdDegree}</span>
+                                            <span className="text-xs text-muted-foreground">{connectionPercentages.thirdDegree}%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Lead Metrics - Enhanced Visualization */}
                         <div className="rounded-lg border bg-muted/20 p-4 transition-all hover:bg-muted/30">
                             <div className="flex items-center justify-between mb-4">
                                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                                     <TrendingUp className="h-3.5 w-3.5 text-primary" />
                                     Lead Metrics
-                                    <InfoTooltip content="Overview of total leads scraped and contact information availability." />
+                                    <InfoTooltip content="Overview of total leads quality distribution and contact information availability." />
                                 </p>
                             </div>
 
@@ -557,58 +735,113 @@ export default function DashboardPage() {
                                 loading ? (
                                     <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">Loading metrics...</div>
                                 ) : (
-                                    <div className="space-y-4">
-                                        {/* Leads - Multi-colored segments (Primary/Secondary/Tertiary) */}
+                                    <div className="space-y-6">
+                                        {/* Leads Quality Distribution Bar */}
                                         <div className="space-y-2">
                                             <div className="flex items-center justify-between text-sm">
-                                                <span className="font-medium text-foreground">Leads</span>
-                                                <span className="font-bold text-foreground">{ls.totalLeads || 0}</span>
+                                                <span className="font-medium text-foreground">Lead Quality Breakdown</span>
+                                                <span className="font-bold text-foreground">{ls.totalLeads || 0} total</span>
                                             </div>
-                                            <div className="w-full h-8 bg-muted/50 rounded-full overflow-hidden relative flex">
+                                            <div className="w-full h-8 bg-muted/50 rounded-full overflow-hidden relative flex shadow-inner">
                                                 {/* Primary segment - Green */}
-                                                <div
-                                                    className="h-full bg-[#10b981] transition-all duration-1000 ease-out flex items-center justify-center"
-                                                    style={{
-                                                        width: `${ls.totalLeads > 0 ? ((lq.primary || 0) / ls.totalLeads) * 85 : 0}%`
-                                                    }}
-                                                >
-                                                    {lq.primary > 0 && (
-                                                        <span className="text-xs font-semibold text-white">{lq.primary}</span>
-                                                    )}
-                                                </div>
+                                                {lq.primary > 0 && (
+                                                    <div
+                                                        className="h-full bg-[#10b981] transition-all duration-1000 ease-out flex items-center justify-center relative group"
+                                                        style={{ width: `${ls.totalLeads > 0 ? (lq.primary / ls.totalLeads) * 100 : 0}%` }}
+                                                    >
+                                                        <span className="text-[10px] sm:text-xs font-bold text-white px-1 truncate">
+                                                            {lq.primary}
+                                                        </span>
+                                                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                                                            Primary: {lq.primary}
+                                                        </div>
+                                                    </div>
+                                                )}
                                                 {/* Secondary segment - Blue */}
-                                                <div
-                                                    className="h-full bg-[#3b82f6] transition-all duration-1000 ease-out flex items-center justify-center"
-                                                    style={{
-                                                        width: `${ls.totalLeads > 0 ? ((lq.secondary || 0) / ls.totalLeads) * 85 : 0}%`
-                                                    }}
-                                                >
-                                                    {lq.secondary > 0 && (
-                                                        <span className="text-xs font-semibold text-white">{lq.secondary}</span>
-                                                    )}
-                                                </div>
-                                                {/* Tertiary segment - Red */}
-                                                <div
-                                                    className="h-full bg-[#ef4444] transition-all duration-1000 ease-out rounded-r-full flex items-center justify-center"
-                                                    style={{
-                                                        width: `${ls.totalLeads > 0 ? ((lq.tertiary || 0) / ls.totalLeads) * 85 : 0}%`
-                                                    }}
-                                                >
-                                                    {lq.tertiary > 0 && (
-                                                        <span className="text-xs font-semibold text-white">{lq.tertiary}</span>
-                                                    )}
-                                                </div>
+                                                {lq.secondary > 0 && (
+                                                    <div
+                                                        className="h-full bg-[#3b82f6] transition-all duration-1000 ease-out flex items-center justify-center relative group"
+                                                        style={{ width: `${ls.totalLeads > 0 ? (lq.secondary / ls.totalLeads) * 100 : 0}%` }}
+                                                    >
+                                                        <span className="text-[10px] sm:text-xs font-bold text-white px-1 truncate">
+                                                            {lq.secondary}
+                                                        </span>
+                                                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                                                            Secondary: {lq.secondary}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {/* Tertiary segment - Slate (Matching Quality Score) */}
+                                                {lq.tertiary > 0 && (
+                                                    <div
+                                                        className="h-full bg-[#94a3b8] transition-all duration-1000 ease-out flex items-center justify-center relative group"
+                                                        style={{ width: `${ls.totalLeads > 0 ? (lq.tertiary / ls.totalLeads) * 100 : 0}%` }}
+                                                    >
+                                                        <span className="text-[10px] sm:text-xs font-bold text-white px-1 truncate">
+                                                            {lq.tertiary}
+                                                        </span>
+                                                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                                                            Tertiary: {lq.tertiary}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                                                <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-[#10b981]" /> Primary</div>
+                                                <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" /> Secondary</div>
+                                                <div className="flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-[#94a3b8]" /> Tertiary</div>
                                             </div>
                                         </div>
 
+                                        {/* Contact Availability Grid */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+                                            {/* Email Availability */}
+                                            <div className="space-y-2">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="font-medium text-muted-foreground flex items-center gap-1.5">
+                                                        <Mail className="h-3.5 w-3.5 text-blue-500" /> 
+                                                        Leads with Email
+                                                    </span>
+                                                    <span className="font-bold text-foreground">{ls.leadsWithEmail || 0}</span>
+                                                </div>
+                                                <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden shadow-inner">
+                                                    <div
+                                                        className="h-full bg-blue-500 transition-all duration-1000 ease-out"
+                                                        style={{ width: `${ls.totalLeads > 0 ? (ls.leadsWithEmail / ls.totalLeads) * 100 : 0}%` }}
+                                                    />
+                                                </div>
+                                                <p className="text-[10px] text-right text-muted-foreground">
+                                                    {ls.totalLeads > 0 ? Math.round((ls.leadsWithEmail / ls.totalLeads) * 100) : 0}% coverage
+                                                </p>
+                                            </div>
 
+                                            {/* Phone Availability */}
+                                            <div className="space-y-2">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="font-medium text-muted-foreground flex items-center gap-1.5">
+                                                        <Phone className="h-3.5 w-3.5 text-emerald-500" /> 
+                                                        Leads with Phone
+                                                    </span>
+                                                    <span className="font-bold text-foreground">{ls.leadsWithPhone || 0}</span>
+                                                </div>
+                                                <div className="w-full h-3 bg-muted/50 rounded-full overflow-hidden shadow-inner">
+                                                    <div
+                                                        className="h-full bg-emerald-500 transition-all duration-1000 ease-out"
+                                                        style={{ width: `${ls.totalLeads > 0 ? (ls.leadsWithPhone / ls.totalLeads) * 100 : 0}%` }}
+                                                    />
+                                                </div>
+                                                <p className="text-[10px] text-right text-muted-foreground">
+                                                    {ls.totalLeads > 0 ? Math.round((ls.leadsWithPhone / ls.totalLeads) * 100) : 0}% coverage
+                                                </p>
+                                            </div>
+                                        </div>
                                     </div>
                                 )
                             }
-                        </div >
+                        </div>
 
                         {/* Industry distribution - Full width, larger chart */}
-                        < div className="rounded-lg border bg-muted/30 p-6" >
+                        <div className="rounded-lg border bg-muted/30 p-6">
                             <div className="flex items-center justify-between mb-4">
                                 <p className="text-sm font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
                                     <BarChart3 className="h-4 w-4" />
@@ -950,8 +1183,7 @@ export default function DashboardPage() {
                             }
                         </div >
 
-                        {/* Extraction + Connection pie */}
-                        < div className="grid md:grid-cols-2 gap-4" >
+                        <div className="grid md:grid-cols-2 gap-4">
                             <div className="rounded-lg border bg-muted/30 p-4 flex flex-col justify-center">
                                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
                                     <Rocket className="h-3.5 w-3.5" />
@@ -963,49 +1195,7 @@ export default function DashboardPage() {
                                 </p>
                                 <p className="text-xs text-muted-foreground mt-1 capitalize">{period}</p>
                             </div>
-                            <div className="rounded-lg border bg-muted/30 p-4">
-                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 flex items-center">
-                                    Connection type
-                                    <InfoTooltip content="Distribution of 1st, 2nd, and 3rd degree connections among scraped leads." />
-                                </p>
-                                {loading ? (
-                                    <p className="text-sm text-muted-foreground">Loading…</p>
-                                ) : (
-                                    <ul className="space-y-3 text-sm">
-                                        <li className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 transition-colors">
-                                            <span className="flex items-center gap-2 font-medium text-foreground">
-                                                <UserCheck className="h-4 w-4 text-primary" />
-                                                1st degree
-                                            </span>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-lg font-semibold text-foreground">{connectionData.firstDegree}</span>
-                                                <span className="text-sm text-muted-foreground">({connectionPercentages.firstDegree}%)</span>
-                                            </div>
-                                        </li>
-                                        <li className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 transition-colors">
-                                            <span className="flex items-center gap-2 font-medium text-foreground">
-                                                <UserPlus className="h-4 w-4 text-primary" />
-                                                2nd degree
-                                            </span>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-lg font-semibold text-foreground">{connectionData.secondDegree}</span>
-                                                <span className="text-sm text-muted-foreground">({connectionPercentages.secondDegree}%)</span>
-                                            </div>
-                                        </li>
-                                        <li className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 transition-colors">
-                                            <span className="flex items-center gap-2 font-medium text-foreground">
-                                                <Users className="h-4 w-4 text-primary" />
-                                                3rd degree
-                                            </span>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-lg font-semibold text-foreground">{connectionData.thirdDegree}</span>
-                                                <span className="text-sm text-muted-foreground">({connectionPercentages.thirdDegree}%)</span>
-                                            </div>
-                                        </li>
-                                    </ul>
-                                )}
-                            </div>
-                        </div >
+                        </div>
 
                         {
                             ls.sourceCount && Object.keys(ls.sourceCount).length > 0 && (
@@ -1197,7 +1387,7 @@ export default function DashboardPage() {
                 </Card >
 
                 {/* Recent imports + CTA */}
-                < div className="grid md:grid-cols-2 gap-6" >
+                <div className="grid md:grid-cols-2 gap-6">
                     <Card>
                         <CardHeader className="pb-2">
                             <CardTitle className="text-base flex items-center">
@@ -1239,11 +1429,15 @@ export default function DashboardPage() {
                             </div>
                         </CardContent>
                     </Card>
-                </div >
-            </div >
-        </TooltipProvider >
+                </div>
+
+                {/* Page Guide Footer */}
+                <PageGuide pageKey="dashboard" />
+            </div>
+        </TooltipProvider>
     );
 }
+
 
 function MiniStat({ label, value, icon: Icon }) {
     return (

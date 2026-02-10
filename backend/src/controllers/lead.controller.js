@@ -208,6 +208,7 @@ export async function getLeads(req, res) {
       company,
       industry,
       quality, // 'primary', 'secondary', 'tertiary'
+      connection_degree,
       createdFrom,
       createdTo,
     } = req.query;
@@ -272,6 +273,13 @@ export async function getLeads(req, res) {
       if (company && company.trim()) {
         conditionClauses.push(`company ILIKE $${params.length + 1}`);
         params.push(`%${company.trim()}%`);
+      }
+      if (connection_degree && connection_degree.trim()) {
+        const degree = connection_degree.trim().toLowerCase();
+        // Handle "1st", "2nd", "3rd" vs "1", "2", "3" flexibility if needed
+        // For now, strict contains match is reasonable 
+        conditionClauses.push(`connection_degree ILIKE $${params.length + 1}`);
+        params.push(`%${degree}%`);
       }
 
       // Complex Industry Logic (preserved for Simple Mode)

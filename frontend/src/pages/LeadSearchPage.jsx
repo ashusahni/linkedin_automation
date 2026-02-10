@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useToast } from '../components/ui/toast';
+import PageGuide from '../components/PageGuide';
 
 /** PhantomBuster import source: CONNECTIONS_EXPORT_PHANTOM vs SEARCH_EXPORT_PHANTOM */
 const IMPORT_SOURCE_OPTIONS = [
@@ -193,6 +194,8 @@ export default function LeadSearchPage() {
                     </CardContent>
                 </Card>
             )}
+
+            <PageGuide pageKey="search" />
         </div>
     );
 }

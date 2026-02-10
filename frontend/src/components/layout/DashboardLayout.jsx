@@ -11,8 +11,6 @@ const navItems = [
     { id: 'search', label: 'Lead Search', icon: Search, path: '/search' },
     { id: 'leads', label: 'Leads', icon: Users, path: '/leads' },
     { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns' },
-    { id: 'content', label: 'Content Engine', icon: Newspaper, path: '/content' },
-    { id: 'imports', label: 'Imports', icon: FileText, path: '/imports' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
 ];
 

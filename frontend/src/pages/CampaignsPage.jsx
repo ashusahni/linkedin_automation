@@ -20,6 +20,7 @@ import {
 } from "../components/ui/dropdown-menu";
 import { useToast } from '../components/ui/toast';
 import { Skeleton, TableSkeleton } from '../components/ui/skeleton';
+import PageGuide from '../components/PageGuide';
 
 export default function CampaignsPage() {
     const navigate = useNavigate();
@@ -457,6 +458,8 @@ export default function CampaignsPage() {
                     onCreate={createCampaign}
                 />
             )}
+
+            <PageGuide pageKey="campaigns" />
         </div>
     );
 }
