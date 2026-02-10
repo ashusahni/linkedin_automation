@@ -13,4 +13,10 @@ router.get('/stats', scraperController.getScrapingStats);
 // GET /api/scraper/jobs - Get recent scraping jobs
 router.get('/jobs', scraperController.getRecentJobs);
 
+// POST /api/scraper/scrape-contacts - Manually trigger contact scraping
+router.post('/scrape-contacts', scraperController.startScraping);
+
+// POST /api/scraper/stop-scraping - Stop all active scraping
+router.post('/stop-scraping', scraperController.stopScraping);
+
 export default router;

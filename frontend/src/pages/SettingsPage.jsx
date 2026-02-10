@@ -18,7 +18,8 @@ import {
     Image,
     Loader2,
     Mail,
-    Phone
+    Phone,
+    Database
 } from 'lucide-react';
 import PageGuide from '../components/PageGuide';
 import { Button } from '@/components/ui/button';
@@ -149,6 +150,30 @@ const SettingsPage = () => {
         }
     };
 
+    const handleStopScraping = async () => {
+        try {
+            const res = await axios.post('/api/scraper/stop-scraping');
+            addToast(res.data.message, 'info');
+        } catch (error) {
+            addToast('Failed to stop scraping', 'error');
+        }
+    };
+
+    const [isTriggering, setIsTriggering] = useState(false);
+    const handleManualTrigger = async () => {
+        setIsTriggering(true);
+        try {
+            const res = await axios.post('/api/scraper/scrape-contacts');
+            if (res.data.success) {
+                addToast(res.data.message, 'success');
+            }
+        } catch (error) {
+            addToast('Failed to start scraping', 'error');
+        } finally {
+            setIsTriggering(false);
+        }
+    };
+
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             {/* Header */}
@@ -168,12 +193,22 @@ const SettingsPage = () => {
                                 <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
                                 <span className="text-sm font-medium">Scraping Contacts in Background</span>
                             </div>
-                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                                <div className="flex items-center gap-1.5">
-                                    <Mail className="w-3.5 h-3.5" />
-                                    <span>{scrapingProgress.processedProfiles} / {scrapingProgress.totalProfiles}</span>
+                            <div className="flex items-center gap-2">
+                                <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="h-7 text-xs border-red-500/50 text-red-500 hover:bg-red-500/10"
+                                    onClick={handleStopScraping}
+                                >
+                                    Stop Scraping
+                                </Button>
+                                <div className="flex items-center gap-4 text-xs text-muted-foreground ml-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <Mail className="w-3.5 h-3.5" />
+                                        <span>{scrapingProgress.processedProfiles} / {scrapingProgress.totalProfiles}</span>
+                                    </div>
+                                    <span className="font-semibold text-blue-600">{scrapingProgress.progressPercentage}%</span>
                                 </div>
-                                <span className="font-semibold text-blue-600">{scrapingProgress.progressPercentage}%</span>
                             </div>
                         </div>
                         <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
@@ -182,9 +217,35 @@ const SettingsPage = () => {
                                 style={{ width: `${scrapingProgress.progressPercentage}%` }}
                             />
                         </div>
-                        <p className="text-xs text-muted-foreground mt-2">
-                            {scrapingProgress.activeJobsCount} active job{scrapingProgress.activeJobsCount !== 1 ? 's' : ''} running
+                        <p className="text-xs text-muted-foreground mt-2 flex justify-between">
+                            <span>{scrapingProgress.activeJobsCount} active job{scrapingProgress.activeJobsCount !== 1 ? 's' : ''} running</span>
+                            <span>ETA: {Math.ceil((scrapingProgress.totalProfiles - scrapingProgress.processedProfiles) * 5 / 60)} mins</span>
                         </p>
+                    </CardContent>
+                </Card>
+            )}
+
+            {!isScrapingActive && (
+                <Card className="border-dashed border-2 bg-muted/30">
+                    <CardContent className="py-6 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-primary/10 rounded-full">
+                                <Zap className="w-5 h-5 text-primary" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-semibold">Contact Scraper</h3>
+                                <p className="text-xs text-muted-foreground">Manual trigger to fetch emails/phones for approved leads.</p>
+                            </div>
+                        </div>
+                        <Button 
+                            variant="outline" 
+                            className="gap-2" 
+                            onClick={handleManualTrigger}
+                            disabled={isTriggering}
+                        >
+                            {isTriggering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                            Run Scraper Now
+                        </Button>
                     </CardContent>
                 </Card>
             )}

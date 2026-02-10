@@ -793,9 +793,8 @@ export default function DashboardPage() {
                                             </div>
                                         </div>
 
-                                        {/* Contact Availability Grid */}
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
-                                            {/* Email Availability */}
+                                        {/* Contact Availability Grid (Hidden for now) */}
+                                        {/* <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
                                             <div className="space-y-2">
                                                 <div className="flex items-center justify-between text-xs">
                                                     <span className="font-medium text-muted-foreground flex items-center gap-1.5">
@@ -815,7 +814,6 @@ export default function DashboardPage() {
                                                 </p>
                                             </div>
 
-                                            {/* Phone Availability */}
                                             <div className="space-y-2">
                                                 <div className="flex items-center justify-between text-xs">
                                                     <span className="font-medium text-muted-foreground flex items-center gap-1.5">
@@ -834,7 +832,7 @@ export default function DashboardPage() {
                                                     {ls.totalLeads > 0 ? Math.round((ls.leadsWithPhone / ls.totalLeads) * 100) : 0}% coverage
                                                 </p>
                                             </div>
-                                        </div>
+                                        </div> */}
                                     </div>
                                 )
                             }

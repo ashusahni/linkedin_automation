@@ -4,6 +4,7 @@ import * as phantomService from './phantombuster.service.js';
 // Note: AIService removed from scheduler - AI generation only happens when user explicitly requests it via campaign page
 import { ApprovalService } from './approval.service.js';
 import SafetyService from './safety.service.js';
+import replyDetectionService from './reply-detection.service.js';
 
 // ==========================================
 // SCHEDULER ORCHESTRATOR (SEQUENTIAL)
@@ -16,8 +17,17 @@ export function initScheduler() {
 }
 
 async function runSequentialLoop() {
+    let lastReplyCheck = 0;
+    const REPLY_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
+
     while (true) {
         try {
+            // Periodically check for LinkedIn replies
+            if (Date.now() - lastReplyCheck > REPLY_CHECK_INTERVAL) {
+                await replyDetectionService.checkAllActiveCampaigns();
+                lastReplyCheck = Date.now();
+            }
+
             const processed = await processNextLead();
             if (!processed) {
                 // No leads due? Wait a bit to avoid hammering the DB

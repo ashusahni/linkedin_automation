@@ -46,25 +46,28 @@ export const ScottishChemicalIcon = ({ className, ...props }) => {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 40 40"
+            viewBox="0 0 100 100"
             className={className}
             fill="none"
             {...props}
         >
-             <circle cx="20" cy="20" r="20" fill="url(#sc-gradient-icon)" />
-             <defs>
-                <linearGradient id="sc-gradient-icon" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#0f172a" />
-                    <stop offset="100%" stopColor="#10b981" />
-                </linearGradient>
-            </defs>
-            <path 
-                d="M12 26C12 26 10 26 10 22C10 18 18 18 18 14C18 10 14 10 12 12M28 12C24 8 18 16 24 28" 
-                stroke="white" 
-                strokeWidth="3" 
-                strokeLinecap="round" 
+            {/* Blue Swoosh */}
+            <path
+                d="M15 45 C 15 15, 85 15, 85 45 C 85 75, 15 75, 15 45"
+                stroke="#1e4da1"
+                strokeWidth="12"
+                strokeLinecap="round"
+                transform="rotate(-20 50 50)"
             />
-            <circle cx="28" cy="12" r="2" fill="#34d399" />
+            {/* Gray Swoosh */}
+            <path
+                d="M25 55 C 25 25, 95 25, 95 55 C 95 85, 25 85, 25 55"
+                stroke="#94a3b8"
+                strokeWidth="8"
+                strokeLinecap="round"
+                transform="rotate(-20 50 50)"
+                opacity="0.8"
+            />
         </svg>
     )
 }

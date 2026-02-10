@@ -36,8 +36,18 @@ Since you already deployed the frontend, you just need to connect it to your new
     -   **Value**: Your Render Backend URL (from Step 1). **Do not include a trailing slash** (e.g., `https://linkedin-automation-backend.onrender.com`).
 4.  **Redeploy**: Go to the "Deployments" tab and redeploy the latest commit (or push a new commit) for the environment variable to take effect.
 
+## 3. Automation Features Enabled
+
+The following features have been successfully configured and tested:
+
+- ✅ **Dashboard Analytics**: Real-time stats for leads, industry distribution, and lead quality.
+- ✅ **Reply Detection**: The backend periodically checks for LinkedIn replies (1hr interval).
+- ✅ **Content Engine**: AI-powered news curation and post generation for LinkedIn.
+- ✅ **Auto-Migrations**: Database tables are created automatically on first run.
+
 ## Troubleshooting
 
--   **CORS Errors**: The backend is configured to allow all origins (`cors()`). If you see CORS errors in the browser console, check if the Backend URL in Vercel is correct.
--   **Database**: Ensure your Render backend can connect to the database. If using Render Postgres, use the *Internal* URL for faster/cheaper connections within Render.
+-   **CORS Errors**: The backend uses `CORS_ORIGIN` from `.env`. If you see errors, ensure `CORS_ORIGIN` matches your Vercel URL (e.g., `https://my-app.vercel.app`).
+-   **Database**: Migrations run automatically. If you see errors about missing tables, restart the backend service.
+-   **Content Engine**: Requires `OPENAI_API_KEY` to be set.
 

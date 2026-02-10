@@ -23,5 +23,28 @@ LLAMA_MODEL=llama2
 # OPENAI_API_KEY=sk-your-key-here
 
 # ============================================
-# Add these lines to your backend/.env file
+# General Configuration
 # ============================================
+PORT=5000
+NODE_ENV=production
+CORS_ORIGIN=https://your-app.vercel.app
+
+# ============================================
+# PhantomBuster Configuration
+# ============================================
+PHANTOMBUSTER_API_KEY=your_key_here
+CONNECTIONS_EXPORT_PHANTOM_ID=your_id_here
+SEARCH_EXPORT_PHANTOM_ID=your_id_here
+MESSAGE_SENDER_PHANTOM_ID=your_id_here
+LINKEDIN_SESSION_COOKIE=li_at=...
+
+# ============================================
+# Database Configuration
+# ============================================
+# DATABASE_URL is automatically set by Render
+# For local dev:
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=your_password
+DB_NAME=linkedin_leads

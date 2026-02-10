@@ -38,3 +38,11 @@ services:
       - key: MESSAGE_SENDER_PHANTOM_ID
         sync: false
       # Add other Phantom IDs as needed
+      - key: APP_USER_NAME
+        value: Rishab
+      - key: APP_COMPANY_NAME
+        value: Scottish Chemical Industries
+      - key: APP_LOGO_URL
+        value: /logo.jpg
+      - key: APP_THEME
+        value: default

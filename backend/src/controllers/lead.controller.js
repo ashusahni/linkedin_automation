@@ -1321,11 +1321,13 @@ export async function bulkApproveLeads(req, res) {
     console.log(`✅ Approved ${result.rowCount} leads`);
 
     // 🆕 PHASE 6: Trigger contact scraping asynchronously (non-blocking)
-    // This runs in the background and doesn't delay the approval response
+    // DISABLED: User wants manual control via button
+    /*
     triggerContactScrapingForApprovedLeads(leadIds).catch(err => {
       console.error('⚠️  Background contact scraping error:', err.message);
       // Don't fail the approval if scraping fails
     });
+    */
 
     res.json({
       success: true,

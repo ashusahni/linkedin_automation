@@ -754,7 +754,33 @@ export default function LeadsTable() {
             addToast('Moved to review', 'info');
             fetchLeads();
             fetchStats();
-        } catch (error) { addToast('Failed to move', 'error'); }
+        } catch (error) { 
+            addToast('Failed to move', 'error'); 
+        }
+    };
+    const handleManualScrape = async () => {
+        const leadIds = Array.from(selectedLeads);
+        try {
+            setEnriching(true);
+            addToast(`🚀 Starting contact scraper for ${leadIds.length > 0 ? leadIds.length : 'all missing'} leads...`, 'info');
+            
+            const res = await axios.post('/api/scraper/scrape-contacts', { leadIds });
+            
+            if (res.data.success) {
+                if (res.data.count === 0) {
+                    addToast('No leads found that need contact info.', 'warning');
+                } else {
+                    addToast(res.data.message || 'Scraper started successfully', 'success');
+                    setSelectedLeads(new Set());
+                }
+            }
+        } catch (error) {
+            console.error('Scrape failed:', error);
+            const errorMsg = error.response?.data?.error || error.message || 'Failed to start scraper';
+            addToast(`Error: ${errorMsg}`, 'error');
+        } finally {
+            setEnriching(false);
+        }
     };
 
     return (
@@ -785,7 +811,18 @@ export default function LeadsTable() {
                                 </CardDescription>
                             </div>
                             <div className="flex gap-2">
-                                <Button className="gap-2" onClick={handleExportCSV}>
+                                {reviewStatusTab === 'approved' && (
+                                    <Button 
+                                        variant="outline" 
+                                        className="gap-2 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
+                                        onClick={handleManualScrape}
+                                        disabled={enriching}
+                                    >
+                                        <Database className={cn("h-4 w-4", enriching && "animate-spin")} />
+                                        Scrape Missing Contacts
+                                    </Button>
+                                )}
+                                <Button className="gap-2 shadow-sm" onClick={handleExportCSV}>
                                     <Download className="h-4 w-4" /> Export CSV
                                 </Button>
                             </div>
@@ -1214,6 +1251,18 @@ export default function LeadsTable() {
                                             <Sparkles className={cn("h-4 w-4", enriching && "animate-spin")} />
                                             {enriching ? 'Enriching...' : 'Bulk Enrich & Personalize'}
                                         </Button>
+                                        {reviewStatusTab === 'approved' && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="gap-2 border-primary/50 text-primary hover:bg-primary/10"
+                                                onClick={handleManualScrape}
+                                                disabled={enriching}
+                                            >
+                                                <Database className={cn("h-4 w-4", enriching && "animate-spin")} />
+                                                Scrape Contacts
+                                            </Button>
+                                        )}
                                         <Button size="sm" variant="default" onClick={() => {
                                             setIsBulkEnrich(false);
                                             setShowCampaignModal(true);

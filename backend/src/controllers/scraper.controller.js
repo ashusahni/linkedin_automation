@@ -89,3 +89,89 @@ export async function getRecentJobs(req, res) {
         res.status(500).json({ error: error.message });
     }
 }
+
+/**
+ * POST /api/scraper/scrape-contacts
+ * Manually trigger contact scraping for selected leads or all approved leads missing info
+ */
+export async function startScraping(req, res) {
+    try {
+        const { leadIds } = req.body;
+        
+        let targetLeadIds = leadIds;
+        
+        if (!targetLeadIds || !Array.isArray(targetLeadIds) || targetLeadIds.length === 0) {
+            const result = await pool.query(`
+                SELECT id FROM leads 
+                WHERE (review_status = 'approved' OR review_status IS NULL)
+                  AND (email IS NULL OR email = '' OR phone IS NULL OR phone = '')
+                  AND (linkedin_url IS NOT NULL AND linkedin_url != '')
+            `);
+            targetLeadIds = result.rows.map(r => r.id);
+        }
+        
+        if (targetLeadIds.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No leads found that need contact scraping',
+                count: 0
+            });
+        }
+        
+        const sessionCookie = process.env.LINKEDIN_SESSION_COOKIE;
+        if (!sessionCookie) {
+            return res.status(400).json({
+                success: false,
+                error: 'LinkedIn session cookie (LINKEDIN_SESSION_COOKIE) is not configured'
+            });
+        }
+        
+        // Force re-initialization if needed or just use existing
+        await contactScraperService.initialize(sessionCookie);
+        const result = await contactScraperService.scrapeApprovedLeads(targetLeadIds);
+        
+        res.json({
+            success: true,
+            message: `Contact scraping started for ${targetLeadIds.length} leads`,
+            jobId: result.jobId,
+            count: targetLeadIds.length
+        });
+    } catch (error) {
+        console.error('Error starting scrape:', error);
+        res.status(500).json({ error: error.message });
+    }
+}
+
+/**
+ * POST /api/scraper/stop-scraping
+ * Stop all active scraping jobs
+ */
+export async function stopScraping(req, res) {
+    try {
+        const activeJobs = contactScraperService.activeJobs;
+        let count = 0;
+        
+        for (const [jobId, job] of activeJobs.entries()) {
+            if (job.status === 'running') {
+                contactScraperService.cancelJob(jobId);
+                count++;
+            }
+        }
+        
+        // Also update any 'running' jobs in DB to 'cancelled' just in case
+        await pool.query(`
+            UPDATE scraping_jobs 
+            SET status = 'cancelled', completed_at = CURRENT_TIMESTAMP 
+            WHERE status = 'running'
+        `);
+        
+        res.json({
+            success: true,
+            message: `Stopped ${count} active scraping jobs`,
+            count
+        });
+    } catch (error) {
+        console.error('Error stopping scrape:', error);
+        res.status(500).json({ error: error.message });
+    }
+}

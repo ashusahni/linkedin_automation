@@ -88,6 +88,15 @@ const config = {
     approval: {
       enabled: process.env.APPROVAL_ENABLED !== 'false'
     }
+  },
+
+  // Branding Configuration
+  branding: {
+    userName: process.env.APP_USER_NAME || '',
+    companyName: process.env.APP_COMPANY_NAME || 'Scottish Chemical Industries',
+    logoUrl: process.env.APP_LOGO_URL || '/logo.jpg',
+    profileImageUrl: process.env.APP_PROFILE_IMAGE_URL || '',
+    theme: process.env.APP_THEME || 'default'
   }
 };
 

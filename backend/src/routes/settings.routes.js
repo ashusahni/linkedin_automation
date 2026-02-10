@@ -8,15 +8,17 @@ const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import config from '../config/index.js';
+
 // Get branding / profile for dashboard welcome (user name, company, logo, profile image, theme)
 router.get('/branding', (req, res) => {
     try {
         const branding = {
-            userName: process.env.APP_USER_NAME || '',
-            companyName: process.env.APP_COMPANY_NAME || '',
-            logoUrl: process.env.APP_LOGO_URL || '',
-            profileImageUrl: process.env.APP_PROFILE_IMAGE_URL || '',
-            theme: process.env.APP_THEME || 'default', // default | blue | green | violet
+            userName: process.env.APP_USER_NAME || config.branding.userName || 'Rishab',
+            companyName: process.env.APP_COMPANY_NAME || config.branding.companyName || 'Scottish Chemical Industries',
+            logoUrl: process.env.APP_LOGO_URL || config.branding.logoUrl || '/logo.jpg',
+            profileImageUrl: process.env.APP_PROFILE_IMAGE_URL || config.branding.profileImageUrl || '',
+            theme: process.env.APP_THEME || config.branding.theme || 'default',
             linkedinAccountName: process.env.LINKEDIN_ACCOUNT_NAME || '',
             linkedinCookieConfigured: !!process.env.LINKEDIN_SESSION_COOKIE
         };

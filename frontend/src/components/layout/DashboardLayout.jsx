@@ -55,16 +55,32 @@ export default function DashboardLayout() {
                 )}
             >
                 {/* Logo */}
-                <div className="h-16 flex items-center px-6 border-b border-border">
+                <div className="h-20 flex items-center px-6 border-b border-border overflow-hidden">
                     {branding.logoUrl ? (
-                        <img src={branding.logoUrl} alt="Logo" className="h-8 w-auto max-w-[140px] object-contain mr-3" />
+                        <div className="flex items-center w-full">
+                            <img 
+                                src={branding.logoUrl} 
+                                alt="Scottish Chemical Industries" 
+                                className={cn(
+                                    "h-14 w-auto object-contain transition-all duration-300",
+                                    sidebarOpen ? "max-w-[200px]" : "max-w-[40px]"
+                                )} 
+                            />
+                        </div>
                     ) : (
-                        <ScottishChemicalIcon className="w-8 h-8 mr-3 shadow-lg" />
-                    )}
-                    {sidebarOpen && !branding.logoUrl && (
-                        <span className="font-bold text-lg tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-slate-800 to-emerald-600 dark:from-slate-200 dark:to-emerald-400">
-                            Scottish Chemical
-                        </span>
+                        <>
+                            <ScottishChemicalIcon className="w-10 h-10 mr-4 shadow-xl" />
+                            {sidebarOpen && (
+                                <div className="flex flex-col justify-center">
+                                    <span className="font-extrabold text-sm uppercase tracking-wider text-foreground leading-none">
+                                        Scottish Chemical
+                                    </span>
+                                    <span className="font-bold text-lg text-primary tracking-tight leading-none mt-1">
+                                        Industries
+                                    </span>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
 
@@ -107,7 +123,7 @@ export default function DashboardLayout() {
                         {sidebarOpen && (
                             <div className="flex-1 min-w-0">
                                 <p className="font-medium text-sm truncate">{displayName}</p>
-                                <p className="text-xs text-muted-foreground truncate">{branding.companyName || 'Scottish Chemical'}</p>
+                                <p className="text-xs text-muted-foreground truncate">{branding.companyName || 'Scottish Chemical Industries'}</p>
                             </div>
                         )}
                     </div>
@@ -122,7 +138,7 @@ export default function DashboardLayout() {
                 )}
             >
                 {/* Header: welcome + menu */}
-                <header className="h-16 bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-10 px-6 flex items-center justify-between">
+                <header className="h-20 bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-10 px-6 flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <Button
                             variant="ghost"
@@ -132,6 +148,9 @@ export default function DashboardLayout() {
                         >
                             <Menu className="w-5 h-5" />
                         </Button>
+                        {!sidebarOpen && branding.logoUrl && (
+                            <img src={branding.logoUrl} alt="Logo" className="h-8 w-auto object-contain md:hidden" />
+                        )}
                         <div className="hidden sm:flex items-center gap-3">
                             {branding.profileImageUrl ? (
                                 <img src={branding.profileImageUrl} alt="" className="w-9 h-9 rounded-full object-cover border-2 border-border" />
