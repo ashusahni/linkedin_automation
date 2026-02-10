@@ -477,192 +477,13 @@ export default function DashboardPage() {
                             {loading ? (
                                 <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">Calculating scores...</div>
                             ) : leadQualityData.length > 0 ? (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full">
-                                    {/* Pyramid / Funnel Chart (Left - 50%) - CUSTOM SVG IMPLEMENTATION */}
-                                    <div className="w-full flex flex-col items-center justify-center p-4">
-                                        <div className="relative w-full max-w-[280px] aspect-[1.2/1]">
-                                            <svg viewBox="0 0 200 160" className="w-full h-full drop-shadow-sm">
-                                                {/* 
-                                                    Triangle Geometry:
-                                                    Top (Green): Tip of the triangle
-                                                    Middle (Blue): Middle trapezoid
-                                                    Bottom (Red): Base trapezoid
-                                                    
-                                                    Total Height: 150 units
-                                                    Base Width: 180 units (at bottom)
-                                                    Center X: 100
-                                                    
-                                                    Calculations for proportional AREAS:
-                                                    Area of triangle = 0.5 * base * height
-                                                    Since triangles are similar, Area is proportional to Height^2
-                                                    Height = sqrt(Area)
-                                                */}
-                                                {(() => {
-                                                    // Calculate total value
-                                                    const total = leadQualityData.reduce((sum, item) => sum + item.value, 0) || 1;
-
-                                                    // Get values for each segment
-                                                    const primaryVal = leadQualityData.find(d => d.id === 'primary')?.value || 0;
-                                                    const secondaryVal = leadQualityData.find(d => d.id === 'secondary')?.value || 0;
-                                                    const tertiaryVal = leadQualityData.find(d => d.id === 'tertiary')?.value || 0;
-
-                                                    // Calculate cumulative proportions (0 to 1)
-                                                    // Top triangle (Green)
-                                                    const p1 = primaryVal / total;
-                                                    // Top + Middle triangle (Green + Blue)
-                                                    const p2 = (primaryVal + secondaryVal) / total;
-
-                                                    // Calculate heights based on AREA (sqrt of proportion)
-                                                    // This ensures visual weight matches data count
-                                                    const h1 = Math.sqrt(p1); // Height of green tip
-                                                    const h2 = Math.sqrt(p2); // Height of green + blue
-
-                                                    // Total dimensions
-                                                    const totalH = 150;
-                                                    const halfBase = 90; // Total base width 180
-
-                                                    // Y-coordinates (0 at top, 150 at bottom)
-                                                    const y0 = 5; // Top padding
-                                                    const y1 = y0 + (h1 * totalH); // Bottom of green
-                                                    const y2 = y0 + (h2 * totalH); // Bottom of blue
-                                                    const y3 = y0 + totalH;        // Bottom of red
-
-                                                    // X-coordinates (spread from center 100)
-                                                    // Width at any y is proportional to y (since it's a triangle)
-                                                    const x1 = h1 * halfBase;
-                                                    const x2 = h2 * halfBase;
-                                                    const x3 = halfBase;
-
-                                                    // Colors
-                                                    const green = "#10b981";
-                                                    const blue = "#3b82f6";
-                                                    const red = "#ef4444"; // New tertiary color
-
-                                                    return (
-                                                        <g>
-                                                            {/* Bottom Segment (Red) - Tertiary */}
-                                                            {tertiaryVal > 0 && (
-                                                                <>
-                                                                    <Tooltip>
-                                                                        <TooltipTrigger asChild>
-                                                                            <path
-                                                                                d={`M ${100 - x3} ${y3} L ${100 + x3} ${y3} L ${100 + x2} ${y2} L ${100 - x2} ${y2} Z`}
-                                                                                fill={red}
-                                                                                stroke="white"
-                                                                                strokeWidth="1"
-                                                                                className="hover:opacity-90 transition-opacity cursor-pointer"
-                                                                            />
-                                                                        </TooltipTrigger>
-                                                                        <TooltipContent>
-                                                                            <p className="font-bold text-[#ef4444]">Tertiary</p>
-                                                                            <p>{tertiaryVal} leads</p>
-                                                                        </TooltipContent>
-                                                                    </Tooltip>
-                                                                    {/* Label for Tertiary */}
-                                                                    <text
-                                                                        x="100"
-                                                                        y={(y2 + y3) / 2}
-                                                                        textAnchor="middle"
-                                                                        dominantBaseline="middle"
-                                                                        fill="white"
-                                                                        fontSize="11"
-                                                                        fontWeight="600"
-                                                                        className="pointer-events-none"
-                                                                    >
-                                                                        <tspan x="100" dy="-6">{tertiaryVal}</tspan>
-                                                                        <tspan x="100" dy="12" fontSize="9">Exploratory</tspan>
-                                                                    </text>
-                                                                </>
-                                                            )}
-
-                                                            {/* Middle Segment (Blue) - Secondary */}
-                                                            {secondaryVal > 0 && (
-                                                                <>
-                                                                    <Tooltip>
-                                                                        <TooltipTrigger asChild>
-                                                                            <path
-                                                                                d={`M ${100 - x2} ${y2} L ${100 + x2} ${y2} L ${100 + x1} ${y1} L ${100 - x1} ${y1} Z`}
-                                                                                fill={blue}
-                                                                                stroke="white"
-                                                                                strokeWidth="1"
-                                                                                className="hover:opacity-90 transition-opacity cursor-pointer"
-                                                                            />
-                                                                        </TooltipTrigger>
-                                                                        <TooltipContent>
-                                                                            <p className="font-bold text-[#3b82f6]">Secondary</p>
-                                                                            <p>{secondaryVal} leads</p>
-                                                                        </TooltipContent>
-                                                                    </Tooltip>
-                                                                    {/* Label for Secondary */}
-                                                                    <text
-                                                                        x="100"
-                                                                        y={(y1 + y2) / 2}
-                                                                        textAnchor="middle"
-                                                                        dominantBaseline="middle"
-                                                                        fill="white"
-                                                                        fontSize="11"
-                                                                        fontWeight="600"
-                                                                        className="pointer-events-none"
-                                                                    >
-                                                                        <tspan x="100" dy="-6">{secondaryVal}</tspan>
-                                                                        <tspan x="100" dy="12" fontSize="9">Adjacent</tspan>
-                                                                    </text>
-                                                                </>
-                                                            )}
-
-                                                            {/* Top Segment (Green) - Primary */}
-                                                            {primaryVal > 0 && (
-                                                                <>
-                                                                    <Tooltip>
-                                                                        <TooltipTrigger asChild>
-                                                                            <path
-                                                                                d={`M ${100 - x1} ${y1} L ${100 + x1} ${y1} L 100 ${y0} Z`}
-                                                                                fill={green}
-                                                                                stroke="white"
-                                                                                strokeWidth="1"
-                                                                                className="hover:opacity-90 transition-opacity cursor-pointer"
-                                                                            />
-                                                                        </TooltipTrigger>
-                                                                        <TooltipContent>
-                                                                            <p className="font-bold text-[#10b981]">Primary</p>
-                                                                            <p>{primaryVal} leads</p>
-                                                                        </TooltipContent>
-                                                                    </Tooltip>
-                                                                    {/* Label for Primary */}
-                                                                    <text
-                                                                        x="100"
-                                                                        y={(y0 + y1) / 2 + 5}
-                                                                        textAnchor="middle"
-                                                                        dominantBaseline="middle"
-                                                                        fill="white"
-                                                                        fontSize="11"
-                                                                        fontWeight="600"
-                                                                        className="pointer-events-none"
-                                                                    >
-                                                                        <tspan x="100" dy="-6">{primaryVal}</tspan>
-                                                                        <tspan x="100" dy="12" fontSize="9">Core</tspan>
-                                                                    </text>
-                                                                </>
-                                                            )}
-                                                        </g>
-                                                    );
-                                                })()}
-                                            </svg>
-                                        </div>
-
-                                        <div className="flex items-center gap-4 mt-6 text-xs text-muted-foreground font-medium w-full justify-center">
-                                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#10b981]"></span>Core</span>
-                                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#3b82f6]"></span>Adjacent</span>
-                                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#ef4444]"></span>Exploratory</span>
-                                        </div>
-                                    </div>
-
-                                    {/* KPI Cards (Right) */}
-                                    <div className="flex-1 w-full grid grid-cols-1 gap-3">
+                                <div className="w-full">
+                                    {/* KPI Cards (Full Width) */}
+                                    <div className="flex-1 w-full grid grid-cols-1 gap-4">
                                         {leadQualityData.map((item, idx) => (
                                             <div
                                                 key={idx}
-                                                className="cursor-pointer flex flex-col p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all group relative overflow-hidden space-y-2"
+                                                className="cursor-pointer flex flex-col p-4 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all group relative overflow-hidden space-y-2"
                                                 onClick={() => navigate(`/leads?quality=${item.id}`)}
                                                 role="button"
                                                 tabIndex={0}
@@ -673,33 +494,33 @@ export default function DashboardPage() {
                                                 />
 
                                                 {/* Label & Value Row */}
-                                                <div className="flex items-center justify-between pl-2">
+                                                <div className="flex items-center justify-between pl-3 pr-2">
                                                     <div>
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors flex items-center gap-2">
+                                                        <div className="flex items-center gap-3 mb-1">
+                                                            <p className="text-base font-semibold text-foreground group-hover:text-primary transition-colors flex items-center gap-2">
                                                                 {item.name}
-                                                                {idx === 0 && <Sparkles className="h-3 w-3 text-yellow-500 fill-yellow-500/20" />}
+                                                                {idx === 0 && <Sparkles className="h-4 w-4 text-yellow-500 fill-yellow-500/20" />}
                                                             </p>
-                                                            <Badge variant={item.tagVariant} className="h-5 px-1.5 text-[9px] font-normal cursor-pointer hover:bg-opacity-80">
+                                                            <Badge variant={item.tagVariant} className="h-5 px-2 text-[10px] font-medium cursor-pointer hover:bg-opacity-80">
                                                                 {item.tag}
                                                             </Badge>
                                                         </div>
-                                                        <p className="text-[10px] text-muted-foreground">
+                                                        <p className="text-xs text-muted-foreground">
                                                             {item.desc}
                                                         </p>
                                                     </div>
                                                     <div className="text-right">
-                                                        <p className="text-2xl font-bold tabular-nums tracking-tight leading-none">
+                                                        <p className="text-3xl font-bold tabular-nums tracking-tight leading-none">
                                                             {item.value}
                                                         </p>
-                                                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                                                        <p className="text-[11px] text-muted-foreground mt-0.5">
                                                             leads
                                                         </p>
                                                     </div>
                                                 </div>
 
                                                 {/* Unified UI Friendly Bar */}
-                                                <div className="w-full h-1.5 bg-muted/50 rounded-full overflow-hidden ml-2 pr-2">
+                                                <div className="w-full h-2 bg-muted/50 rounded-full overflow-hidden ml-2 pr-2 mt-1">
                                                     <div
                                                         className="h-full rounded-full transition-all duration-1000 ease-out"
                                                         style={{
