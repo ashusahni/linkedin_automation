@@ -84,23 +84,29 @@ export async function getDashboardAnalytics(req, res) {
       await loadIndustryMetadata();
 
     // —— Lead Scraping & Extraction ——
-    const totalLeads = await pool.query("SELECT COUNT(*) AS count FROM leads");
+    const totalLeads = await pool.query(
+      "SELECT COUNT(*) AS count FROM leads WHERE created_at >= NOW() - $1::interval",
+      [interval]
+    );
     const sourceBreakdown = await pool.query(
-      "SELECT source, COUNT(*) AS count FROM leads GROUP BY source"
+      "SELECT source, COUNT(*) AS count FROM leads WHERE created_at >= NOW() - $1::interval GROUP BY source",
+      [interval]
     );
     const sourceCount = sourceBreakdown.rows.reduce((acc, row) => {
       acc[row.source || "unknown"] = parseInt(row.count, 10);
       return acc;
     }, {});
     const withPhone = await pool.query(
-      "SELECT COUNT(*) AS count FROM leads WHERE phone IS NOT NULL AND TRIM(phone) != ''"
+      "SELECT COUNT(*) AS count FROM leads WHERE phone IS NOT NULL AND TRIM(phone) != '' AND created_at >= NOW() - $1::interval",
+      [interval]
     );
     const withEmail = await pool.query(
-      "SELECT COUNT(*) AS count FROM leads WHERE email IS NOT NULL AND TRIM(email) != ''"
+      "SELECT COUNT(*) AS count FROM leads WHERE email IS NOT NULL AND TRIM(email) != '' AND created_at >= NOW() - $1::interval",
+      [interval]
     );
     const actionableLeads = await pool.query(
-      "SELECT COUNT(*) AS count FROM leads WHERE status = $1",
-      ["approved"]
+      "SELECT COUNT(*) AS count FROM leads WHERE status = $1 AND created_at >= NOW() - $2::interval",
+      ["approved", interval]
     );
 
     // Industry-wise distribution using shared config
@@ -114,7 +120,8 @@ export async function getDashboardAnalytics(req, res) {
     });
 
     const leadsForIndustry = await pool.query(
-      "SELECT id, COALESCE(company,'') AS company, COALESCE(title,'') AS title FROM leads"
+      "SELECT id, COALESCE(company,'') AS company, COALESCE(title,'') AS title FROM leads WHERE created_at >= NOW() - $1::interval",
+      [interval]
     );
 
     const preferredKeywords = (process.env.PREFERRED_COMPANY_KEYWORDS || '')
@@ -258,9 +265,9 @@ export async function getDashboardAnalytics(req, res) {
         connection_degree,
         COUNT(*) as count
       FROM leads
-      WHERE connection_degree IS NOT NULL AND connection_degree != ''
+      WHERE connection_degree IS NOT NULL AND connection_degree != '' AND created_at >= NOW() - $1::interval
       GROUP BY connection_degree
-    `);
+    `, [interval]);
 
     const connectionBreakdown = {
       firstDegree: 0,
@@ -284,8 +291,8 @@ export async function getDashboardAnalytics(req, res) {
 
     // —— Campaign Analytics ——
     const campaignStatus = await pool.query(`
-      SELECT status, COUNT(*) AS count FROM campaigns GROUP BY status
-    `);
+      SELECT status, COUNT(*) AS count FROM campaigns WHERE created_at >= NOW() - $1::interval GROUP BY status
+    `, [interval]);
     const statusCounts = campaignStatus.rows.reduce((acc, row) => {
       acc[row.status] = parseInt(row.count, 10);
       return acc;
@@ -294,14 +301,14 @@ export async function getDashboardAnalytics(req, res) {
     const completedCampaigns = statusCounts.completed || 0;
     const scheduledCampaigns = await pool.query(`
       SELECT COUNT(*) AS count FROM campaigns
-      WHERE status = $1 AND schedule_start > NOW()
-    `, ["draft"]).then((r) => parseInt(r.rows[0]?.count || 0, 10));
+      WHERE status = $1 AND schedule_start > NOW() AND created_at >= NOW() - $2::interval
+    `, ["draft", interval]).then((r) => parseInt(r.rows[0]?.count || 0, 10));
 
     // Get messages sent count (campaign_leads with status sent, replied, or completed)
     const messagesSentResult = await pool.query(`
       SELECT COUNT(*) AS count FROM campaign_leads
-      WHERE status IN ('sent', 'replied', 'completed')
-    `);
+      WHERE status IN ('sent', 'replied', 'completed') AND last_activity_at >= NOW() - $1::interval
+    `, [interval]);
     const totalMessagesSent = parseInt(messagesSentResult.rows[0]?.count || 0, 10);
 
     // Campaign types breakdown - group by type, NULL types show as messages_sent
@@ -313,13 +320,14 @@ export async function getDashboardAnalytics(req, res) {
         END AS type,
         COUNT(*) AS count 
       FROM campaigns 
+      WHERE created_at >= NOW() - $1::interval
       GROUP BY 
         CASE 
           WHEN type IS NULL OR type = '' THEN 'messages_sent'
           ELSE type
         END
       ORDER BY count DESC
-    `);
+    `, [interval]);
 
     // Build type breakdown
     const typeBreakdown = {};
@@ -341,8 +349,8 @@ export async function getDashboardAnalytics(req, res) {
     }
 
     const repliesResult = await pool.query(`
-      SELECT COUNT(*) AS count FROM campaign_leads WHERE status = $1
-    `, ["replied"]);
+      SELECT COUNT(*) AS count FROM campaign_leads WHERE status = $1 AND last_activity_at >= NOW() - $2::interval
+    `, ["replied", interval]);
     const totalSent = parseInt(messagesSentResult.rows[0]?.count || 0, 10);
     const totalReplied = parseInt(repliesResult.rows[0]?.count || 0, 10);
     const engagementLevel = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0;
