@@ -13,13 +13,31 @@ function str(val) {
   return val != null && val !== '' ? String(val) : undefined;
 }
 
+// Helper to parse DATABASE_URL
+let dbUrlConfig = {};
+if (process.env.DATABASE_URL) {
+  try {
+    const parsed = new URL(process.env.DATABASE_URL);
+    dbUrlConfig = {
+      host: parsed.hostname,
+      port: parsed.port,
+      database: parsed.pathname.slice(1), // Remove leading '/'
+      user: parsed.username,
+      password: parsed.password,
+      ssl: { rejectUnauthorized: false } // Required for Render/Cloud Postgres
+    };
+  } catch (err) {
+    console.error('❌ Failed to parse DATABASE_URL:', err.message);
+  }
+}
+
 const databaseConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
-  database: process.env.DB_NAME || process.env.DB_DATABASE || 'linkedin_leads',
-  user: str(process.env.DB_USER) || 'postgres',
-  password: str(process.env.DB_PASSWORD) ?? '',
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  host: dbUrlConfig.host || process.env.DB_HOST || 'localhost',
+  port: parseInt(dbUrlConfig.port || process.env.DB_PORT || '5432', 10),
+  database: dbUrlConfig.database || process.env.DB_NAME || process.env.DB_DATABASE || 'linkedin_leads',
+  user: str(dbUrlConfig.user || process.env.DB_USER) || 'postgres',
+  password: str(dbUrlConfig.password || process.env.DB_PASSWORD) ?? '',
+  ssl: dbUrlConfig.ssl || (process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false),
   max: parseInt(process.env.DB_POOL_MAX || '20', 10),
   idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_TIMEOUT || '30000', 10),
   connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT || '2000', 10)
