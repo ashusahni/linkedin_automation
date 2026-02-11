@@ -158,13 +158,22 @@ class PhantomBusterService {
       // Check if additionalArgs already contains sessionCookie (from dashboard)
       const hasDashboardCookie = additionalArgs?.sessionCookie;
 
-      if (options.noSessionCookie || options.useDashboardCookie || hasDashboardCookie) {
-        // Using dashboard cookie - explicitly don't read cookie from .env
+      if (options.noSessionCookie || options.useDashboardCookie) {
+        // Enforce using dashboard connection - strict no-cookie policy
+        // Even if additionalArgs has a cookie, we might want to respect noSessionCookie option if that's the intent
+        // However, usually noSessionCookie=true means "don't look at .env"
         if (hasDashboardCookie) {
-          console.log("📌 Using sessionCookie from dashboard (provided in additionalArgs)");
+          console.log("📌 Using sessionCookie provided in arguments (ignoring .env)");
+          // We keep it in additionalArgs, subsequent logic will include it
+          cookieForPhantom = additionalArgs.sessionCookie;
         } else {
-          console.log("📌 Skipping .env cookie - using PhantomBuster dashboard connection only");
+          console.log("📌 Using PhantomBuster dashboard connection (no session cookie in args)");
+          // Leave cookieForPhantom empty
         }
+      } else if (hasDashboardCookie) {
+        console.log("📌 Using sessionCookie from dashboard (provided in additionalArgs)");
+        // Use the one passed in
+        cookieForPhantom = additionalArgs.sessionCookie;
       } else {
         // Only read cookie from .env if we're not using dashboard connection
         sessionCookie = process.env.LINKEDIN_SESSION_COOKIE || process.env[" LINKEDIN_SESSION_COOKIE"] || process.env["LINKEDIN_SESSION_COOKIE "] || "";
@@ -178,6 +187,9 @@ class PhantomBusterService {
 
         // Cookie sent to PhantomBuster: many LinkedIn phantoms expect "li_at=value" (full cookie string)
         cookieForPhantom = sessionCookie ? `li_at=${sessionCookie}` : "";
+        if (cookieForPhantom) {
+          console.log("📌 Using session cookie from .env");
+        }
       }
 
       let userAgent = process.env.LINKEDIN_USER_AGENT || process.env[" LINKEDIN_USER_AGENT"] || process.env["LINKEDIN_USER_AGENT "] || "";
@@ -1287,6 +1299,7 @@ class PhantomBusterService {
 
         // Extract dashboard cookie so we can inject it explicitly if needed
         let dashboardCookieValue = null;
+        let dashboardUserAgent = null;
         let hasDashboardCookie = false;
 
         try {
@@ -1299,10 +1312,14 @@ class PhantomBusterService {
                 : agentConfig.argument;
 
               dashboardCookieValue = savedArgs.sessionCookie || savedArgs.linkedinSessionCookie;
+              dashboardUserAgent = savedArgs.userAgent || savedArgs.user_agent;
               hasDashboardCookie = !!dashboardCookieValue;
 
               if (hasDashboardCookie) {
                 console.log("✅ Found sessionCookie in dashboard saved configuration");
+                if (dashboardUserAgent) {
+                  console.log("✅ Found userAgent in dashboard saved configuration");
+                }
               } else {
                 console.log("⚠️  No sessionCookie found in dashboard saved configuration");
               }
@@ -1327,11 +1344,23 @@ class PhantomBusterService {
         // while minimizing "network-cookie-invalid" risks since it matches their record.
 
         if (hasDashboardCookie && dashboardCookieValue) {
-          console.log("✅ Injecting dashboard cookie into launch arguments (solves 'cookie-missing' error)");
+          // CRITICAL: When passing arguments via API, PhantomBuster does NOT automatically use dashboard OAuth.
+          // We MUST explicitly inject the session cookie from the dashboard configuration.
+          // This is different from manual launches where OAuth is implicit.
+          console.log("✅ Explicitly injecting dashboard sessionCookie into launch arguments");
+
+          // Inject the cookie exactly as stored in dashboard
           launchArgs.sessionCookie = dashboardCookieValue;
+
+          // ALSO inject User-Agent to match the session fingerprint
+          if (dashboardUserAgent) {
+            launchArgs.userAgent = dashboardUserAgent;
+            console.log("✅ Also injecting matching userAgent to prevent LinkedIn detection");
+          }
+
           launchOptions = { noSessionCookie: true }; // Don't use .env, use the one we just injected
         } else {
-          console.log("⚠️  Falling back to .env cookie (Dashboard cookie missing)");
+          console.log("⚠️  Falling back to .env cookie (Dashboard connection not detected)");
           launchOptions = { noSessionCookie: false }; // Use .env
         }
 

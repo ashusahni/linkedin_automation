@@ -79,6 +79,8 @@ export default function CampaignDetailPage() {
     const [approvalStatuses, setApprovalStatuses] = useState({}); // { approvalId: { status, containerId, sentAt } }
     const [recentActivity, setRecentActivity] = useState([]); // Recent sending activity
     const [regeneratingId, setRegeneratingId] = useState(null);
+    const [actioningId, setActioningId] = useState(null);
+    const [bulkActioning, setBulkActioning] = useState(false);
     const [bulkPersonalizing, setBulkPersonalizing] = useState(false);
     const [showBulkPersonalizeModal, setShowBulkPersonalizeModal] = useState(false);
     const [bulkPersonalizeOptions, setBulkPersonalizeOptions] = useState({
@@ -584,6 +586,7 @@ export default function CampaignDetailPage() {
             return;
         }
 
+        setBulkActioning(true);
         try {
             await axios.post('/api/sow/approvals/bulk-approve', { ids: selectedApprovals });
             addToast(`Approved ${selectedApprovals.length} messages`, 'success');
@@ -594,6 +597,8 @@ export default function CampaignDetailPage() {
             console.error('Failed to approve messages:', error);
             const errorMsg = error.response?.data?.error || error.message || 'Failed to approve messages';
             addToast(`Error: ${errorMsg}`, 'error');
+        } finally {
+            setBulkActioning(false);
         }
     };
 
@@ -603,6 +608,7 @@ export default function CampaignDetailPage() {
             return;
         }
 
+        setBulkActioning(true);
         try {
             await axios.post('/api/sow/approvals/bulk-reject', { ids: selectedApprovals });
             addToast(`Rejected ${selectedApprovals.length} messages`, 'success');
@@ -612,6 +618,8 @@ export default function CampaignDetailPage() {
             console.error('Failed to reject messages:', error);
             const errorMsg = error.response?.data?.error || error.message || 'Failed to reject messages';
             addToast(`Error: ${errorMsg}`, 'error');
+        } finally {
+            setBulkActioning(false);
         }
     };
 
@@ -1566,17 +1574,30 @@ export default function CampaignDetailPage() {
                                         <Button
                                             variant="outline"
                                             onClick={handleRejectSelected}
-                                            className="gap-2 border-red-500/50 text-red-500 hover:bg-red-500/10"
+                                            disabled={bulkActioning}
+                                            className="gap-2 border-red-500/50 text-red-500 hover:bg-red-500/10 disabled:opacity-50"
                                         >
-                                            <XCircle className="w-4 h-4" />
+                                            {bulkActioning ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <XCircle className="w-4 h-4" />
+                                            )}
                                             Reject ({selectedApprovals.length})
                                         </Button>
                                         <Button
                                             onClick={handleApproveSelected}
-                                            className="gap-2 bg-green-600 hover:bg-green-500"
+                                            disabled={bulkActioning}
+                                            className={cn(
+                                                "gap-2 bg-green-600 hover:bg-green-500 transition-all duration-200",
+                                                bulkActioning && "bg-green-600/80 cursor-wait opacity-80"
+                                            )}
                                         >
-                                            <CheckCheck className="w-4 h-4" />
-                                            Approve & Send ({selectedApprovals.length})
+                                            {bulkActioning ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <CheckCheck className="w-4 h-4" />
+                                            )}
+                                            {bulkActioning ? 'Processing...' : `Approve & Send (${selectedApprovals.length})`}
                                         </Button>
                                     </>
                                 )}
@@ -1799,8 +1820,10 @@ export default function CampaignDetailPage() {
                                                         <Button
                                                             size="sm"
                                                             variant="outline"
+                                                            disabled={actioningId === approval.id}
                                                             onClick={async () => {
                                                                 try {
+                                                                    setActioningId(approval.id);
                                                                     await axios.post(`/api/sow/approvals/${approval.id}/review`, { action: 'reject' });
                                                                     addToast('Message rejected', 'info');
                                                                     fetchApprovals();
@@ -1808,16 +1831,25 @@ export default function CampaignDetailPage() {
                                                                     console.error('Failed to reject approval:', error);
                                                                     const errorMsg = error.response?.data?.error || error.message || 'Failed to reject message';
                                                                     addToast(`Error: ${errorMsg}`, 'error');
+                                                                } finally {
+                                                                    setActioningId(null);
                                                                 }
                                                             }}
-                                                            className="border-red-500/30 text-red-500 hover:bg-red-500/10"
+                                                            className="border-red-500/30 text-red-500 hover:bg-red-500/10 disabled:opacity-50 transition-all duration-200"
                                                         >
-                                                            <XCircle className="w-4 h-4 mr-2" /> Reject
+                                                            {actioningId === approval.id ? (
+                                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                            ) : (
+                                                                <XCircle className="w-4 h-4 mr-2" />
+                                                            )}
+                                                            Reject
                                                         </Button>
                                                         <Button
                                                             size="sm"
+                                                            disabled={actioningId === approval.id}
                                                             onClick={async () => {
                                                                 try {
+                                                                    setActioningId(approval.id);
                                                                     await axios.post(`/api/sow/approvals/${approval.id}/review`, { action: 'approve' });
                                                                     addToast('✅ Message approved! Scheduler will send within 1 minute.', 'success');
                                                                     fetchApprovals();
@@ -1852,11 +1884,21 @@ export default function CampaignDetailPage() {
                                                                     console.error('Failed to approve:', error);
                                                                     const errorMsg = error.response?.data?.error || error.message || 'Failed to approve message';
                                                                     addToast(`Error: ${errorMsg}`, 'error');
+                                                                } finally {
+                                                                    setActioningId(null);
                                                                 }
                                                             }}
-                                                            className="bg-green-600 hover:bg-green-500"
+                                                            className={cn(
+                                                                "bg-green-600 hover:bg-green-500 transition-all duration-200",
+                                                                actioningId === approval.id && "bg-green-600/80 cursor-wait opacity-80"
+                                                            )}
                                                         >
-                                                            <Send className="w-4 h-4 mr-2" /> Approve & Send
+                                                            {actioningId === approval.id ? (
+                                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                            ) : (
+                                                                <Send className="w-4 h-4 mr-2" />
+                                                            )}
+                                                            {actioningId === approval.id ? 'Approving...' : 'Approve & Send'}
                                                         </Button>
                                                     </div>
                                                 </div>
