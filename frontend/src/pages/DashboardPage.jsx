@@ -240,7 +240,7 @@ export default function DashboardPage() {
         try {
             setUploading(true);
             setUploadResult(null);
-            
+
             const res = await axios.post('/api/leads/import-csv', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
@@ -258,7 +258,7 @@ export default function DashboardPage() {
             let errorMessage = 'Failed to upload CSV file';
             if (error.response?.data?.error) errorMessage = error.response.data.error;
             else if (error.message) errorMessage = error.message;
-            
+
             setUploadResult({
                 success: false,
                 message: errorMessage
@@ -331,7 +331,13 @@ export default function DashboardPage() {
             subCategories: Array.isArray(d.subCategories) ? d.subCategories : [],
         }))
         .filter((d) => d.value > 0)
-        .sort((a, b) => b.value - a.value);
+        .sort((a, b) => {
+            const isOtherA = a.name === 'Other' || a.name === 'Others';
+            const isOtherB = b.name === 'Other' || b.name === 'Others';
+            if (isOtherA && !isOtherB) return 1;
+            if (!isOtherA && isOtherB) return -1;
+            return b.value - a.value;
+        });
 
     // Build sub-industry breakdown map: { [industryName]: SubSlice[] }
     const subIndustryMap = {};
@@ -356,7 +362,13 @@ export default function DashboardPage() {
                 contextLabel: parent.name,
             }))
             .filter((s) => s.value > 0)
-            .sort((a, b) => b.value - a.value);
+            .sort((a, b) => {
+                const isOtherA = a.name === 'Other' || a.name === 'Others';
+                const isOtherB = b.name === 'Other' || b.name === 'Others';
+                if (isOtherA && !isOtherB) return 1;
+                if (!isOtherA && isOtherB) return -1;
+                return b.value - a.value;
+            });
 
         if (slices.length > 0) {
             subIndustryMap[parent.name] = slices;
@@ -498,7 +510,7 @@ export default function DashboardPage() {
                         onChange={handleFileUpload}
                         className="hidden"
                     />
-                    
+
                     <div className="flex flex-col gap-2 w-full sm:w-auto">
                         <Button
                             variant={preferencesApplied ? "default" : "outline"}
@@ -672,7 +684,7 @@ export default function DashboardPage() {
                                 <div className="h-20 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
                             ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                    <div 
+                                    <div
                                         className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
                                         onClick={() => navigate('/leads?connection_degree=1st')}
                                     >
@@ -687,7 +699,7 @@ export default function DashboardPage() {
                                             <span className="text-xs text-muted-foreground">{connectionPercentages.firstDegree}%</span>
                                         </div>
                                     </div>
-                                    <div 
+                                    <div
                                         className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
                                         onClick={() => navigate('/leads?connection_degree=2nd')}
                                     >
@@ -702,7 +714,7 @@ export default function DashboardPage() {
                                             <span className="text-xs text-muted-foreground">{connectionPercentages.secondDegree}%</span>
                                         </div>
                                     </div>
-                                    <div 
+                                    <div
                                         className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
                                         onClick={() => navigate('/leads?connection_degree=3rd')}
                                     >

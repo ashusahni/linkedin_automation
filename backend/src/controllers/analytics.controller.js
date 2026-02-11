@@ -236,7 +236,13 @@ export async function getDashboardAnalytics(req, res) {
               null,
           }))
           .filter((s) => s.count > 0)
-          .sort((a, b) => b.count - a.count);
+          .sort((a, b) => {
+            const isOtherA = a.name === "Other" || a.name === "Others";
+            const isOtherB = b.name === "Other" || b.name === "Others";
+            if (isOtherA && !isOtherB) return 1;
+            if (!isOtherA && isOtherB) return -1;
+            return b.count - a.count;
+          });
 
         if (req.query.preferences === 'true' && name === 'Other') {
           return null;
@@ -250,7 +256,13 @@ export async function getDashboardAnalytics(req, res) {
         };
       })
       .filter(item => item && item.count > 0) // Only include valid industries with leads
-      .sort((a, b) => b.count - a.count); // Sort by count descending
+      .sort((a, b) => {
+        const isOtherA = a.industry === "Other" || a.industry === "Others";
+        const isOtherB = b.industry === "Other" || b.industry === "Others";
+        if (isOtherA && !isOtherB) return 1;
+        if (!isOtherA && isOtherB) return -1;
+        return b.count - a.count;
+      }); // Sort by count descending, but keep 'Other' last
 
     // Extraction by period (leads created in last interval)
     const extractionByPeriod = await pool.query(

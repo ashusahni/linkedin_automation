@@ -130,7 +130,7 @@ export default function LeadsTable() {
     });
 
     // PHASE 4: Review Workflow State
-    const [reviewStatusTab, setReviewStatusTab] = useState('to_be_reviewed'); // 'to_be_reviewed' | 'approved' | 'rejected'
+    const [reviewStatusTab, setReviewStatusTab] = useState('approved'); // 'approved' | 'to_be_reviewed' | 'rejected'
     const [reviewStats, setReviewStats] = useState({
         to_be_reviewed: 0,
         approved: 0,
@@ -223,7 +223,7 @@ export default function LeadsTable() {
         const unapprovedCount = selectedLeadObjects.filter(l => (l.review_status || 'approved') !== 'approved').length;
 
         if (unapprovedCount > 0) {
-            addToast(`⚠️ ${unapprovedCount} selected leads are not approved. Only approved leads can be added to campaigns.`, 'error');
+            addToast(`⚠️ ${unapprovedCount} selected leads are not qualified. Only qualified leads can be added to campaigns.`, 'error');
             return;
         }
 
@@ -446,7 +446,7 @@ export default function LeadsTable() {
             case 'to_be_reviewed':
                 return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 font-medium">🟡 Review</Badge>;
             case 'approved':
-                return <Badge variant="default" className="bg-green-100 text-green-700 border-green-200 hover:bg-green-100 font-medium">✔ Approved</Badge>;
+                return <Badge variant="default" className="bg-green-100 text-green-700 border-green-200 hover:bg-green-100 font-medium">✔ Qualified</Badge>;
             case 'rejected':
                 return <Badge variant="destructive" className="bg-red-50 text-red-700 border-red-200 hover:bg-red-50 font-medium">❌ Rejected</Badge>;
             default:
@@ -683,7 +683,7 @@ export default function LeadsTable() {
 
         try {
             await axios.post('/api/leads/bulk-approve', { leadIds });
-            addToast(`✅ Approved ${leadIds.length} lead(s)`, 'success');
+            addToast(`✅ Qualified ${leadIds.length} lead(s)`, 'success');
             setSelectedLeads(new Set());
             fetchLeads();
             fetchStats(); // Update counters
@@ -734,7 +734,7 @@ export default function LeadsTable() {
     const handleApproveSingle = async (id) => {
         try {
             await axios.post('/api/leads/bulk-approve', { leadIds: [id] });
-            addToast('Lead approved', 'success');
+            addToast('Lead qualified', 'success');
             fetchLeads();
             fetchStats();
         } catch (error) { addToast('Failed to approve', 'error'); }
@@ -754,8 +754,8 @@ export default function LeadsTable() {
             addToast('Moved to review', 'info');
             fetchLeads();
             fetchStats();
-        } catch (error) { 
-            addToast('Failed to move', 'error'); 
+        } catch (error) {
+            addToast('Failed to move', 'error');
         }
     };
     const handleManualScrape = async () => {
@@ -763,9 +763,9 @@ export default function LeadsTable() {
         try {
             setEnriching(true);
             addToast(`🚀 Starting contact scraper for ${leadIds.length > 0 ? leadIds.length : 'all missing'} leads...`, 'info');
-            
+
             const res = await axios.post('/api/scraper/scrape-contacts', { leadIds });
-            
+
             if (res.data.success) {
                 if (res.data.count === 0) {
                     addToast('No leads found that need contact info.', 'warning');
@@ -788,8 +788,8 @@ export default function LeadsTable() {
             {/* Header Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <StatCard label="Total Leads" value={reviewStats.total || stats.totalLeads} />
-                <StatCard label="To Be Reviewed" value={reviewStats.to_be_reviewed} className="text-yellow-600" />
-                <StatCard label="Approved" value={reviewStats.approved} className="text-green-600" />
+                <StatCard label="Qualified" value={reviewStats.approved} className="text-green-600" />
+                <StatCard label="Review" value={reviewStats.to_be_reviewed} className="text-yellow-600" />
                 <StatCard label="Rejected" value={reviewStats.rejected} className="text-red-600" />
             </div>
 
@@ -812,8 +812,8 @@ export default function LeadsTable() {
                             </div>
                             <div className="flex gap-2">
                                 {reviewStatusTab === 'approved' && (
-                                    <Button 
-                                        variant="outline" 
+                                    <Button
+                                        variant="outline"
                                         className="gap-2 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
                                         onClick={handleManualScrape}
                                         disabled={enriching}
@@ -1175,17 +1175,6 @@ export default function LeadsTable() {
                     {/* PHASE 4: Review Status Tabs */}
                     <div className="flex gap-2 mb-4 border-b">
                         <button
-                            onClick={() => setReviewStatusTab('to_be_reviewed')}
-                            className={cn(
-                                "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
-                                reviewStatusTab === 'to_be_reviewed'
-                                    ? "border-yellow-500 text-yellow-600"
-                                    : "border-transparent text-muted-foreground hover:text-foreground"
-                            )}
-                        >
-                            🟡 To Be Reviewed ({reviewStats.to_be_reviewed})
-                        </button>
-                        <button
                             onClick={() => setReviewStatusTab('approved')}
                             className={cn(
                                 "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
@@ -1194,7 +1183,18 @@ export default function LeadsTable() {
                                     : "border-transparent text-muted-foreground hover:text-foreground"
                             )}
                         >
-                            🟢 Approved ({reviewStats.approved})
+                            🟢 Qualified Leads ({reviewStats.approved})
+                        </button>
+                        <button
+                            onClick={() => setReviewStatusTab('to_be_reviewed')}
+                            className={cn(
+                                "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
+                                reviewStatusTab === 'to_be_reviewed'
+                                    ? "border-yellow-500 text-yellow-600"
+                                    : "border-transparent text-muted-foreground hover:text-foreground"
+                            )}
+                        >
+                            🟡 Review ({reviewStats.to_be_reviewed})
                         </button>
                         <button
                             onClick={() => setReviewStatusTab('rejected')}
@@ -1218,7 +1218,7 @@ export default function LeadsTable() {
                                 {reviewStatusTab === 'to_be_reviewed' && (
                                     <>
                                         <Button size="sm" variant="default" className="bg-green-600 hover:bg-green-700 text-white border-none" onClick={handleBulkApprove}>
-                                            ✅ Approve
+                                            ✅ Qualify
                                         </Button>
                                         <Button size="sm" variant="destructive" onClick={() => setShowRejectModal(true)}>
                                             ❌ Reject
@@ -1384,7 +1384,7 @@ export default function LeadsTable() {
                                                                 lead.review_status === 'rejected' ? "bg-red-50 text-red-700 border-red-200" :
                                                                     "text-muted-foreground border-transparent"
                                                         )}>
-                                                            {lead.review_status === 'approved' && 'Approved'}
+                                                            {lead.review_status === 'approved' && 'Qualified'}
                                                             {lead.review_status === 'rejected' && 'Rejected'}
                                                             {!lead.review_status && lead.status}
                                                         </span>
