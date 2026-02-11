@@ -742,7 +742,7 @@ class PhantomBusterService {
           console.log(`   Phantom message: ${data[0].error}`);
         }
 
-        data = await this.fetchAllConnectionsFromDatabase(phantomId);
+        data = await this.fetchAllConnectionsFromDatabase(phantomId, container);
         console.log(`📊 Retrieved ${data.length} existing connections from PhantomBuster database`);
       } else {
         console.log(`📊 Retrieved ${data.length} new connections from latest run`);
@@ -765,7 +765,7 @@ class PhantomBusterService {
   // ============================================
   // FETCH ALL CONNECTIONS FROM PHANTOMBUSTER DATABASE
   // ============================================
-  async fetchAllConnectionsFromDatabase(phantomId) {
+  async fetchAllConnectionsFromDatabase(phantomId, container = null) {
     try {
       console.log("📥 Fetching all connections from PhantomBuster database...");
 
@@ -839,6 +839,49 @@ class PhantomBusterService {
         }
       } catch (err) {
         console.log(`   ⚠️ Could not fetch from agent output: ${err.message}`);
+      }
+
+      // STRATEGY: Use container logs to find S3 path, then try result.csv / database.csv
+      if (container) {
+        try {
+            console.log("📊 Strategy: Analyzing container logs to find alternative files (CSV)...");
+            const outputSnippet = await this.fetchContainerOutput(container.id);
+            if (outputSnippet) {
+                 // Regex to find S3 base path from any log line
+                 // Matches: https://phantombuster.s3.amazonaws.com/HASH/HASH/[file]
+                 const match = outputSnippet.match(/https:\/\/phantombuster\.s3[^/]*\.amazonaws\.com\/([a-zA-Z0-9_-]+\/){2,}/);
+                 if (match) {
+                     const baseUrl = match[0].replace(/\/$/, ""); 
+                     console.log(`   ✅ Found S3 Base URL: ${baseUrl}`);
+                     
+                     // Files to try from this base
+                     const candidates = ["result.csv", "database.csv", "connections.csv", "result.json", "database.json"];
+                     
+                     for(const f of candidates) {
+                         const fileUrl = `${baseUrl}/${f}`;
+                         console.log(`   Trying: ${fileUrl}...`);
+                         // Use downloadResultFileWithStatus (no Phantom Key needed for S3 usually)
+                         const { data, status } = await this.downloadResultFileWithStatus(fileUrl);
+                         
+                         // If we get an array and it's not just the error message
+                         if (data && data.length > 0) {
+                             // Check if it's just the error "No new profile found"
+                             if (data.length === 1 && data[0].error) {
+                                 console.log(`   ⚠️  ${f} contained only error: ${data[0].error}`);
+                                 continue;
+                             }
+                             
+                             console.log(`   ✅ Found ${data.length} records in ${f}`);
+                             return data;
+                         }
+                     }
+                 } else {
+                     console.log("   ⚠️  No S3 URL pattern found in logs");
+                 }
+            }
+        } catch (err) {
+            console.error(`   ❌ Error in log strategy: ${err.message}`);
+        }
       }
 
       console.warn("⚠️ Could not find existing connections in PhantomBuster database");
