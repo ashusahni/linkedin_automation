@@ -9,6 +9,7 @@ import {
     getImports,
     importLeads,
     importLeadsFromCSV,
+    importLeadsFromExcel,
     deleteCSVLeads,
     deleteAllLeads,
     enrichLead,
@@ -22,7 +23,8 @@ import {
     bulkRejectLeads,
     moveToReview,
     getReviewStats,
-    createLead
+    createLead,
+    exportLeads
 } from "../controllers/lead.controller.js";
 import { upload } from "../middleware/upload.js";
 
@@ -39,6 +41,7 @@ router.post("/", createLead);
 router.get("/search", searchLeads);
 router.get("/stats", getStats);
 router.get("/imports", getImports);
+router.get("/export", exportLeads);
 router.get("/enriched", getEnrichedLeads);
 router.get("/:id", getLeadById);
 router.get("/:id/enrichment", getLeadEnrichment);
@@ -49,6 +52,7 @@ router.delete("/all", deleteAllLeads);
 router.delete("/:id", deleteLead);
 router.post("/import", importLeads);
 router.post("/import-csv", upload.single('csvFile'), importLeadsFromCSV);
+router.post("/import-excel", upload.single('excelFile'), importLeadsFromExcel);
 router.post("/enrich-batch", enrichLeadsBatch);
 router.post("/bulk-enrich-personalize", bulkEnrichAndPersonalize);
 router.post("/:id/enrich", enrichLead);

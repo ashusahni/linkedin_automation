@@ -507,14 +507,14 @@ export async function getLeadById(req, res) {
 export async function updateLead(req, res) {
   try {
     const { id } = req.params;
-    const { 
-      status, 
-      title, 
-      company, 
-      first_name, 
-      last_name, 
+    const {
+      status,
+      title,
+      company,
+      first_name,
+      last_name,
       // Mapping camelCase to snake_case if sent from frontend
-      firstName, 
+      firstName,
       lastName,
       // Additional fields
       email,
@@ -554,10 +554,10 @@ export async function updateLead(req, res) {
        WHERE id = $16
        RETURNING *`,
       [
-        status, 
-        title, 
-        company, 
-        finalFirstName, 
+        status,
+        title,
+        company,
+        finalFirstName,
         finalLastName,
         email,
         phone,
@@ -587,14 +587,14 @@ export async function updateLead(req, res) {
 // POST /api/leads
 export async function createLead(req, res) {
   try {
-    const { 
+    const {
       full_name,
-      first_name, 
-      last_name, 
-      firstName, 
+      first_name,
+      last_name,
+      firstName,
       lastName,
-      company, 
-      title, 
+      company,
+      title,
       email,
       phone,
       linkedin_url,
@@ -626,7 +626,7 @@ export async function createLead(req, res) {
   } catch (err) {
     // Handle unique constraint violation for linkedin_url
     if (err.code === '23505') {
-       return res.status(409).json({ error: "Lead with this LinkedIn URL already exists." });
+      return res.status(409).json({ error: "Lead with this LinkedIn URL already exists." });
     }
     console.error("Create lead error:", err);
     res.status(500).json({ error: err.message });
@@ -1224,6 +1224,146 @@ export async function importLeadsFromCSV(req, res) {
   }
 }
 
+// POST /api/leads/import-excel
+export async function importLeadsFromExcel(req, res) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No Excel file uploaded" });
+    }
+
+    // Dynamic import to avoid crash if not installed
+    let xlsx;
+    try {
+      const module = await import('xlsx');
+      xlsx = module.default || module;
+    } catch (e) {
+      console.error("❌ xlsx library not found. Please run 'npm install xlsx'");
+      return res.status(500).json({ error: "Excel import capability is currently unavailable on the server. Please check server dependencies." });
+    }
+
+    // Read the uploaded Excel file
+    const workbook = xlsx.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+
+    // Convert to JSON
+    const records = xlsx.utils.sheet_to_json(worksheet, {
+      defval: null,
+      raw: true
+    });
+
+    if (records.length === 0) {
+      // Clean up the uploaded file
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Excel file is empty" });
+    }
+
+    let saved = 0;
+    let duplicates = 0;
+    let errors = 0;
+    const errorDetails = [];
+
+    // Process each record
+    for (const record of records) {
+      try {
+        // Map Excel columns to database fields (flexible mapping with fallbacks)
+        const leadData = {
+          full_name: record.full_name || record.fullName || record.full_name || record.name || record.Name || record['Full Name'] || record['full name'] || null,
+          first_name: record.first_name || record.firstName || record['First Name'] || record['first name'] || null,
+          last_name: record.last_name || record.lastName || record['Last Name'] || record['last name'] || null,
+          title: record.title || record.jobTitle || record['Job Title'] || record['title'] || record['JobTitle'] || null,
+          company: record.company || record.companyName || record['Company'] || record['company'] || record['CompanyName'] || null,
+          location: record.location || record.Location || record['location'] || null,
+          linkedin_url: record.linkedin_url || record.linkedinUrl || record.profileUrl || record['LinkedIn URL'] || record['Profile URL'] || record['linkedin'] || null,
+          email: record.email || record.Email || record['email'] || null,
+          phone: record.phone || record.Phone || record['phone'] || record['Phone Number'] || null,
+          source: record.source || 'excel_import',
+          status: 'new'
+        };
+
+        // Skip if no meaningful data
+        if (!leadData.full_name && !leadData.first_name && !leadData.linkedin_url) {
+          errors++;
+          errorDetails.push({ row: record, reason: 'Missing required fields (name or LinkedIn URL)' });
+          continue;
+        }
+
+        // Apply DB-safe truncation to respect column sizes
+        const values = [
+          safeTruncate(leadData.full_name, 255),
+          safeTruncate(leadData.first_name, 100),
+          safeTruncate(leadData.last_name, 100),
+          safeTruncate(leadData.title, 255),
+          safeTruncate(leadData.company, 255),
+          safeTruncate(leadData.location, 255),
+          safeTruncate(leadData.linkedin_url, 500),
+          safeTruncate(leadData.email, 255),
+          safeTruncate(leadData.phone, 50),
+          safeTruncate(leadData.source, 100),
+          leadData.status
+        ];
+
+        // Try to insert, handle duplicates
+        const result = await pool.query(
+          `INSERT INTO leads (
+            full_name, first_name, last_name, title, company, 
+            location, linkedin_url, email, phone, source, status
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT (linkedin_url) DO NOTHING
+          RETURNING id`,
+          values
+        );
+
+        if (result.rows.length > 0) {
+          saved++;
+        } else {
+          duplicates++;
+        }
+      } catch (err) {
+        errors++;
+        errorDetails.push({ row: record, reason: err.message });
+        console.error('Error inserting lead from Excel:', err.message);
+      }
+    }
+
+    // Clean up the uploaded file
+    fs.unlinkSync(req.file.path);
+
+    // Log import to database
+    try {
+      await pool.query(
+        `INSERT INTO import_logs (source, total_leads, saved, duplicates, timestamp)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        ['excel_import', records.length, saved, duplicates]
+      );
+    } catch (err) {
+      console.error('Failed to log Excel import:', err.message);
+    }
+
+    return res.json({
+      success: true,
+      summary: {
+        totalLeads: records.length,
+        saved,
+        duplicates,
+        errors,
+        errorDetails: errorDetails.length > 0 ? errorDetails.slice(0, 10) : []
+      }
+    });
+
+  } catch (err) {
+    console.error("❌ Excel import error:", err.message);
+
+    // Clean up the file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({ error: err.message });
+  }
+}
+
 // DELETE /api/leads/csv-imports
 export async function deleteCSVLeads(req, res) {
   try {
@@ -1503,6 +1643,223 @@ export async function getReviewStats(req, res) {
 
   } catch (err) {
     console.error('❌ Review stats error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/leads/export
+export async function exportLeads(req, res) {
+  try {
+    const {
+      format = 'csv',
+      filters, // New JSON param
+      // Legacy params
+      source,
+      status,
+      review_status, // PHASE 4: Review status filter
+      hasEmail,
+      hasLinkedin,
+      search,
+      title,
+      location,
+      company,
+      industry,
+      quality, // 'primary', 'secondary', 'tertiary'
+      connection_degree,
+      createdFrom,
+      createdTo,
+    } = req.query;
+
+    const conditionClauses = [];
+    const params = [];
+
+    // Check for Advanced Filters first
+    if (filters) {
+      try {
+        const filterJSON = JSON.parse(filters);
+        const advancedClause = buildAdvancedFilterClause(filterJSON, params);
+        if (advancedClause) {
+          conditionClauses.push(advancedClause);
+        }
+      } catch (e) {
+        console.error("Failed to parse filters JSON", e);
+      }
+    } else {
+      // --- Legacy / Simple Filter Logic ---
+      if (source && source !== 'all') {
+        conditionClauses.push(`source = $${params.length + 1}`);
+        params.push(source);
+      }
+      if (status && status !== 'all') {
+        conditionClauses.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+      if (review_status && review_status !== 'all') {
+        conditionClauses.push(`review_status = $${params.length + 1}`);
+        params.push(review_status);
+      }
+      if (hasEmail === "true") {
+        conditionClauses.push(`email IS NOT NULL AND email != ''`);
+      }
+      if (hasLinkedin === "true") {
+        conditionClauses.push(`linkedin_url IS NOT NULL AND linkedin_url != ''`);
+      }
+      if (title && title.trim()) {
+        conditionClauses.push(`title ILIKE $${params.length + 1}`);
+        params.push(`%${title.trim()}%`);
+      }
+      if (location && location.trim()) {
+        conditionClauses.push(`location ILIKE $${params.length + 1}`);
+        params.push(`%${location.trim()}%`);
+      }
+      if (company && company.trim()) {
+        conditionClauses.push(`company ILIKE $${params.length + 1}`);
+        params.push(`%${company.trim()}%`);
+      }
+      if (connection_degree && connection_degree.trim()) {
+        const degree = connection_degree.trim().toLowerCase();
+        conditionClauses.push(`connection_degree ILIKE $${params.length + 1}`);
+        params.push(`%${degree}%`);
+      }
+
+      if (industry && industry.trim()) {
+        const industryName = industry.trim();
+        const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        if (industryName === 'Other') {
+          const allKeywords = Object.values(INDUSTRY_KEYWORDS).flat();
+          if (allKeywords.length > 0) {
+            const allRegex = allKeywords.map(k => escapeRegExp(k)).join('|');
+            conditionClauses.push(`(COALESCE(company, '') || ' ' || COALESCE(title, '')) !~* $${params.length + 1}`);
+            params.push(`(${allRegex})`);
+          }
+        } else if (INDUSTRY_KEYWORDS[industryName]) {
+          const targetKeywords = INDUSTRY_KEYWORDS[industryName];
+          const currentRegex = targetKeywords.map(k => escapeRegExp(k)).join('|');
+          conditionClauses.push(`(COALESCE(company, '') || ' ' || COALESCE(title, '')) ~* $${params.length + 1}`);
+          params.push(`(${currentRegex})`);
+        } else {
+          conditionClauses.push(`(company ILIKE $${params.length + 1} OR title ILIKE $${params.length + 1})`);
+          params.push(`%${industryName}%`);
+        }
+      }
+
+      if (createdFrom) {
+        conditionClauses.push(`created_at >= $${params.length + 1}`);
+        params.push(createdFrom);
+      }
+      if (createdTo) {
+        conditionClauses.push(`created_at <= $${params.length + 1}`);
+        params.push(createdTo);
+      }
+    }
+
+    if (search && search.trim()) {
+      conditionClauses.push(`(full_name ILIKE $${params.length + 1} OR company ILIKE $${params.length + 1} OR title ILIKE $${params.length + 1})`);
+      params.push(`%${search.trim()}%`);
+    }
+
+    const whereClause = conditionClauses.length ? ` WHERE ${conditionClauses.join(" AND ")}` : "";
+
+    // Lead Scoring & Quality query check
+    let leads = [];
+    if (quality) {
+      const preferredKeywords = (process.env.PREFERRED_COMPANY_KEYWORDS || '')
+        .toLowerCase()
+        .split(',')
+        .map(k => k.trim())
+        .filter(Boolean);
+
+      let scoreExp = '0';
+      if (preferredKeywords.length > 0) {
+        const likes = preferredKeywords.map(k => {
+          const safeK = k.replace(/'/g, "''");
+          return `(COALESCE(company, '') ILIKE '%${safeK}%' OR COALESCE(title, '') ILIKE '%${safeK}%')`;
+        }).join(' OR ');
+        scoreExp += ` + (CASE WHEN ${likes} THEN 50 ELSE 0 END)`;
+      }
+
+      const qualityQuery = `
+          WITH scored_leads AS (
+            SELECT *,
+              (${scoreExp}) AS score
+            FROM leads
+            ${whereClause}
+          ),
+          ranked_leads AS (
+             SELECT *,
+               PERCENT_RANK() OVER (ORDER BY score DESC, created_at DESC) as pct_rank
+             FROM scored_leads
+          )
+          SELECT * FROM ranked_leads
+          WHERE 
+            CASE 
+              WHEN $${params.length + 1} = 'primary' THEN pct_rank <= 0.20
+              WHEN $${params.length + 1} = 'secondary' THEN pct_rank > 0.20 AND pct_rank <= 0.50
+              WHEN $${params.length + 1} = 'tertiary' THEN pct_rank > 0.50
+            END
+          ORDER BY score DESC, created_at DESC
+        `;
+      const qResult = await pool.query(qualityQuery, [...params, quality]);
+      leads = qResult.rows;
+    } else {
+      const dataQuery = `SELECT * FROM leads ${whereClause} ORDER BY created_at DESC`;
+      const result = await pool.query(dataQuery, params);
+      leads = result.rows;
+    }
+
+    if (format === 'xlsx') {
+      let xlsx;
+      try {
+        const module = await import('xlsx');
+        xlsx = module.default || module;
+      } catch (e) {
+        console.error("❌ xlsx library not found. Please run 'npm install xlsx'");
+        return res.status(500).json({ error: "Excel export capability is currently unavailable on the server." });
+      }
+
+      // Format dates for Excel
+      const xlsxData = leads.map(l => ({
+        ...l,
+        created_at: l.created_at ? new Date(l.created_at).toLocaleString() : '',
+        updated_at: l.updated_at ? new Date(l.updated_at).toLocaleString() : ''
+      }));
+
+      const worksheet = xlsx.utils.json_to_sheet(xlsxData);
+      const workbook = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(workbook, worksheet, "Leads");
+
+      // Use helper to output buffer
+      const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=leads_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      return res.status(200).send(buffer);
+    } else {
+      // Default CSV Export
+      const fields = [
+        'full_name', 'first_name', 'last_name', 'title', 'company', 'location',
+        'linkedin_url', 'email', 'phone', 'source', 'status', 'review_status', 'created_at'
+      ];
+
+      let csv = fields.join(',') + '\n';
+      leads.forEach(lead => {
+        const row = fields.map(field => {
+          let val = lead[field] === null || lead[field] === undefined ? '' : String(lead[field]);
+          // Basic CSV escaping
+          val = val.replace(/"/g, '""');
+          if (val.search(/("|,|\n)/g) >= 0) val = `"${val}"`;
+          return val;
+        });
+        csv += row.join(',') + '\n';
+      });
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=leads_export_${new Date().toISOString().split('T')[0]}.csv`);
+      return res.status(200).send(csv);
+    }
+  } catch (err) {
+    console.error('❌ Export error:', err);
     res.status(500).json({ error: err.message });
   }
 }

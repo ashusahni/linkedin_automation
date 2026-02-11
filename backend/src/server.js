@@ -42,66 +42,8 @@ async function init() {
     logger.info("⏰ Scheduler disabled (SCHEDULER_ENABLED=false)");
   }
 
-  // 🆕 AUTO-SCRAPE APPROVED LEADS ON STARTUP
-  // Run AFTER server starts to avoid blocking startup
-  // Delayed by 10 seconds to let database and everything load first
-  const scheduleContactScraping = async () => {
-    if (!config.phantombuster.sessionCookie) {
-      logger.info("⚠️  LinkedIn session cookie not configured - skipping auto-scraping");
-      return;
-    }
-
-    try {
-      logger.info("🔍 Checking for approved leads needing contact scraping...");
-
-      // Dynamic import to avoid loading at startup if not needed
-      const { default: pool } = await import('./db.js');
-
-      // Find approved leads without email or phone
-      const result = await pool.query(`
-        SELECT id, linkedin_url, linkedin_profile_id
-        FROM leads
-        WHERE review_status = 'approved'
-          AND (email IS NULL OR phone IS NULL)
-          AND linkedin_url IS NOT NULL
-        LIMIT 500
-      `);
-
-      if (result.rows.length > 0) {
-        logger.info(`📧 Found ${result.rows.length} approved leads without contact info`);
-        logger.info(`🚀 Triggering background contact scraping...`);
-
-        // Extract lead IDs
-        const leadIds = result.rows.map(row => row.id);
-
-        // Trigger scraping asynchronously (don't block server startup)
-        const { default: contactScraperService } = await import('./services/contact-scraper.service.js');
-        await contactScraperService.initialize(config.phantombuster.sessionCookie);
-        contactScraperService.scrapeApprovedLeads(leadIds).catch(err => {
-          logger.error('⚠️  Startup scraping error:', err.message);
-        });
-
-        logger.info(`✅ Contact scraping initiated in background`);
-      } else {
-        logger.info(`✅ All approved leads already have contact info`);
-      }
-    } catch (error) {
-      logger.error('⚠️  Failed to check/scrape approved leads:', error.message);
-      // Don't block server startup
-    }
-  };
-
   app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
-
-    // Schedule contact scraping to run 60 seconds (1 minute) after server starts
-    // This gives plenty of time for database connections, migrations, and everything to fully load
-    setTimeout(() => {
-      logger.info("⏰ Backend fully loaded. Starting contact scraping check...");
-      scheduleContactScraping().catch(err => {
-        logger.error('⚠️  Delayed scraping failed:', err.message);
-      });
-    }, 60000); // 60 second (1 minute) delay
   });
 }
 
