@@ -1166,7 +1166,41 @@ class PhantomBusterService {
         console.log(`   📋 URLs: ${profileUrls.join(', ')}`);
       }
 
-      const { containerId } = await this.launchPhantom(phantomId, phantomArgs);
+      // Fetch agent to get dashboard cookie
+      let dashboardCookieValue = null;
+      try {
+        const agentConfig = await this.fetchAgent(phantomId);
+        if (agentConfig?.argument) {
+          const savedArgs = typeof agentConfig.argument === 'string'
+            ? JSON.parse(agentConfig.argument)
+            : agentConfig.argument;
+          dashboardCookieValue = savedArgs.sessionCookie || savedArgs.linkedinSessionCookie;
+        }
+      } catch (e) {
+        console.warn("⚠️ Could not fetch agent config:", e.message);
+      }
+
+      // If we found a cookie, inject it. If not, we still proceed but it might fail or use .env based on options.
+      if (dashboardCookieValue) {
+        phantomArgs.sessionCookie = dashboardCookieValue;
+        console.log("   ✅ Injected dashboard cookie into launch arguments");
+      } else {
+        console.log("   ⚠️ Dashboard cookie not found in agent config");
+      }
+
+      // Reverting to profileUrls but with correct cookie this time.
+      // "Invalid input" on spreadsheetUrl suggests it validates for actual spreadsheet/CSV links.
+      // "Invalid argument" on profileUrls previously might have been due to missing/invalid sessionCookie logic.
+      // We start with standard newline-separated string for profileUrls.
+      phantomArgs.profileUrls = profileUrls.join('\n');
+
+      // Some agents prefer 'queries' or 'spreadsheetUrl' - but if using raw URLs, profileUrls is standard for Network Booster.
+      // If this fails, we might need to check if the agent expects 'serialized-arguments' or similar.
+
+      console.log("   📌 Using dashboard cookie configuration (auto mode) for this connection request.");
+      // We pass noSessionCookie: true because we either injected it manually above, or we want to rely on PB defaults (which usually requires empty launch args but here we have args).
+      // If we injected it, we definitely don't want .env cookie overwriting it (if that were possible).
+      const { containerId } = await this.launchPhantom(phantomId, phantomArgs, { noSessionCookie: true });
 
       console.log(`✅ Auto Connect Launched. Container ID: ${containerId}`);
 

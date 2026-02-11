@@ -498,7 +498,7 @@ export default function DashboardPage() {
                         </h1>
                         <div className="flex items-center gap-3 mt-1">
                             <p className="text-muted-foreground">
-                                Search, lead scraping & campaign analytics
+                                Search, lead generation & campaign analytics
                             </p>
                         </div>
                     </div>
