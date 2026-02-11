@@ -331,8 +331,8 @@ export default function CampaignDetailPage() {
         }
 
         const confirmMsg = leadsToProcess
-            ? `Scrape contact info (email/phone) for ${leadsToProcess.length} selected leads?`
-            : `Scrape contact info (email/phone) for leads missing contact info?`;
+            ? `Get contact info (email/phone) for ${leadsToProcess.length} selected leads?`
+            : `Get contact info (email/phone) for leads missing contact info?`;
 
         if (!confirm(`${confirmMsg}\n\n✅ Smart scraping: Only scrapes leads without contact info\n🛑 Click button again to stop while running\n\nContinue?`)) {
             return;
@@ -342,7 +342,7 @@ export default function CampaignDetailPage() {
             setScraping(true);
             setScrapeProgress({ status: 'Checking...', processed: 0, total: 0 });
 
-            console.log('🔍 Starting contact scrape...');
+            console.log('🔍 Starting to get contacts...');
             const res = await axios.post(`/api/campaigns/${id}/scrape-contacts`, {
                 leadIds: leadsToProcess
             });
@@ -363,7 +363,7 @@ export default function CampaignDetailPage() {
             setScrapeJobId(jobId);
 
             const needsScraping = res.data.needsScraping;
-            addToast(`🔍 Scraping ${needsScraping} leads... (Click button to stop)`, 'info');
+            addToast(`🔍 Getting contacts for ${needsScraping} leads... (Click button to stop)`, 'info');
 
             // Poll for status
             const pollInterval = setInterval(async () => {
@@ -386,21 +386,21 @@ export default function CampaignDetailPage() {
                         clearInterval(pollInterval);
                         setScraping(false);
                         setScrapeJobId(null);
-                        addToast(`✅ Scraping complete! Found ${status.found} contacts from ${status.processed} leads scraped. ${status.alreadyHadContacts || 0} already had info.`, 'success');
+                        addToast(`✅ Process complete! Found ${status.found} contacts from ${status.processed} leads. ${status.alreadyHadContacts || 0} already had info.`, 'success');
                         fetchCampaignDetails(); // Refresh to show new contact info
                         setTimeout(() => setScrapeProgress(null), 3000);
                     } else if (status.status === 'cancelled') {
                         clearInterval(pollInterval);
                         setScraping(false);
                         setScrapeJobId(null);
-                        addToast(`🛑 Scraping cancelled at ${status.processed}/${status.total} leads. Found ${status.found} contacts.`, 'info');
+                        addToast(`🛑 Process cancelled at ${status.processed}/${status.total} leads. Found ${status.found} contacts.`, 'info');
                         fetchCampaignDetails(); // Refresh to show partial results
                         setTimeout(() => setScrapeProgress(null), 2000);
                     } else if (status.status === 'error') {
                         clearInterval(pollInterval);
                         setScraping(false);
                         setScrapeJobId(null);
-                        addToast(`❌ Scraping error: ${status.error}`, 'error');
+                        addToast(`❌ Error: ${status.error}`, 'error');
                         setTimeout(() => setScrapeProgress(null), 3000);
                     }
                 } catch (pollError) {
@@ -443,7 +443,7 @@ export default function CampaignDetailPage() {
         );
 
         if (leadsWithEmail.length === 0) {
-            addToast('No leads have email addresses. Run Contact Scraper first!', 'error');
+            addToast('No leads have email addresses. Please Get Contact Info first!', 'error');
             return;
         }
 
@@ -498,7 +498,7 @@ export default function CampaignDetailPage() {
         );
 
         if (leadsWithPhone.length === 0) {
-            addToast('No leads have phone numbers. Run Contact Scraper first!', 'error');
+            addToast('No leads have phone numbers. Please Get Contact Info first!', 'error');
             return;
         }
 
@@ -1327,7 +1327,7 @@ export default function CampaignDetailPage() {
                                             scrapeProgress.cancelled ? "text-orange-400" : "text-green-400"
                                         )}>
                                             <Search className={cn("w-4 h-4", scraping && "animate-pulse")} />
-                                            Contact Scraping: {scrapeProgress.status}
+                                            Getting Contacts: {scrapeProgress.status}
                                             {scraping && (
                                                 <span className="text-xs text-muted-foreground">(Click button to stop)</span>
                                             )}
@@ -1388,7 +1388,7 @@ export default function CampaignDetailPage() {
                                         <p className="text-sm font-medium text-white mb-2">🎯 Multi-Channel Outreach System:</p>
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-muted-foreground">
                                             <div className="space-y-1">
-                                                <p className="text-green-400 font-medium flex items-center gap-1"><Search className="w-3 h-3" /> 1. Scrape Contacts</p>
+                                                <p className="text-green-400 font-medium flex items-center gap-1"><Search className="w-3 h-3" /> 1. Get Contacts</p>
                                                 <ul className="list-disc list-inside space-y-0.5 pl-2">
                                                     <li>Gets <strong className="text-white">email & phone</strong></li>
                                                     <li>From LinkedIn profiles</li>

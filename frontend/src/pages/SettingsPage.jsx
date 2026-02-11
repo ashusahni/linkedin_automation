@@ -155,7 +155,7 @@ const SettingsPage = () => {
             const res = await axios.post('/api/scraper/stop-scraping');
             addToast(res.data.message, 'info');
         } catch (error) {
-            addToast('Failed to stop scraping', 'error');
+            addToast('Failed to stop process', 'error');
         }
     };
 
@@ -168,7 +168,7 @@ const SettingsPage = () => {
                 addToast(res.data.message, 'success');
             }
         } catch (error) {
-            addToast('Failed to start scraping', 'error');
+            addToast('Failed to start process', 'error');
         } finally {
             setIsTriggering(false);
         }
@@ -191,16 +191,16 @@ const SettingsPage = () => {
                         <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
                                 <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
-                                <span className="text-sm font-medium">Scraping Contacts in Background</span>
+                                <span className="text-sm font-medium">Getting Contacts in Background</span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <Button 
-                                    variant="outline" 
-                                    size="sm" 
+                                <Button
+                                    variant="outline"
+                                    size="sm"
                                     className="h-7 text-xs border-red-500/50 text-red-500 hover:bg-red-500/10"
                                     onClick={handleStopScraping}
                                 >
-                                    Stop Scraping
+                                    Stop
                                 </Button>
                                 <div className="flex items-center gap-4 text-xs text-muted-foreground ml-2">
                                     <div className="flex items-center gap-1.5">
@@ -233,18 +233,18 @@ const SettingsPage = () => {
                                 <Zap className="w-5 h-5 text-primary" />
                             </div>
                             <div>
-                                <h3 className="text-sm font-semibold">Contact Scraper</h3>
+                                <h3 className="text-sm font-semibold">Get Contacts</h3>
                                 <p className="text-xs text-muted-foreground">Manual trigger to fetch emails/phones for approved leads.</p>
                             </div>
                         </div>
-                        <Button 
-                            variant="outline" 
-                            className="gap-2" 
+                        <Button
+                            variant="outline"
+                            className="gap-2"
                             onClick={handleManualTrigger}
                             disabled={isTriggering}
                         >
                             {isTriggering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                            Run Scraper Now
+                            Get Contacts Now
                         </Button>
                     </CardContent>
                 </Card>

@@ -596,33 +596,42 @@ export default function LeadsTable() {
         ? [...leads].sort((a, b) => computePreferenceScore(b) - computePreferenceScore(a))
         : leads;
 
-    const handleExportCSV = async () => {
+    const handleExport = async (format = 'csv') => {
         if (reviewStatusTab === 'rejected') {
             addToast('Cannot export rejected leads.', 'error');
             return;
         }
 
         try {
+            const params = {
+                query: searchTerm,
+                review_status: reviewStatusTab,
+                format: format
+            };
+
+            // Add other filters if present
+            if (metaFilters.title) params.title = metaFilters.title;
+            if (metaFilters.industry) params.industry = metaFilters.industry;
+            if (metaFilters.location) params.location = metaFilters.location;
+            if (metaFilters.company) params.company = metaFilters.company;
+            if (metaFilters.status !== 'all') params.status = metaFilters.status;
+            if (metaFilters.source !== 'all') params.source = metaFilters.source;
+            if (metaFilters.quality) params.quality = metaFilters.quality;
+
             const res = await axios.get('/api/leads/export', {
                 responseType: 'blob',
-                params: {
-                    query: searchTerm,
-                    // If in To Be Reviewed tab, export distinct set. If approved, export approved.
-                    // If filter mode advanced, pass that too? Need to align export filter logic with table logic.
-                    // For now, pass review_status based on tab to match view.
-                    review_status: reviewStatusTab
-                }
+                params
             });
             const url = window.URL.createObjectURL(new Blob([res.data]));
             const link = document.createElement('a');
             link.href = url;
-            link.setAttribute('download', `leads_${new Date().toISOString().split('T')[0]}.csv`);
+            link.setAttribute('download', `leads_${new Date().toISOString().split('T')[0]}.${format}`);
             document.body.appendChild(link);
             link.click();
             link.remove();
         } catch (error) {
-            console.error('Failed to export CSV', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Failed to export CSV';
+            console.error(`Failed to export ${format.toUpperCase()}`, error);
+            const errorMsg = error.response?.data?.error || error.message || `Failed to export ${format.toUpperCase()}`;
             addToast(`Error: ${errorMsg}`, 'error');
         }
     };
@@ -762,7 +771,7 @@ export default function LeadsTable() {
         const leadIds = Array.from(selectedLeads);
         try {
             setEnriching(true);
-            addToast(`🚀 Starting contact scraper for ${leadIds.length > 0 ? leadIds.length : 'all missing'} leads...`, 'info');
+            addToast(`🚀 Starting to get contacts for ${leadIds.length > 0 ? leadIds.length : 'all missing'} leads...`, 'info');
 
             const res = await axios.post('/api/scraper/scrape-contacts', { leadIds });
 
@@ -770,13 +779,12 @@ export default function LeadsTable() {
                 if (res.data.count === 0) {
                     addToast('No leads found that need contact info.', 'warning');
                 } else {
-                    addToast(res.data.message || 'Scraper started successfully', 'success');
+                    addToast(res.data.message || 'Started getting contacts', 'success');
                     setSelectedLeads(new Set());
                 }
             }
         } catch (error) {
             console.error('Scrape failed:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Failed to start scraper';
             addToast(`Error: ${errorMsg}`, 'error');
         } finally {
             setEnriching(false);
@@ -819,12 +827,25 @@ export default function LeadsTable() {
                                         disabled={enriching}
                                     >
                                         <Database className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                        Scrape Missing Contacts
+                                        Get Missing Contacts
                                     </Button>
                                 )}
-                                <Button className="gap-2 shadow-sm" onClick={handleExportCSV}>
-                                    <Download className="h-4 w-4" /> Export CSV
-                                </Button>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button className="gap-2 shadow-sm">
+                                            <Download className="h-4 w-4" /> Export
+                                            <ChevronDown className="h-4 w-4" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => handleExport('csv')} className="gap-2">
+                                            <Database className="h-4 w-4" /> Export CSV
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleExport('xlsx')} className="gap-2">
+                                            <Database className="h-4 w-4" /> Export Excel
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             </div>
                         </div>
 
@@ -1260,7 +1281,7 @@ export default function LeadsTable() {
                                                 disabled={enriching}
                                             >
                                                 <Database className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                                Scrape Contacts
+                                                Get Contacts
                                             </Button>
                                         )}
                                         <Button size="sm" variant="default" onClick={() => {

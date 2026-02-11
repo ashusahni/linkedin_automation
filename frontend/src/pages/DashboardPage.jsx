@@ -54,6 +54,12 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
 import { cn } from '../lib/utils';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu';
 import PageGuide from '../components/PageGuide';
 
 const PERIODS = [
@@ -163,6 +169,7 @@ export default function DashboardPage() {
     // CSV Import State
     const [uploading, setUploading] = useState(false);
     const [uploadResult, setUploadResult] = useState(null);
+    const [importType, setImportType] = useState('csv'); // 'csv' or 'excel'
     const fileInputRef = useRef(null);
 
     useEffect(() => {
@@ -218,7 +225,8 @@ export default function DashboardPage() {
         }
     };
 
-    const handleFileSelect = () => {
+    const handleFileSelect = (type) => {
+        setImportType(type);
         fileInputRef.current?.click();
     };
 
@@ -226,7 +234,7 @@ export default function DashboardPage() {
         const file = event.target.files?.[0];
         if (!file) return;
 
-        if (!file.name.endsWith('.csv')) {
+        if (importType === 'csv' && !file.name.endsWith('.csv')) {
             setUploadResult({
                 success: false,
                 message: 'Please upload a CSV file'
@@ -234,14 +242,27 @@ export default function DashboardPage() {
             return;
         }
 
+        if (importType === 'excel' && !file.name.match(/\.(xlsx|xls)$/)) {
+            setUploadResult({
+                success: false,
+                message: 'Please upload an Excel file (.xlsx or .xls)'
+            });
+            return;
+        }
+
         const formData = new FormData();
-        formData.append('csvFile', file);
+        if (importType === 'csv') {
+            formData.append('csvFile', file);
+        } else {
+            formData.append('excelFile', file);
+        }
 
         try {
             setUploading(true);
             setUploadResult(null);
 
-            const res = await axios.post('/api/leads/import-csv', formData, {
+            const endpoint = importType === 'csv' ? '/api/leads/import-csv' : '/api/leads/import-excel';
+            const res = await axios.post(endpoint, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
 
@@ -255,7 +276,7 @@ export default function DashboardPage() {
             fetchAnalytics();
         } catch (error) {
             console.error('Upload failed:', error);
-            let errorMessage = 'Failed to upload CSV file';
+            let errorMessage = `Failed to upload ${importType.toUpperCase()} file`;
             if (error.response?.data?.error) errorMessage = error.response.data.error;
             else if (error.message) errorMessage = error.message;
 
@@ -506,7 +527,7 @@ export default function DashboardPage() {
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".csv"
+                        accept={importType === 'csv' ? ".csv" : ".xlsx,.xls"}
                         onChange={handleFileUpload}
                         className="hidden"
                     />
@@ -532,16 +553,29 @@ export default function DashboardPage() {
                             {!hasProfileUrl && <span className="text-xs ml-1 opacity-70">(Set profile URL first)</span>}
                         </Button>
 
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleFileSelect}
-                            disabled={uploading}
-                            className="gap-2 border-primary/20 hover:bg-primary/5 font-bold tracking-widest w-full"
-                        >
-                            <Upload className="h-4 w-4" />
-                            {uploading ? "IMPORTING..." : "IMPORTS"}
-                        </Button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={uploading}
+                                    className="gap-2 border-primary/20 hover:bg-primary/5 font-bold tracking-widest w-full"
+                                >
+                                    <Upload className="h-4 w-4" />
+                                    {uploading ? "IMPORTING..." : "IMPORTS"}
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-[180px]">
+                                <DropdownMenuItem onClick={() => handleFileSelect('csv')} className="gap-2 cursor-pointer">
+                                    <FileText className="h-4 w-4" />
+                                    <span>Import CSV</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleFileSelect('excel')} className="gap-2 cursor-pointer">
+                                    <FileText className="h-4 w-4 text-green-600" />
+                                    <span>Import Excel</span>
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </div>
 
                     {/* Upload Result Alert */}

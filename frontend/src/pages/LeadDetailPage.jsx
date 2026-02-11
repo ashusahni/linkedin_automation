@@ -411,7 +411,7 @@ export default function LeadDetailPage() {
                                 <span className="block">Extra context gathered to help AI personalize messages.</span>
                                 {lead.linkedin_url && (
                                     <span className="block text-xs mt-1.5 text-muted-foreground">
-                                        Scraped from this lead&apos;s LinkedIn profile — the link was sent automatically to the Profile Scraper.{' '}
+                                        Retrieved automatically from this lead&apos;s LinkedIn profile — the link was processed via the Profile Service.{' '}
                                         <a
                                             href={lead.linkedin_url}
                                             target="_blank"
