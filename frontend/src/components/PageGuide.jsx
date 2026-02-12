@@ -16,7 +16,7 @@ const guides = {
   },
   search: {
     title: "Lead Search Guide",
-    description: "Search for new leads using LinkedIn keywords. Use the Phantom search-import to pull profiles directly into your database for review.",
+    description: "Search for new leads using LinkedIn keywords. Use the External Data Source to pull profiles directly into your database for review.",
     nextPage: {
       name: "Leads Management",
       path: "/leads",
@@ -64,7 +64,7 @@ export default function PageGuide({ pageKey }) {
         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
           <HelpCircle className="h-24 w-24 text-primary rotate-12" />
         </div>
-        
+
         <CardContent className="p-6 relative z-10">
           <div className="flex flex-col md:flex-row gap-8 items-center">
             <div className="flex-1 space-y-3 text-center md:text-left">
@@ -87,10 +87,10 @@ export default function PageGuide({ pageKey }) {
                   {guide.nextPage.info}
                 </p>
               </div>
-              
-              <Button 
+
+              <Button
                 onClick={() => navigate(guide.nextPage.path)}
-                variant="default" 
+                variant="default"
                 size="sm"
                 className="gap-2 group/btn"
               >
@@ -101,7 +101,7 @@ export default function PageGuide({ pageKey }) {
           </div>
         </CardContent>
       </Card>
-      
+
       <div className="mt-4 flex items-center justify-center gap-6 text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-medium opacity-50">
         <span className="h-px w-12 bg-border" />
         End of {pageKey} section

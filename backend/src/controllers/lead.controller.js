@@ -1615,15 +1615,127 @@ export async function moveToReview(req, res) {
 
 // GET /api/leads/review-stats
 // Get counts for each review status
+// GET /api/leads/review-stats
+// Get counts for each review status
 export async function getReviewStats(req, res) {
   try {
-    const result = await pool.query(`
-      SELECT 
-        review_status,
-        COUNT(*) as count
-      FROM leads
-      GROUP BY review_status
-    `);
+    const {
+      connection_degree,
+      quality,
+      quality_score,
+      industry,
+      title,
+      company,
+      location,
+      status
+    } = req.query;
+
+    const params = [];
+    let whereConditions = [];
+
+    // Connection Degree Filter
+    if (connection_degree && connection_degree.trim()) {
+      whereConditions.push(`connection_degree ILIKE $${params.length + 1}`);
+      params.push(`%${connection_degree.trim()}%`);
+    }
+
+    // Industry Filter
+    if (industry && industry.trim()) {
+      whereConditions.push(`industry ILIKE $${params.length + 1}`);
+      params.push(`%${industry.trim()}%`);
+    }
+
+    // Title Filter
+    if (title && title.trim()) {
+      whereConditions.push(`title ILIKE $${params.length + 1}`);
+      params.push(`%${title.trim()}%`);
+    }
+
+    // Company Filter
+    if (company && company.trim()) {
+      whereConditions.push(`company ILIKE $${params.length + 1}`);
+      params.push(`%${company.trim()}%`);
+    }
+
+    // Location Filter
+    if (location && location.trim()) {
+      whereConditions.push(`location ILIKE $${params.length + 1}`);
+      params.push(`%${location.trim()}%`);
+    }
+
+    // Status Filter (Lead Status, not Review Status)
+    if (status && status !== 'all') {
+      whereConditions.push(`status = $${params.length + 1}`);
+      params.push(status);
+    }
+
+    const whereClause = whereConditions.length > 0
+      ? 'WHERE ' + whereConditions.join(' AND ')
+      : '';
+
+    // Check for Quality / Scoring request
+    const qScore = quality_score || quality;
+    let result;
+
+    if (qScore) {
+      // --- DYNAMIC SCORING PATH (CTE) ---
+      const preferredKeywords = (process.env.PREFERRED_COMPANY_KEYWORDS || '')
+        .toLowerCase()
+        .split(',')
+        .map(k => k.trim())
+        .filter(Boolean);
+
+      let scoreExp = '0';
+      if (preferredKeywords.length > 0) {
+        const likes = preferredKeywords.map(k => {
+          const safeK = k.replace(/'/g, "''");
+          return `(COALESCE(company, '') ILIKE '%${safeK}%' OR COALESCE(title, '') ILIKE '%${safeK}%')`;
+        }).join(' OR ');
+        scoreExp += ` + (CASE WHEN ${likes} THEN 50 ELSE 0 END)`;
+      }
+
+      const scores = qScore.split(',').map(s => s.trim().toLowerCase());
+
+      let rankCondition = [];
+      if (scores.includes('primary')) rankCondition.push('pct_rank <= 0.20');
+      if (scores.includes('secondary')) rankCondition.push('(pct_rank > 0.20 AND pct_rank <= 0.50)');
+      if (scores.includes('tertiary')) rankCondition.push('pct_rank > 0.50');
+
+      const rankClause = rankCondition.length > 0 ? `(${rankCondition.join(' OR ')})` : '1=1';
+
+      const qualityQuery = `
+         WITH scored_leads AS (
+           SELECT *,
+             (${scoreExp}) AS score
+           FROM leads
+           ${whereClause}
+         ),
+         ranked_leads AS (
+            SELECT *,
+              PERCENT_RANK() OVER (ORDER BY score DESC, created_at DESC) as pct_rank
+            FROM scored_leads
+         )
+         SELECT 
+           review_status,
+           COUNT(*) as count
+         FROM ranked_leads
+         WHERE ${rankClause}
+         GROUP BY review_status
+       `;
+
+      result = await pool.query(qualityQuery, params);
+
+    } else {
+      // --- STANDARD PATH (No quality scoring) ---
+      result = await pool.query(`
+          SELECT 
+            review_status,
+            COUNT(*) as count
+          FROM leads
+          ${whereClause}
+          GROUP BY review_status
+        `, params);
+    }
 
     // Format response with default values
     const stats = {
@@ -1634,18 +1746,27 @@ export async function getReviewStats(req, res) {
     };
 
     result.rows.forEach(row => {
-      const status = row.review_status || 'approved'; // Default for null
-      stats[status] = parseInt(row.count, 10);
+      // Use 'approved' as default if null, matching previous behavior/expectations
+      // or if review_status is null, it typically meant imported but not reviewed yet?
+      // Actually leads default to 'new' status, review_status might be null.
+      const status = row.review_status || 'approved';
+      if (stats[status] !== undefined) {
+        stats[status] = parseInt(row.count, 10);
+      }
       stats.total += parseInt(row.count, 10);
     });
 
-    res.json({ reviewStats: stats });
-
+    res.json({
+      success: true,
+      reviewStats: stats
+    });
   } catch (err) {
-    console.error('❌ Review stats error:', err);
+    console.error('getReviewStats error:', err);
     res.status(500).json({ error: err.message });
   }
 }
+
+
 
 // GET /api/leads/export
 export async function exportLeads(req, res) {

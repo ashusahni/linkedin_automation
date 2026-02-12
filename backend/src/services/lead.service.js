@@ -22,6 +22,23 @@ export async function saveLead(lead) {
       profile_image = COALESCE(EXCLUDED.profile_image, leads.profile_image),
       -- Always update connection_degree with new data from PhantomBuster (don't keep NULL)
       connection_degree = EXCLUDED.connection_degree,
+      -- Auto-promote to approved if:
+      -- 1. New connection_degree is '1st' (case insensitive)
+      -- 2. New review_status is 'approved' (from auto-approval logic)
+      -- Never downgrade from 'approved' back to 'to_be_reviewed'
+      review_status = CASE
+        WHEN LOWER(EXCLUDED.connection_degree) LIKE '%1st%' THEN 'approved'
+        WHEN EXCLUDED.review_status = 'approved' THEN 'approved'
+        WHEN leads.review_status = 'approved' THEN 'approved'
+        ELSE COALESCE(EXCLUDED.review_status, leads.review_status)
+      END,
+      -- Set approved_at timestamp when promoting to approved
+      approved_at = CASE
+        WHEN (LOWER(EXCLUDED.connection_degree) LIKE '%1st%' OR EXCLUDED.review_status = 'approved') 
+             AND leads.approved_at IS NULL 
+        THEN NOW()
+        ELSE leads.approved_at
+      END,
       updated_at = NOW()
     RETURNING (xmax = 0) AS inserted;
   `;

@@ -4,6 +4,7 @@ import config from "./config/index.js";
 import { initScheduler } from "./services/scheduler.service.js";
 import { runMigrations } from "./db/migrations.js";
 import logger from "./utils/logger.js";
+import industryHierarchyService from "./services/industryHierarchy.service.js";
 
 const PORT = config.server.port;
 
@@ -29,6 +30,16 @@ async function init() {
     logger.error("❌ Migration failed:", err.message);
     // Don't exit - allow server to start even if migrations fail
     // (they might already be applied)
+  }
+
+  // Load industry hierarchy data
+  try {
+    logger.info("📊 Loading industry hierarchy data...");
+    await industryHierarchyService.loadIndustryData();
+    logger.info("✅ Industry hierarchy loaded successfully");
+  } catch (err) {
+    logger.error("❌ Failed to load industry data:", err.message);
+    // Continue - server can still function without industry data
   }
 
   app.get("/", (req, res) => {

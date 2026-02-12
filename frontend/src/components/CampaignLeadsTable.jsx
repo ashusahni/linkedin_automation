@@ -167,7 +167,7 @@ export default function CampaignLeadsTable({ leads, onContactLead, onAutoConnect
                                             size="sm"
                                             onClick={() => onContactLead && onContactLead(lead)}
                                             className="bg-purple-600 hover:bg-purple-500"
-                                            title="Send LinkedIn connection request via PhantomBuster"
+                                            title="Send LinkedIn connection request via Data Source"
                                         >
                                             <LinkIcon className="w-3 h-3 mr-1" />
                                             Auto Connect

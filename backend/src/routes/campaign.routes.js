@@ -18,13 +18,15 @@ import {
     getCampaignTemplates,
     scrapeContacts,
     getScrapeStatus,
-    autoConnectCampaign
+    autoConnectCampaign,
+    estimateAudience
 } from '../controllers/campaign.controller.js';
 
 const router = Router();
 
 router.get('/', getCampaigns);
 router.get('/templates', getCampaignTemplates);
+router.post('/estimate-audience', estimateAudience);
 router.post('/', createCampaign);
 router.get('/:id', getCampaignById);
 router.put('/:id', updateCampaign);

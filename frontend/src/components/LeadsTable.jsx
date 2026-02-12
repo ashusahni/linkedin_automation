@@ -139,6 +139,40 @@ export default function LeadsTable() {
     });
     const [showRejectModal, setShowRejectModal] = useState(false);
     const [rejectReason, setRejectReason] = useState('');
+    const [deleting, setDeleting] = useState(false);
+
+    const handleBulkDeleteRejected = async () => {
+        const isDeleteAll = selectedLeads.size === leads.length && leads.length > 0;
+
+        const confirmMessage = isDeleteAll
+            ? 'Are you sure you want to PERMANENTLY delete ALL leads from the Rejected tab? This action cannot be undone.'
+            : `Are you sure you want to PERMANENTLY delete these ${selectedLeads.size} rejected leads? This action cannot be undone.`;
+
+        if (!window.confirm(confirmMessage)) {
+            return;
+        }
+
+        try {
+            setDeleting(true);
+
+            if (isDeleteAll) {
+                await axios.delete('/api/leads/rejected/all');
+            } else {
+                await axios.post('/api/leads/bulk-delete', { leadIds: Array.from(selectedLeads) });
+            }
+
+            addToast(`✅ ${isDeleteAll ? 'All' : selectedLeads.size} rejected leads permanently deleted`, 'success');
+            setSelectedLeads(new Set());
+            fetchLeads();
+            fetchStats();
+        } catch (error) {
+            console.error('Delete rejected failed:', error);
+            const errorMsg = error.response?.data?.error || error.message || 'Failed to delete rejected leads';
+            addToast(`Error: ${errorMsg}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
 
     // Selection State
     const [selectedLeads, setSelectedLeads] = useState(new Set());
@@ -156,16 +190,28 @@ export default function LeadsTable() {
     const [importProgress, setImportProgress] = useState(null);
 
     // Fetch data on mount
+    // Fetch data on mount
     useEffect(() => {
-        // If industry or quality or connection param is present, expand filters automatically
-        if (searchParams.get('industry') || searchParams.get('quality') || searchParams.get('connection_degree')) {
-            setShowMetaFilters(true);
-            setExpandedSections((prev) => ({
+        // Apply filters from URL params without expanding the panel
+        const connectionDegree = searchParams.get('connection_degree');
+        const quality = searchParams.get('quality');
+        const industry = searchParams.get('industry');
+
+        if (connectionDegree || quality || industry) {
+            setMetaFilters(prev => ({
                 ...prev,
-                leadInformation: true,
-                quickFilters: !!searchParams.get('quality') // Expand quick filters if quality is set
+                connectionDegree: connectionDegree || prev.connectionDegree,
+                industry: industry || prev.industry
             }));
+
+            if (quality) {
+                setActiveQuickFilters([quality]);
+            }
         }
+
+        // We explicitly DO NOT set showMetaFilters to true here.
+        // It stays collapsed by default.
+
         fetchLeads();
         fetchStats();
         fetchCampaigns();
@@ -408,11 +454,44 @@ export default function LeadsTable() {
         }
     };
 
-    const fetchStats = async () => {
+    const fetchStats = async (overrides = {}) => {
         try {
+            const params = {};
+
+            const currentMetaFilters = overrides.metaFilters || metaFilters;
+            const currentQuickFilters = overrides.quickFilters || activeQuickFilters;
+
+            // Add connection degree filter
+            if (currentMetaFilters.connectionDegree) {
+                params.connection_degree = currentMetaFilters.connectionDegree;
+            }
+
+            // Add quality filter from quick filters (Primary, Secondary, Tertiary)
+            if (currentQuickFilters.length > 0) {
+                const qualityFilters = currentQuickFilters.filter(f => ['primary', 'secondary', 'tertiary'].includes(f.toLowerCase()));
+                if (qualityFilters.length > 0) {
+                    params.quality_score = qualityFilters.join(',');
+                }
+            }
+
+            // Also include other meta filters if we want stats to be fully dynamic based on ALL filters
+            if (currentMetaFilters.industry) params.industry = currentMetaFilters.industry;
+            if (currentMetaFilters.title) params.title = currentMetaFilters.title;
+            if (currentMetaFilters.company) params.company = currentMetaFilters.company;
+            if (currentMetaFilters.location) params.location = currentMetaFilters.location;
+            if (currentMetaFilters.status !== 'all') params.status = currentMetaFilters.status;
+
+
             const [statsRes, reviewRes] = await Promise.all([
-                axios.get('/api/leads/stats'),
-                axios.get('/api/leads/review-stats')
+                // /stats endpoint is for overall system stats (Total Leads, etc). 
+                // If we want THAT to be filtered too, we need to pass params there as well.
+                // But usually "Total Database" stats might be separate.
+                // The user specifically asked for "Qualified Leads, Review, and Rejected tabs" 
+                // which come from /review-stats.
+                axios.get('/api/leads/stats'), // Keeping global stats global for now, or should they filter too?
+                // "All counts across the system must reflect the filtered dataset only" -> implies global stats too?
+                // Let's stick to review-stats first as that's the explicit tab request.
+                axios.get('/api/leads/review-stats', { params })
             ]);
 
             setStats(statsRes.data);
@@ -421,7 +500,6 @@ export default function LeadsTable() {
             }
         } catch (error) {
             console.error("Failed to fetch stats", error);
-            // Don't show toast on stats error to avoid annoyance
         }
     };
 
@@ -458,6 +536,7 @@ export default function LeadsTable() {
     const handleSearch = (e) => {
         e.preventDefault();
         fetchLeads();
+        fetchStats();
     };
 
     const handleResetFilters = () => {
@@ -482,6 +561,7 @@ export default function LeadsTable() {
 
         // Fetch with empty overrides
         fetchLeads(false, emptyFilters);
+        fetchStats({ metaFilters: emptyFilters, quickFilters: [] });
     };
 
     const toggleQuickFilter = (id) => {
@@ -504,6 +584,7 @@ export default function LeadsTable() {
     useEffect(() => {
         // Debounce slightly or just fetch
         fetchLeads();
+        fetchStats();
     }, [activeQuickFilters]);
 
 
@@ -640,13 +721,13 @@ export default function LeadsTable() {
         try {
             setImportingLeads(true);
             setImportProgress({ status: 'Starting...', progress: 0 });
-            addToast('Starting Phantom search-import...', 'info');
+            addToast('Starting data import...', 'info');
 
             const body = searchTerm.trim() ? { query: searchTerm.trim() } : {};
             const res = await axios.post('/api/phantom/search-import', body);
             const jobId = res.data?.jobId;
             if (!jobId) {
-                addToast('No job ID returned from search-import', 'error');
+                addToast('No task ID returned from import', 'error');
                 setImportingLeads(false);
                 setImportProgress(null);
                 return;
@@ -771,15 +852,15 @@ export default function LeadsTable() {
         const leadIds = Array.from(selectedLeads);
         try {
             setEnriching(true);
-            addToast(`🚀 Starting to get contacts for ${leadIds.length > 0 ? leadIds.length : 'all missing'} leads...`, 'info');
+            addToast(`🚀 Starting to enrich contact info for ${leadIds.length > 0 ? leadIds.length : 'all missing'} leads...`, 'info');
 
             const res = await axios.post('/api/scraper/scrape-contacts', { leadIds });
 
             if (res.data.success) {
                 if (res.data.count === 0) {
-                    addToast('No leads found that need contact info.', 'warning');
+                    addToast('No leads found that need enrichment.', 'warning');
                 } else {
-                    addToast(res.data.message || 'Started getting contacts', 'success');
+                    addToast(res.data.message || 'Started enrichment', 'success');
                     setSelectedLeads(new Set());
                 }
             }
@@ -789,6 +870,40 @@ export default function LeadsTable() {
         } finally {
             setEnriching(false);
         }
+    };
+
+    const toggleConnectionDegree = (degree) => {
+        const newValue = metaFilters.connectionDegree === degree ? '' : degree;
+        const newFilters = { ...metaFilters, connectionDegree: newValue };
+        setMetaFilters(newFilters);
+        // fetchLeads will be triggered by state change if we depend on it, 
+        // but here we call it manually to be safe/explicit or if we want to await?
+        // Actually, we are modifying state, so we should rely on useEffect or call fetchLeads with new state
+        // In previous implementation we called fetchLeads(false, newFilters) which is good.
+        // We ALSO need to fetchStats with the new filter.
+        fetchLeads(false, newFilters);
+
+        // We need to fetchStats with the new filter. 
+        // Since setMetaFilters is async, we use the value we just calculated.
+        // But fetchStats reads from state 'metaFilters'. We need to pass override or wait.
+        // Let's modify fetchStats to accept overrides or simply wait for re-render if we useEffect on metaFilters?
+        // Simplest: just pass the override to fetchLeads, and for fetchStats we might need a similar mechanism 
+        // OR we can make a small useEffect for connectionDegree specifically to trigger fetchStats.
+        // Let's update toggleConnectionDegree to handle this temporarily or update fetchStats signature.
+        // Updating fetchStats signature is cleanest.
+        updateStatsWithFilter(newValue);
+    };
+
+    const updateStatsWithFilter = async (degree) => {
+        try {
+            const params = {};
+            if (degree) params.connection_degree = degree;
+
+            const res = await axios.get('/api/leads/review-stats', { params });
+            if (res.data?.reviewStats) {
+                setReviewStats(res.data.reviewStats);
+            }
+        } catch (e) { console.error(e); }
     };
 
     return (
@@ -827,25 +942,45 @@ export default function LeadsTable() {
                                         disabled={enriching}
                                     >
                                         <Database className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                        Get Missing Contacts
+                                        Enrich Contact Info
                                     </Button>
                                 )}
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                         <Button className="gap-2 shadow-sm">
-                                            <Download className="h-4 w-4" /> Export
+                                            <Download className="h-4 w-4" /> Export Report
                                             <ChevronDown className="h-4 w-4" />
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
                                         <DropdownMenuItem onClick={() => handleExport('csv')} className="gap-2">
-                                            <Database className="h-4 w-4" /> Export CSV
+                                            <Database className="h-4 w-4" /> Export Report (CSV)
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleExport('xlsx')} className="gap-2">
-                                            <Database className="h-4 w-4" /> Export Excel
+                                            <Database className="h-4 w-4" /> Export Report (Excel)
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center py-2">
+                            <span className="text-sm font-medium mr-2 text-muted-foreground">Network Proximity:</span>
+                            <div className="flex items-center bg-muted/40 rounded-lg p-1 border border-border/50 gap-1">
+                                {['1st', '2nd', '3rd'].map((degree) => (
+                                    <button
+                                        key={degree}
+                                        onClick={() => toggleConnectionDegree(degree)}
+                                        className={cn(
+                                            "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200",
+                                            metaFilters.connectionDegree === degree
+                                                ? "bg-primary text-primary-foreground shadow-sm scale-105"
+                                                : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                        )}
+                                    >
+                                        {degree} Degree
+                                    </button>
+                                ))}
                             </div>
                         </div>
 
@@ -1035,7 +1170,7 @@ export default function LeadsTable() {
                                                         </div>
                                                         <div className="space-y-1.5">
                                                             <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                                                                <UserPlus className="h-3 w-3" /> Connection Degree
+                                                                <UserPlus className="h-3 w-3" /> Network Proximity
                                                             </label>
                                                             <Input
                                                                 placeholder="e.g. 1st, 2nd"
@@ -1252,6 +1387,18 @@ export default function LeadsTable() {
                                     </Button>
                                 )}
 
+                                {reviewStatusTab === 'rejected' && (
+                                    <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={handleBulkDeleteRejected}
+                                        disabled={deleting}
+                                    >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        {deleting ? 'Deleting...' : (selectedLeads.size === leads.length ? 'Delete All Rejected' : `Delete (${selectedLeads.size})`)}
+                                    </Button>
+                                )}
+
                                 <div className="w-px h-6 bg-primary/20 mx-1" />
 
                                 <Button variant="ghost" size="sm" onClick={() => setSelectedLeads(new Set())} >
@@ -1281,7 +1428,7 @@ export default function LeadsTable() {
                                                 disabled={enriching}
                                             >
                                                 <Database className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                                Get Contacts
+                                                Enrich Contact Info
                                             </Button>
                                         )}
                                         <Button size="sm" variant="default" onClick={() => {
@@ -1301,7 +1448,7 @@ export default function LeadsTable() {
                             <div className="flex items-center gap-3">
                                 <Loader2 className="h-5 w-5 text-primary animate-spin" />
                                 <p className="text-sm font-medium text-primary">
-                                    Enriching leads via PhantomBuster and generating AI messages... This may take a few minutes.
+                                    Enriching leads via Data Source and generating AI messages... This may take a few minutes.
                                 </p>
                             </div>
                         </div>
@@ -1322,7 +1469,7 @@ export default function LeadsTable() {
                                     <TableHead>Name</TableHead>
                                     <TableHead>Company</TableHead>
                                     <TableHead>Title</TableHead>
-                                    <TableHead>Status</TableHead>
+
                                     {/* Contact column only visible in Approved tab */}
                                     {reviewStatusTab === 'approved' && (
                                         <TableHead className="min-w-[180px]">Contact</TableHead>
@@ -1334,13 +1481,13 @@ export default function LeadsTable() {
                             <TableBody>
                                 {loading ? (
                                     <TableRow>
-                                        <TableCell colSpan={7} className="p-0">
-                                            <TableSkeleton rows={8} cols={7} />
+                                        <TableCell colSpan={reviewStatusTab === 'approved' ? 7 : 6} className="p-0">
+                                            <TableSkeleton rows={8} cols={reviewStatusTab === 'approved' ? 7 : 6} />
                                         </TableCell>
                                     </TableRow>
                                 ) : leads.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={7} className="h-24 text-center">
+                                        <TableCell colSpan={reviewStatusTab === 'approved' ? 7 : 6} className="h-24 text-center">
                                             No leads found.
                                         </TableCell>
                                     </TableRow>
@@ -1394,24 +1541,7 @@ export default function LeadsTable() {
                                                     {lead.title || '-'}
                                                 </span>
                                             </TableCell>
-                                            <TableCell>
-                                                <div className="flex flex-col gap-1.5 items-start">
-                                                    {lead.review_status === 'to_be_reviewed' ? (
-                                                        <span className="text-xs font-semibold text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded border border-yellow-200">Review</span>
-                                                    ) : (
-                                                        <span className={cn(
-                                                            "text-xs px-2 py-0.5 rounded border font-medium uppercase tracking-wider",
-                                                            lead.review_status === 'approved' ? "bg-green-50 text-green-700 border-green-200" :
-                                                                lead.review_status === 'rejected' ? "bg-red-50 text-red-700 border-red-200" :
-                                                                    "text-muted-foreground border-transparent"
-                                                        )}>
-                                                            {lead.review_status === 'approved' && 'Qualified'}
-                                                            {lead.review_status === 'rejected' && 'Rejected'}
-                                                            {!lead.review_status && lead.status}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </TableCell>
+
                                             {/* Contact column only visible in Approved tab */}
                                             {reviewStatusTab === 'approved' && (
                                                 <TableCell className="min-w-[180px]">
@@ -1564,7 +1694,7 @@ export default function LeadsTable() {
                                             <Sparkles className="h-3 w-3" /> AI Enrichment Flow:
                                         </p>
                                         <ul className="list-disc list-inside space-y-1">
-                                            <li>Scrape full LinkedIn bio & activity via PhantomBuster</li>
+                                            <li>Enrich full LinkedIn bio & activity via Data Source</li>
                                             <li>Generate unique personalized message via OpenAI/Ollama</li>
                                             <li>Add messages to Campaign Approval Queue</li>
                                         </ul>

@@ -7,10 +7,10 @@ import { Badge } from '../components/ui/badge';
 import { useToast } from '../components/ui/toast';
 import PageGuide from '../components/PageGuide';
 
-/** PhantomBuster import source: CONNECTIONS_EXPORT_PHANTOM vs SEARCH_EXPORT_PHANTOM */
+/** External Data Source import: CONNECTIONS_EXPORT_SOURCE vs SEARCH_EXPORT_SOURCE */
 const IMPORT_SOURCE_OPTIONS = [
-    { value: 'connections_export', label: 'Import My Connections', envLabel: 'CONNECTIONS_EXPORT_PHANTOM', description: 'Your 1st-degree LinkedIn connections', icon: Share2 },
-    { value: 'search_export', label: 'Explore Beyond My Network', envLabel: 'SEARCH_EXPORT_PHANTOM', description: 'Find 2nd & 3rd-degree LinkedIn leads', icon: Search },
+    { value: 'connections_export', label: 'Import My Connections', envLabel: 'CONNECTIONS_EXPORT_SOURCE', description: 'Your 1st-degree LinkedIn connections', icon: Share2 },
+    { value: 'search_export', label: 'Explore Beyond My Network', envLabel: 'SEARCH_EXPORT_SOURCE', description: 'Find 2nd & 3rd-degree LinkedIn leads', icon: Search },
 ];
 
 export default function LeadSearchPage() {
@@ -40,7 +40,7 @@ export default function LeadSearchPage() {
             if (response.data.totalLeads > 0) {
                 addToast(`✅ Found ${response.data.totalLeads} leads and saved ${response.data.savedToDatabase} to database!`, 'success');
             } else {
-                addToast('⚠️ No leads returned from PhantomBuster.', 'warning');
+                addToast('⚠️ No new Leads found', 'warning');
             }
         } catch (err) {
             const backend = err.response?.data;
@@ -65,7 +65,7 @@ export default function LeadSearchPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Lead Search</h1>
                     <p className="text-muted-foreground mt-1">
-                        Run PhantomBuster agents to import leads directly into the system.
+                        Run advanced data strategies to import leads directly into the system.
                     </p>
                 </div>
             </div>
@@ -74,10 +74,10 @@ export default function LeadSearchPage() {
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                         <Linkedin className="h-5 w-5 text-[#0077b5]" />
-                        Select Import Source
+                        Select Data Source
                     </CardTitle>
                     <CardDescription>
-                        Choose which PhantomBuster phantom to run. Configuration (Search URL, limits, etc.) is managed in your PhantomBuster dashboard.
+                        Choose which data strategy to run. Configuration (Search URL, limits, etc.) is managed in your external provider settings.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -111,7 +111,7 @@ export default function LeadSearchPage() {
                                 {loading ? (
                                     <>
                                         <Loader2 className="h-5 w-5 animate-spin" />
-                                        Running Phantom...
+                                        Syncing Data...
                                     </>
                                 ) : (
                                     <>
@@ -137,7 +137,7 @@ export default function LeadSearchPage() {
                             Import Completed Successfully
                         </CardTitle>
                         <CardDescription className="flex items-center gap-2 mt-1">
-                            Source: <Badge variant="outline" className="font-mono bg-green-500/10 text-green-700 border-green-500/30">{importSource}</Badge>
+                            Data Source: <Badge variant="outline" className="font-mono bg-green-500/10 text-green-700 border-green-500/30">{importSource}</Badge>
                         </CardDescription>
                     </CardHeader>
                     <CardContent>

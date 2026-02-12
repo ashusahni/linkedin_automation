@@ -8,8 +8,8 @@ import { ScottishChemicalIcon } from '../ui/ScottishChemicalLogo';
 
 const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
-    { id: 'search', label: 'Lead Search', icon: Search, path: '/search' },
-    { id: 'leads', label: 'Leads', icon: Users, path: '/leads' },
+    { id: 'search', label: 'Contact Search', icon: Search, path: '/search' },
+    { id: 'leads', label: 'Contacts', icon: Users, path: '/leads' },
     { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
 ];
@@ -58,13 +58,13 @@ export default function DashboardLayout() {
                 <div className="h-20 flex items-center px-6 border-b border-border overflow-hidden">
                     {branding.logoUrl ? (
                         <div className="flex items-center w-full">
-                            <img 
-                                src={branding.logoUrl} 
-                                alt="Scottish Chemical Industries" 
+                            <img
+                                src={branding.logoUrl}
+                                alt="Scottish Chemical Industries"
                                 className={cn(
                                     "h-14 w-auto object-contain transition-all duration-300",
                                     sidebarOpen ? "max-w-[200px]" : "max-w-[40px]"
-                                )} 
+                                )}
                             />
                         </div>
                     ) : (

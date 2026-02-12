@@ -191,7 +191,7 @@ const SettingsPage = () => {
                         <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
                                 <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
-                                <span className="text-sm font-medium">Getting Contacts in Background</span>
+                                <span className="text-sm font-medium">Enriching Contacts in Background</span>
                             </div>
                             <div className="flex items-center gap-2">
                                 <Button
@@ -218,7 +218,7 @@ const SettingsPage = () => {
                             />
                         </div>
                         <p className="text-xs text-muted-foreground mt-2 flex justify-between">
-                            <span>{scrapingProgress.activeJobsCount} active job{scrapingProgress.activeJobsCount !== 1 ? 's' : ''} running</span>
+                            <span>{scrapingProgress.activeJobsCount} active task{scrapingProgress.activeJobsCount !== 1 ? 's' : ''} running</span>
                             <span>ETA: {Math.ceil((scrapingProgress.totalProfiles - scrapingProgress.processedProfiles) * 5 / 60)} mins</span>
                         </p>
                     </CardContent>
@@ -233,8 +233,8 @@ const SettingsPage = () => {
                                 <Zap className="w-5 h-5 text-primary" />
                             </div>
                             <div>
-                                <h3 className="text-sm font-semibold">Get Contacts</h3>
-                                <p className="text-xs text-muted-foreground">Manual trigger to fetch emails/phones for approved leads.</p>
+                                <h3 className="text-sm font-semibold">Enrich Contact Info</h3>
+                                <p className="text-xs text-muted-foreground">Manual trigger to enrich contact info for qualified leads.</p>
                             </div>
                         </div>
                         <Button
@@ -244,7 +244,7 @@ const SettingsPage = () => {
                             disabled={isTriggering}
                         >
                             {isTriggering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                            Get Contacts Now
+                            Start Enrichment
                         </Button>
                     </CardContent>
                 </Card>
@@ -344,15 +344,15 @@ const SettingsPage = () => {
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                             <Key className="w-5 h-5 text-primary" />
-                            Integration Keys
+                            Integration Credentials
                         </CardTitle>
                         <CardDescription>
-                            Your credentials for PhantomBuster and LinkedIn.
+                            Your credentials for External Data Source and LinkedIn.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="space-y-2">
-                            <Label htmlFor="pb-key">PhantomBuster API Key</Label>
+                            <Label htmlFor="pb-key">Data Source API Key</Label>
                             <div className="relative">
                                 <Input
                                     id="pb-key"
@@ -429,10 +429,10 @@ const SettingsPage = () => {
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2">
                             <Webhook className="w-5 h-5 text-blue-500" />
-                            Webhook Listener
+                            Webhook Integration
                         </CardTitle>
                         <CardDescription>
-                            Paste this URL into your PhantomBuster dashboard.
+                            Paste this URL into your Data Source dashboard.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -449,7 +449,7 @@ const SettingsPage = () => {
                             <AlertCircle className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
                             <div className="text-xs text-blue-700 dark:text-blue-300">
                                 <p className="font-semibold mb-1">How to use:</p>
-                                <p>Go to your Phantom settings &gt; Webhooks &gt; Paste this URL. This allows the CRM to update lead status in real-time.</p>
+                                <p>Go to your Data Source settings &gt; Webhooks &gt; Paste this URL. This allows the CRM to update lead status in real-time.</p>
                             </div>
                         </div>
                     </CardContent>
@@ -513,7 +513,7 @@ const SettingsPage = () => {
                             </span>
                         </div>
                         <div className="flex justify-between items-center py-2">
-                            <span className="text-sm font-medium">PhantomBuster API</span>
+                            <span className="text-sm font-medium">Data Source API</span>
                             <span className="flex items-center gap-1.5 text-xs text-green-500">
                                 <span className="w-2 h-2 bg-green-500 rounded-full" />
                                 Verified

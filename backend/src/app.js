@@ -12,6 +12,7 @@ import settingsRoutes from "./routes/settings.routes.js";
 import outreachRoutes from "./routes/outreach.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import scraperRoutes from "./routes/scraper.routes.js";
+import industryRoutes from "./routes/industry.routes.js";
 
 import config from "./config/index.js";
 
@@ -49,6 +50,7 @@ app.use("/api/email", emailRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/scraper", scraperRoutes); // 🆕 Contact scraper progress
+app.use("/api/industry", industryRoutes); // 🆕 Industry hierarchy and prioritization
 app.use("/api", outreachRoutes); // Multi-channel outreach
 
 // 404 for unknown API routes – return JSON so frontend doesn't get HTML

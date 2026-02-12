@@ -22,7 +22,7 @@ export default function LeadDetailPage() {
     const [enrichment, setEnrichment] = useState(null);
     const [enriching, setEnriching] = useState(false);
 
-    // Send Message State (LinkedIn Message Sender phantom)
+    // Send Message State (LinkedIn Integration)
     const [showSendMessage, setShowSendMessage] = useState(false);
     const [messageContent, setMessageContent] = useState('');
     const [sendingMessage, setSendingMessage] = useState(false);
@@ -93,8 +93,8 @@ export default function LeadDetailPage() {
         try {
             setEnriching(true);
             await axios.post(`/api/leads/${id}/enrich`);
-            addToast('Enrichment complete. Profile was scraped from this lead\'s LinkedIn URL.', 'success');
-            // Refetch immediately — backend waits for PhantomBuster, so data is ready when POST returns
+            addToast('Enrichment complete. Profile data was synced from this lead\'s LinkedIn URL.', 'success');
+            // Refetch immediately — backend waits for Integration, so data is ready when POST returns
             await fetchEnrichment();
         } catch (error) {
             console.error('Enrichment failed', error);
@@ -411,7 +411,7 @@ export default function LeadDetailPage() {
                                 <span className="block">Extra context gathered to help AI personalize messages.</span>
                                 {lead.linkedin_url && (
                                     <span className="block text-xs mt-1.5 text-muted-foreground">
-                                        Retrieved automatically from this lead&apos;s LinkedIn profile — the link was processed via the Profile Service.{' '}
+                                        Retrieved automatically from this lead&apos;s LinkedIn profile.{' '}
                                         <a
                                             href={lead.linkedin_url}
                                             target="_blank"
@@ -431,7 +431,7 @@ export default function LeadDetailPage() {
                                 <p className="text-sm border p-3 rounded-lg bg-muted/30 italic">"{enrichment.bio}"</p>
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium text-muted-foreground">Scraped Interests</label>
+                                <label className="text-sm font-medium text-muted-foreground">Enriched Interests</label>
                                 <div className="flex flex-wrap gap-2">
                                     {enrichment.interests?.map((interest, i) => (
                                         <Badge key={i} variant="outline" className="bg-blue-500/5 text-blue-600 border-blue-200">

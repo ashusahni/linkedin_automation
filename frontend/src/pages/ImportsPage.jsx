@@ -63,7 +63,7 @@ export default function ImportsPage() {
         try {
             setUploading(true);
             setUploadResult(null);
-            
+
             const res = await axios.post('/api/leads/import-csv', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data'
@@ -80,9 +80,9 @@ export default function ImportsPage() {
             fetchImports();
         } catch (error) {
             console.error('Upload failed:', error);
-            
+
             let errorMessage = 'Failed to upload CSV file';
-            
+
             if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
                 errorMessage = '❌ Backend server is not running! Please start it with: cd backend && npm run dev';
             } else if (error.response?.data?.error) {
@@ -90,7 +90,7 @@ export default function ImportsPage() {
             } else if (error.message) {
                 errorMessage = error.message;
             }
-            
+
             setUploadResult({
                 success: false,
                 message: errorMessage
@@ -106,14 +106,14 @@ export default function ImportsPage() {
 
     const handleDeleteCSVLeads = async () => {
         // Confirm before deletion
-        if (!window.confirm('Are you sure you want to delete ALL leads imported from CSV? This action cannot be undone.')) {
+        if (!window.confirm('Are you sure you want to delete ALL leads imported from Data Import? This action cannot be undone.')) {
             return;
         }
 
         try {
             setDeleting(true);
             setDeleteResult(null);
-            
+
             const res = await axios.delete('/api/leads/csv-imports/all');
 
             setDeleteResult({
@@ -126,9 +126,9 @@ export default function ImportsPage() {
             fetchImports();
         } catch (error) {
             console.error('Delete failed:', error);
-            
-            let errorMessage = 'Failed to delete CSV leads';
-            
+
+            let errorMessage = 'Failed to delete imported leads';
+
             if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
                 errorMessage = '❌ Backend server is not running! Please start it with: cd backend && npm run dev';
             } else if (error.response?.data?.error) {
@@ -136,7 +136,7 @@ export default function ImportsPage() {
             } else if (error.message) {
                 errorMessage = error.message;
             }
-            
+
             setDeleteResult({
                 success: false,
                 message: errorMessage
@@ -153,7 +153,7 @@ export default function ImportsPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Imports & Activity Log</h1>
                     <p className="text-muted-foreground mt-1">
-                        Track PhantomBuster imports and system operations
+                        Track data imports and system operations
                     </p>
                 </div>
                 <div className="flex gap-2">
@@ -164,23 +164,23 @@ export default function ImportsPage() {
                         onChange={handleFileUpload}
                         className="hidden"
                     />
-                    <Button 
-                        onClick={handleFileSelect} 
+                    <Button
+                        onClick={handleFileSelect}
                         disabled={uploading}
                         variant="outline"
                         className="gap-2"
                     >
-                        <Upload className="h-4 w-4" /> 
-                        {uploading ? 'Uploading...' : 'Import CSV'}
+                        <Upload className="h-4 w-4" />
+                        {uploading ? 'Uploading...' : 'Data Import'}
                     </Button>
-                    <Button 
-                        onClick={handleDeleteCSVLeads} 
+                    <Button
+                        onClick={handleDeleteCSVLeads}
                         disabled={deleting}
                         variant="destructive"
                         className="gap-2"
                     >
-                        <Trash2 className="h-4 w-4" /> 
-                        {deleting ? 'Deleting...' : 'Remove CSV Leads'}
+                        <Trash2 className="h-4 w-4" />
+                        {deleting ? 'Deleting...' : 'Remove Imported Leads'}
                     </Button>
                     <Button onClick={fetchImports} variant="outline" className="gap-2">
                         <RefreshCw className="h-4 w-4" /> Refresh
@@ -213,9 +213,9 @@ export default function ImportsPage() {
                                     </div>
                                 )}
                             </div>
-                            <Button 
-                                variant="ghost" 
-                                size="sm" 
+                            <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => setUploadResult(null)}
                                 className="h-6 w-6 p-0"
                             >
@@ -246,9 +246,9 @@ export default function ImportsPage() {
                                     </div>
                                 )}
                             </div>
-                            <Button 
-                                variant="ghost" 
-                                size="sm" 
+                            <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => setDeleteResult(null)}
                                 className="h-6 w-6 p-0"
                             >
@@ -263,7 +263,7 @@ export default function ImportsPage() {
             <div className="grid gap-4 md:grid-cols-3">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Imports</CardTitle>
+                        <CardTitle className="text-sm font-medium">Total Data Imports</CardTitle>
                         <Database className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
@@ -301,7 +301,7 @@ export default function ImportsPage() {
             <Card>
                 <CardHeader>
                     <CardTitle>Import History</CardTitle>
-                    <CardDescription>Complete log of all PhantomBuster data imports</CardDescription>
+                    <CardDescription>Complete log of all data imports</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="rounded-md border">
@@ -310,12 +310,12 @@ export default function ImportsPage() {
                                 <TableRow>
                                     <TableHead>Import ID</TableHead>
                                     <TableHead>Source</TableHead>
-                                    <TableHead>Container ID</TableHead>
+                                    <TableHead>Sync Session ID</TableHead>
                                     <TableHead className="text-right">Total Leads</TableHead>
                                     <TableHead className="text-right">Saved</TableHead>
                                     <TableHead className="text-right">Duplicates</TableHead>
                                     <TableHead>Timestamp</TableHead>
-                                    <TableHead className="text-right">CSV</TableHead>
+                                    <TableHead className="text-right">Source File</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -332,7 +332,7 @@ export default function ImportsPage() {
                                                 <FileText className="h-12 w-12 text-muted-foreground/50 mb-3" />
                                                 <p className="text-sm text-muted-foreground">No imports yet</p>
                                                 <p className="text-xs text-muted-foreground mt-1">
-                                                    Import data from PhantomBuster to see activity here
+                                                    Import data from External Sources to see activity here
                                                 </p>
                                             </div>
                                         </TableCell>

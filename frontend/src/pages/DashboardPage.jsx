@@ -568,11 +568,11 @@ export default function DashboardPage() {
                             <DropdownMenuContent align="end" className="w-[180px]">
                                 <DropdownMenuItem onClick={() => handleFileSelect('csv')} className="gap-2 cursor-pointer">
                                     <FileText className="h-4 w-4" />
-                                    <span>Import CSV</span>
+                                    <span>From CSV File</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleFileSelect('excel')} className="gap-2 cursor-pointer">
                                     <FileText className="h-4 w-4 text-green-600" />
-                                    <span>Import Excel</span>
+                                    <span>From Excel File</span>
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
@@ -1436,9 +1436,9 @@ export default function DashboardPage() {
                         <CardHeader className="pb-2">
                             <CardTitle className="text-base flex items-center">
                                 Recent imports
-                                <InfoTooltip content="Your latest lead imports from PhantomBuster." />
+                                <InfoTooltip content="Your latest data imports." />
                             </CardTitle>
-                            <CardDescription>Last PhantomBuster imports</CardDescription>
+                            <CardDescription>Last data imports</CardDescription>
                         </CardHeader>
                         <CardContent>
                             {imports.length > 0 ? (

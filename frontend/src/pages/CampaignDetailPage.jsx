@@ -170,10 +170,9 @@ export default function CampaignDetailPage() {
                 const prevStatus = prev[approvalId];
                 const newStatus = res.data;
 
-                // Show prominent toast when status changes to 'sent'
                 if (newStatus.sending_status === 'sent' && (!prevStatus || prevStatus.sending_status !== 'sent')) {
                     setTimeout(() => {
-                        addToast(`🎉 SUCCESS! Message sent to ${newStatus.lead_name || 'lead'}! Container ID: ${newStatus.container_id?.substring(0, 12)}...`, 'success');
+                        addToast(`🎉 SUCCESS! Message sent to ${newStatus.lead_name || 'lead'}! Sync Session ID: ${newStatus.container_id?.substring(0, 12)}...`, 'success');
                     }, 100);
                 }
 
@@ -299,27 +298,27 @@ export default function CampaignDetailPage() {
     const handleScrapeContacts = async () => {
         // If already scraping, cancel it
         if (scraping && scrapeJobId) {
-            const confirmed = confirm('Stop the current scraping process?');
+            const confirmed = confirm('Stop the current enrichment process?');
             if (!confirmed) return;
 
             try {
-                console.log('🛑 Cancelling scraping...');
+                console.log('🛑 Cancelling enrichment...');
                 const res = await axios.post(`/api/campaigns/${id}/scrape-contacts`, {
                     cancel: true
                 });
 
                 if (res.data.success) {
-                    addToast('✅ Scraping cancelled', 'info');
+                    addToast('✅ Enrichment cancelled', 'info');
                     setScraping(false);
                     setScrapeProgress(null);
                     setScrapeJobId(null);
                     fetchCampaignDetails(); // Refresh to show partial results
                 } else {
-                    addToast('No active scraping to cancel', 'info');
+                    addToast('No active enrichment to cancel', 'info');
                 }
             } catch (error) {
                 console.error('Cancel error:', error);
-                addToast('Failed to cancel scraping', 'error');
+                addToast('Failed to cancel enrichment', 'error');
             }
             return;
         }
@@ -328,15 +327,15 @@ export default function CampaignDetailPage() {
         const leadsToProcess = selectedLeads.length > 0 ? selectedLeads : null;
 
         if (leads.length === 0) {
-            addToast('No leads in campaign to scrape', 'error');
+            addToast('No leads in campaign to enrich', 'error');
             return;
         }
 
         const confirmMsg = leadsToProcess
-            ? `Get contact info (email/phone) for ${leadsToProcess.length} selected leads?`
-            : `Get contact info (email/phone) for leads missing contact info?`;
+            ? `Enrich contact info (email/phone) for ${leadsToProcess.length} selected leads?`
+            : `Enrich contact info (email/phone) for leads missing contact info?`;
 
-        if (!confirm(`${confirmMsg}\n\n✅ Smart scraping: Only scrapes leads without contact info\n🛑 Click button again to stop while running\n\nContinue?`)) {
+        if (!confirm(`${confirmMsg}\n\n✅ Smart enrichment: Only enriches leads without contact info\n🛑 Click button again to stop while running\n\nContinue?`)) {
             return;
         }
 
@@ -344,7 +343,7 @@ export default function CampaignDetailPage() {
             setScraping(true);
             setScrapeProgress({ status: 'Checking...', processed: 0, total: 0 });
 
-            console.log('🔍 Starting to get contacts...');
+            console.log('🔍 Starting to enrich contacts...');
             const res = await axios.post(`/api/campaigns/${id}/scrape-contacts`, {
                 leadIds: leadsToProcess
             });
@@ -365,7 +364,7 @@ export default function CampaignDetailPage() {
             setScrapeJobId(jobId);
 
             const needsScraping = res.data.needsScraping;
-            addToast(`🔍 Getting contacts for ${needsScraping} leads... (Click button to stop)`, 'info');
+            addToast(`🔍 Enriching contact info for ${needsScraping} leads... (Click button to stop)`, 'info');
 
             // Poll for status
             const pollInterval = setInterval(async () => {
@@ -416,13 +415,13 @@ export default function CampaignDetailPage() {
                 if (scraping) {
                     setScraping(false);
                     setScrapeJobId(null);
-                    addToast('Scraping is taking longer than expected. Check backend logs.', 'warning');
+                    addToast('Enrichment is taking longer than expected. Check backend logs.', 'warning');
                 }
             }, 600000);
 
         } catch (error) {
-            console.error('❌ Contact scrape failed:', error);
-            const errorMessage = error.response?.data?.error || error.response?.data?.details || error.message || 'Failed to start contact scraping';
+            console.error('❌ Contact enrichment failed:', error);
+            const errorMessage = error.response?.data?.error || error.response?.data?.details || error.message || 'Failed to start contact enrichment';
             addToast(`Error: ${errorMessage}`, 'error');
             setScraping(false);
             setScrapeProgress(null);
@@ -445,13 +444,13 @@ export default function CampaignDetailPage() {
         );
 
         if (leadsWithEmail.length === 0) {
-            addToast('No leads have email addresses. Please Get Contact Info first!', 'error');
+            addToast('No leads have email addresses. Please Enrich Contact Info first!', 'error');
             return;
         }
 
         const confirmed = confirm(
             `Send AI-generated personalized emails to ${leadsWithEmail.length} leads?\n\n` +
-            `This will use the scraped email addresses and generate personalized content using AI.\n\n` +
+            `This will use the enriched email addresses and generate personalized content using AI.\n\n` +
             `Continue?`
         );
 
@@ -500,7 +499,7 @@ export default function CampaignDetailPage() {
         );
 
         if (leadsWithPhone.length === 0) {
-            addToast('No leads have phone numbers. Please Get Contact Info first!', 'error');
+            addToast('No leads have phone numbers. Please Enrich Contact Info first!', 'error');
             return;
         }
 
@@ -1317,12 +1316,12 @@ export default function CampaignDetailPage() {
                                             : 'LinkedIn AI Messages'}
                                 </Button>
                                 <Button size="sm" variant="outline" className="gap-2">
-                                    <Download className="w-4 h-4" /> Export
+                                    <Download className="w-4 h-4" /> Export Report
                                 </Button>
                             </div>
                         </CardHeader>
 
-                        {/* Contact Scraping Progress */}
+                        {/* Contact Enrichment Progress */}
                         {scrapeProgress && (
                             <div className="px-6 pb-4">
                                 <div className={cn(
@@ -1335,13 +1334,13 @@ export default function CampaignDetailPage() {
                                             scrapeProgress.cancelled ? "text-orange-400" : "text-green-400"
                                         )}>
                                             <Search className={cn("w-4 h-4", scraping && "animate-pulse")} />
-                                            Getting Contacts: {scrapeProgress.status}
+                                            Enriching Contacts: {scrapeProgress.status}
                                             {scraping && (
                                                 <span className="text-xs text-muted-foreground">(Click button to stop)</span>
                                             )}
                                         </span>
                                         <div className="text-xs text-muted-foreground text-right">
-                                            <div>{scrapeProgress.processed} / {scrapeProgress.total} scraped</div>
+                                            <div>{scrapeProgress.processed} / {scrapeProgress.total} enriched</div>
                                             {scrapeProgress.found > 0 && (
                                                 <div className="text-green-400">✓ {scrapeProgress.found} contacts found</div>
                                             )}
@@ -1396,11 +1395,11 @@ export default function CampaignDetailPage() {
                                         <p className="text-sm font-medium text-white mb-2">🎯 Multi-Channel Outreach System:</p>
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-muted-foreground">
                                             <div className="space-y-1">
-                                                <p className="text-green-400 font-medium flex items-center gap-1"><Search className="w-3 h-3" /> 1. Get Contacts</p>
+                                                <p className="text-green-400 font-medium flex items-center gap-1"><Search className="w-3 h-3" /> 1. Enrich Contacts</p>
                                                 <ul className="list-disc list-inside space-y-0.5 pl-2">
                                                     <li>Gets <strong className="text-white">email & phone</strong></li>
                                                     <li>From LinkedIn profiles</li>
-                                                    <li>Browser automation</li>
+                                                    <li>Advanced Data Source</li>
                                                 </ul>
                                             </div>
                                             <div className="space-y-1">
@@ -1533,7 +1532,7 @@ export default function CampaignDetailPage() {
                                                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                                                         <span>{new Date(activity.timestamp).toLocaleString()}</span>
                                                         {activity.container_id && (
-                                                            <span className="font-mono">Container: {activity.container_id.substring(0, 12)}...</span>
+                                                            <span className="font-mono">Sync Session: {activity.container_id.substring(0, 12)}...</span>
                                                         )}
                                                     </div>
                                                 </div>
@@ -1743,7 +1742,7 @@ export default function CampaignDetailPage() {
                                                                                     </p>
                                                                                     {approvalStatuses[approval.id].container_id && (
                                                                                         <p className="text-xs text-muted-foreground font-mono mt-1">
-                                                                                            Container: {approvalStatuses[approval.id].container_id}
+                                                                                            Sync Session: {approvalStatuses[approval.id].container_id}
                                                                                         </p>
                                                                                     )}
                                                                                 </div>

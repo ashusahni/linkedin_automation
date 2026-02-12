@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import contactScraperService from '../services/contact-scraper.service.js';
+import profileEnrichmentService from '../services/profileEnrichment.service.js';
 
 const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -58,8 +59,16 @@ router.put('/branding', async (req, res) => {
 });
 
 // Get current settings (masked sensitive data)
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
+        const linkedinProfileUrl = process.env.LINKEDIN_PROFILE_URL || '';
+
+        // Enrich profile data if URL is provided
+        let enrichedProfile = null;
+        if (linkedinProfileUrl) {
+            enrichedProfile = await profileEnrichmentService.enrichProfileFromUrl(linkedinProfileUrl);
+        }
+
         const settings = {
             phantombuster: {
                 apiKey: process.env.PHANTOMBUSTER_API_KEY ? maskKey(process.env.PHANTOMBUSTER_API_KEY) : '',
@@ -86,8 +95,13 @@ router.get('/', (req, res) => {
                 emailFailoverDelay: parseInt(process.env.EMAIL_FAILOVER_DELAY) || 7
             },
             preferences: {
-                linkedinProfileUrl: process.env.LINKEDIN_PROFILE_URL || '',
-                preferredCompanyKeywords: process.env.PREFERRED_COMPANY_KEYWORDS || ''
+                linkedinProfileUrl,
+                preferredCompanyKeywords: process.env.PREFERRED_COMPANY_KEYWORDS || '',
+                // Include enriched profile data
+                industry: enrichedProfile?.industry || '',
+                title: enrichedProfile?.title || '',
+                company: enrichedProfile?.company || '',
+                metadata: enrichedProfile?.metadata || []
             }
         };
 

@@ -850,6 +850,113 @@ export async function getScrapeStatus(req, res) {
     }
 }
 
+// POST /api/campaigns/estimate-audience
+// Estimate how many leads match the given filter criteria
+export async function estimateAudience(req, res) {
+    try {
+        const { filters } = req.body;
+
+        if (!filters || !filters.groups || filters.groups.length === 0) {
+            return res.json({ count: 0, preview: [] });
+        }
+
+        // Build SQL WHERE clause from filters
+        const whereClause = buildWhereClauseFromFilters(filters);
+
+        // Count matching leads
+        const countQuery = `SELECT COUNT(*) as count FROM leads WHERE ${whereClause}`;
+        const countResult = await pool.query(countQuery);
+        const count = parseInt(countResult.rows[0].count) || 0;
+
+        // Get preview (first 5 leads)
+        const previewQuery = `
+            SELECT id, full_name, first_name, last_name, title, company, location
+            FROM leads 
+            WHERE ${whereClause}
+            LIMIT 5
+        `;
+        const previewResult = await pool.query(previewQuery);
+
+        return res.json({
+            count,
+            preview: previewResult.rows
+        });
+    } catch (err) {
+        console.error('Estimate audience error:', err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
+// Helper function to build SQL WHERE clause from FilterLogicBuilder format
+function buildWhereClauseFromFilters(filters) {
+    const { operator, groups } = filters;
+
+    if (!groups || groups.length === 0) {
+        return '1=1'; // Return all if no filters
+    }
+
+    const groupClauses = groups.map(group => {
+        const { conditions } = group;
+        if (!conditions || conditions.length === 0) return null;
+
+        const conditionClauses = conditions.map(cond => {
+            const { field, operator: op, value, exclude } = cond;
+
+            // Skip empty values for non-boolean fields
+            if (op !== 'exists' && op !== 'not_exists' && (!value || value === '')) {
+                return null;
+            }
+
+            let clause = '';
+
+            switch (op) {
+                case 'contains':
+                    clause = `${field} ILIKE '%${value}%'`;
+                    break;
+                case 'not_contains':
+                    clause = `${field} NOT ILIKE '%${value}%'`;
+                    break;
+                case 'equals':
+                    clause = `${field} = '${value}'`;
+                    break;
+                case 'not_equals':
+                    clause = `${field} != '${value}'`;
+                    break;
+                case 'starts_with':
+                    clause = `${field} ILIKE '${value}%'`;
+                    break;
+                case 'exists':
+                    clause = `${field} IS NOT NULL AND ${field} != ''`;
+                    break;
+                case 'not_exists':
+                    clause = `${field} IS NULL OR ${field} = ''`;
+                    break;
+                default:
+                    return null;
+            }
+
+            // Apply exclude logic
+            if (exclude && clause) {
+                clause = `NOT (${clause})`;
+            }
+
+            return clause;
+        }).filter(Boolean);
+
+        if (conditionClauses.length === 0) return null;
+
+        // Join conditions with AND within a group
+        return `(${conditionClauses.join(' AND ')})`;
+    }).filter(Boolean);
+
+    if (groupClauses.length === 0) {
+        return '1=1';
+    }
+
+    // Join groups with OR (top-level operator)
+    return groupClauses.join(` ${operator} `);
+}
+
 // POST /api/campaigns/:id/bulk-enrich-generate
 export async function bulkEnrichAndGenerate(req, res) {
     try {
