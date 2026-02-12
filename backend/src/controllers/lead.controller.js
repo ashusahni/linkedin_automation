@@ -1642,8 +1642,40 @@ export async function getReviewStats(req, res) {
 
     // Industry Filter
     if (industry && industry.trim()) {
-      whereConditions.push(`industry ILIKE $${params.length + 1}`);
-      params.push(`%${industry.trim()}%`);
+      const industryName = industry.trim();
+      const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      if (industryName === 'Other') {
+        const allKeywords = Object.values(INDUSTRY_KEYWORDS).flat();
+        if (allKeywords.length > 0) {
+          const allRegex = allKeywords.map(k => escapeRegExp(k)).join('|');
+          whereConditions.push(`(COALESCE(company, '') || ' ' || COALESCE(title, '')) !~* $${params.length + 1}`);
+          params.push(`(${allRegex})`);
+        }
+      } else if (INDUSTRY_KEYWORDS[industryName]) {
+        const industryKeys = Object.keys(INDUSTRY_KEYWORDS);
+        const targetIndex = industryKeys.indexOf(industryName);
+        const currentKeywords = INDUSTRY_KEYWORDS[industryName];
+        const currentRegex = currentKeywords.map(k => escapeRegExp(k)).join('|');
+
+        whereConditions.push(`(COALESCE(company, '') || ' ' || COALESCE(title, '')) ~* $${params.length + 1}`);
+        params.push(`(${currentRegex})`);
+
+        if (targetIndex > 0) {
+          const priorIndustries = industryKeys.slice(0, targetIndex);
+          const priorKeywords = priorIndustries.flatMap(k => INDUSTRY_KEYWORDS[k]);
+          if (priorKeywords.length > 0) {
+            const priorRegex = priorKeywords.map(k => escapeRegExp(k)).join('|');
+            whereConditions.push(`(COALESCE(company, '') || ' ' || COALESCE(title, '')) !~* $${params.length + 1}`);
+            params.push(`(${priorRegex})`);
+          }
+        }
+      } else {
+        whereConditions.push(
+          `(company ILIKE $${params.length + 1} OR title ILIKE $${params.length + 1})`
+        );
+        params.push(`%${industryName}%`);
+      }
     }
 
     // Title Filter
