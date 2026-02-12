@@ -7,120 +7,112 @@ import '../config/index.js'; // Ensure config is loaded
 const AI_PROVIDER = (process.env.AI_PROVIDER || 'openai').toLowerCase();
 
 // Initialize OpenAI client
+// Initialize OpenAI client
 const openaiKey = process.env.OPENAI_API_KEY || '';
 let openai = null;
-if (openaiKey && AI_PROVIDER === 'openai') {
-    openai = new OpenAI({
-        apiKey: openaiKey
-    });
+if (openaiKey) {
+    try {
+        openai = new OpenAI({ apiKey: openaiKey });
+    } catch (e) {
+        console.error('Failed to initialize OpenAI client:', e.message);
+    }
 }
 
 // Initialize Anthropic (Claude) client
 const anthropicKey = process.env.ANTHROPIC_API_KEY || '';
 let anthropic = null;
-if (anthropicKey && AI_PROVIDER === 'claude') {
-    anthropic = new Anthropic({
-        apiKey: anthropicKey
-    });
+if (anthropicKey) {
+    try {
+        anthropic = new Anthropic({ apiKey: anthropicKey });
+    } catch (e) {
+        console.error('Failed to initialize Claude client:', e.message);
+    }
 }
 
-// Log configuration status on module load
+// Log configuration status
 console.log(`\n🤖 AI Configuration:`);
-console.log(`   Provider: ${AI_PROVIDER.toUpperCase()}`);
+console.log(`   Primary Provider: ${AI_PROVIDER.toUpperCase()}`);
 
-if (AI_PROVIDER === 'claude') {
-    if (anthropicKey) {
-        console.log(`   ✅ Claude API Key loaded: ${anthropicKey.substring(0, 12)}...${anthropicKey.substring(anthropicKey.length - 4)}`);
-        console.log(`   Model: ${process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229'}`);
-    } else {
-        console.warn('   ⚠️ ANTHROPIC_API_KEY not found in environment variables');
-    }
+if (anthropic) {
+    console.log(`   ✅ Claude API Key loaded`);
+    console.log(`   Model: ${process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229'}`);
 } else {
-    if (openaiKey) {
-        console.log(`   ✅ OpenAI API Key loaded: ${openaiKey.substring(0, 7)}...${openaiKey.substring(openaiKey.length - 4)}`);
-        console.log(`   Model: ${process.env.OPENAI_MODEL || 'gpt-4o-mini'}`);
-    } else {
-        console.warn('   ⚠️ OPENAI_API_KEY not found in environment variables');
-    }
+    console.log('   ⚪ Claude not configured');
+}
+
+if (openai) {
+    console.log(`   ✅ OpenAI API Key loaded`);
+    console.log(`   Model: ${process.env.OPENAI_MODEL || 'gpt-4o-mini'}`);
+} else {
+    console.log('   ⚪ OpenAI not configured');
 }
 console.log('');
 
 class AIService {
     /**
-     * Check if AI is configured (OpenAI or Claude)
+     * Check if ANY AI is configured
      */
     static isConfigured() {
-        if (AI_PROVIDER === 'claude') {
-            const hasKey = !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim().length > 0;
-            if (!hasKey) {
-                console.warn('⚠️ ANTHROPIC_API_KEY not found or empty in environment variables');
-                console.warn('   Check backend/.env file and ensure ANTHROPIC_API_KEY=sk-ant-... is set');
-            }
-            return hasKey;
-        } else {
-            const hasKey = !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0;
-            if (!hasKey) {
-                console.warn('⚠️ OPENAI_API_KEY not found or empty in environment variables');
-                console.warn('   Check backend/.env file and ensure OPENAI_API_KEY=sk-... is set');
-            }
-            return hasKey;
-        }
+        return !!openai || !!anthropic;
     }
 
     /**
-     * Call AI API (supports both OpenAI and Claude)
+     * Call AI API with automatic fallback
      */
     static async callAI(prompt, maxTokens = 300, temperature = 0.8) {
-        if (AI_PROVIDER === 'claude') {
-            if (!anthropic) {
-                throw new Error('Claude client not initialized. Please check ANTHROPIC_API_KEY in .env file.');
+        // Determine primary and secondary providers
+        let primary = AI_PROVIDER === 'claude' ? 'claude' : 'openai';
+        let secondary = AI_PROVIDER === 'claude' ? 'openai' : 'claude';
+
+        // Helper to execute call per provider
+        const executeCall = async (provider) => {
+            if (provider === 'claude') {
+                if (!anthropic) throw new Error('Claude not configured');
+                console.log('   📡 Calling Claude API...');
+                const model = process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229';
+                const response = await anthropic.messages.create({
+                    model: model,
+                    max_tokens: maxTokens,
+                    temperature: temperature,
+                    messages: [{ role: 'user', content: prompt }]
+                });
+                if (!response?.content?.[0]?.text) throw new Error('Invalid response from Claude');
+                return response.content[0].text.trim();
+            } else {
+                if (!openai) throw new Error('OpenAI not configured');
+                console.log('   📡 Calling OpenAI API...');
+                const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+                const response = await openai.chat.completions.create({
+                    model: model,
+                    messages: [{ role: 'user', content: prompt }],
+                    temperature: temperature,
+                    max_tokens: maxTokens
+                });
+                if (!response?.choices?.[0]?.message?.content) throw new Error('Invalid response from OpenAI');
+                return response.choices[0].message.content.trim();
             }
+        };
 
-            console.log('   📡 Calling Claude API...');
-            const model = process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229';
-            console.log(`      Model: ${model}`);
-            console.log(`      Prompt length: ${prompt.length} chars`);
+        try {
+            // Try Primary
+            return await executeCall(primary);
+        } catch (error) {
+            console.error(`⚠️ ${primary.toUpperCase()} failed: ${error.message}`);
 
-            const response = await anthropic.messages.create({
-                model: model,
-                max_tokens: maxTokens,
-                temperature: temperature,
-                messages: [{ role: 'user', content: prompt }]
-            });
-
-            if (!response || !response.content || !response.content[0] || !response.content[0].text) {
-                throw new Error('Invalid response format from Claude');
+            // Try Fallback
+            if ((primary === 'claude' && openai) || (primary === 'openai' && anthropic)) {
+                console.log(`   🔄 Falling back to ${secondary.toUpperCase()}...`);
+                try {
+                    const result = await executeCall(secondary);
+                    console.log(`   ✅ ${secondary.toUpperCase()} fallback successful`);
+                    return result;
+                } catch (secondaryError) {
+                    console.error(`❌ ${secondary.toUpperCase()} fallback also failed: ${secondaryError.message}`);
+                    throw error; // Throw original error to trigger superior fallback (template)
+                }
+            } else {
+                throw error;
             }
-
-            const message = response.content[0].text.trim();
-            console.log(`   ✅ Claude API call successful (${message.length} chars)`);
-            return message;
-
-        } else {
-            // OpenAI
-            if (!openai) {
-                throw new Error('OpenAI client not initialized. Please check OPENAI_API_KEY in .env file.');
-            }
-
-            console.log('   📡 Calling OpenAI API...');
-            const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-            console.log(`      Model: ${model}`);
-            console.log(`      Prompt length: ${prompt.length} chars`);
-
-            const response = await openai.chat.completions.create({
-                model: model,
-                messages: [{ role: 'user', content: prompt }],
-                temperature: temperature,
-                max_tokens: maxTokens
-            });
-
-            if (!response || !response.choices || !response.choices[0] || !response.choices[0].message) {
-                throw new Error('Invalid response format from OpenAI');
-            }
-
-            const message = response.choices[0].message.content.trim();
-            console.log(`   ✅ OpenAI API call successful (${message.length} chars)`);
-            return message;
         }
     }
 
