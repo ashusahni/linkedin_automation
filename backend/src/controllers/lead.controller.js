@@ -1627,7 +1627,8 @@ export async function getReviewStats(req, res) {
       title,
       company,
       location,
-      status
+      status,
+      filters
     } = req.query;
 
     const params = [];
@@ -1667,6 +1668,24 @@ export async function getReviewStats(req, res) {
     if (status && status !== 'all') {
       whereConditions.push(`status = $${params.length + 1}`);
       params.push(status);
+    }
+
+    // Advanced Filters (JSON)
+    if (filters) {
+      try {
+        const filterJSON = JSON.parse(filters);
+        // Note: buildAdvancedFilterClause mutates params by pushing values
+        const advancedClause = buildAdvancedFilterClause(filterJSON, params);
+        if (advancedClause) {
+          // Since buildAdvancedFilterClause returns a string like "(...)", we can just push it to whereConditions
+          // which are joined by AND.
+          // CAUTION: buildAdvancedFilterClause assumes params are appended. 
+          // It uses params.length inside. Logic seems safe as we push to params here too.
+          whereConditions.push(advancedClause);
+        }
+      } catch (e) {
+        console.error("Failed to parse filters JSON in getReviewStats", e);
+      }
     }
 
     const whereClause = whereConditions.length > 0

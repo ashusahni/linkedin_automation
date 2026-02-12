@@ -486,6 +486,34 @@ export default function LeadsTable() {
             if (currentMetaFilters.status !== 'all') params.status = currentMetaFilters.status;
 
 
+            // Construct 'filters' JSON for advanced/quick filters (same logic as fetchLeads)
+            const quickGroups = currentQuickFilters.map(id => {
+                const q = QUICK_FILTERS.find(x => x.id === id);
+                if (!q) return null;
+                return {
+                    operator: 'AND',
+                    conditions: Object.entries(q.preset).map(([field, value]) => ({
+                        field,
+                        operator: 'contains',
+                        value
+                    }))
+                };
+            }).filter(Boolean);
+
+            let manualGroups = [];
+            // If overrides are provided (like reset), we assume manual filters are cleared/ignored
+            if (filterMode === 'advanced' && !overrides.metaFilters) {
+                manualGroups = advancedFilters.groups;
+            }
+
+            if (quickGroups.length > 0 || manualGroups.length > 0) {
+                params.filters = JSON.stringify({
+                    operator: 'OR',
+                    groups: [...quickGroups, ...manualGroups]
+                });
+            }
+
+
             const [statsRes, reviewRes] = await Promise.all([
                 // /stats endpoint is for overall system stats (Total Leads, etc). 
                 // If we want THAT to be filtered too, we need to pass params there as well.
