@@ -79,8 +79,11 @@ router.get('/', async (req, res) => {
                 linkedinSessionCookie: process.env.LINKEDIN_SESSION_COOKIE ? maskKey(process.env.LINKEDIN_SESSION_COOKIE) : ''
             },
             ai: {
+                provider: process.env.AI_PROVIDER || 'openai',
                 openaiApiKey: process.env.OPENAI_API_KEY ? maskKey(process.env.OPENAI_API_KEY) : '',
-                model: process.env.OPENAI_MODEL || 'gpt-4o-mini'
+                openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+                anthropicApiKey: process.env.ANTHROPIC_API_KEY ? maskKey(process.env.ANTHROPIC_API_KEY) : '',
+                claudeModel: process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229'
             },
             email: {
                 provider: process.env.EMAIL_PROVIDER || 'sendgrid',
@@ -136,8 +139,11 @@ router.put('/', async (req, res) => {
             LINKEDIN_SESSION_COOKIE: phantombuster?.linkedinSessionCookie,
 
             // AI
+            AI_PROVIDER: ai?.provider,
             OPENAI_API_KEY: ai?.openaiApiKey,
-            OPENAI_MODEL: ai?.model,
+            OPENAI_MODEL: ai?.openaiModel,
+            ANTHROPIC_API_KEY: ai?.anthropicApiKey,
+            CLAUDE_MODEL: ai?.claudeModel,
 
             // Email
             EMAIL_PROVIDER: email?.provider,
@@ -269,6 +275,54 @@ router.post('/test/openai', async (req, res) => {
         }
     } catch (error) {
         console.error('OpenAI test failed:', error);
+        res.json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+// Test Claude (Anthropic) connection
+router.post('/test/claude', async (req, res) => {
+    try {
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+
+        if (!apiKey) {
+            return res.status(400).json({
+                success: false,
+                message: 'Claude API key not configured'
+            });
+        }
+
+        // Test with a simple message
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229',
+                max_tokens: 10,
+                messages: [{ role: 'user', content: 'Hi' }]
+            })
+        });
+
+        if (response.ok) {
+            res.json({
+                success: true,
+                message: 'Claude API key is valid!'
+            });
+        } else {
+            const errorData = await response.json().catch(() => ({}));
+            res.json({
+                success: false,
+                message: errorData.error?.message || 'Invalid API key'
+            });
+        }
+    } catch (error) {
+        console.error('Claude test failed:', error);
         res.json({
             success: false,
             message: error.message

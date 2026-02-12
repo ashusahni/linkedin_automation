@@ -1746,11 +1746,10 @@ export async function getReviewStats(req, res) {
     };
 
     result.rows.forEach(row => {
-      // Use 'approved' as default if null, matching previous behavior/expectations
-      // or if review_status is null, it typically meant imported but not reviewed yet?
-      // Actually leads default to 'new' status, review_status might be null.
-      const status = row.review_status || 'approved';
-      if (stats[status] !== undefined) {
+      // Only count leads with actual review_status values
+      // Do NOT treat NULL as 'approved' - this was causing count mismatches
+      const status = row.review_status;
+      if (status && stats[status] !== undefined) {
         stats[status] = parseInt(row.count, 10);
       }
       stats.total += parseInt(row.count, 10);

@@ -4,7 +4,7 @@ import axios from 'axios';
 import {
     Plus, Play, Pause, MoreVertical, Trash2, Edit2, Users,
     TrendingUp, Calendar, Target, ArrowRight, Search, Filter,
-    CheckCircle2, Clock, XCircle, Zap, Copy, Tag, Flag
+    CheckCircle2, Clock, XCircle, Zap, Copy, Tag, Flag, X, TrendingDown
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -19,9 +19,10 @@ import {
     DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { useToast } from '../components/ui/toast';
-import { Skeleton, TableSkeleton } from '../components/ui/skeleton';
+import { Skeleton } from '../components/ui/skeleton';
 import PageGuide from '../components/PageGuide';
 import CampaignWizard from '../components/CampaignWizard';
+import { cn } from '../lib/utils';
 
 export default function CampaignsPage() {
     const navigate = useNavigate();
@@ -100,39 +101,80 @@ export default function CampaignsPage() {
         }
     };
 
-    const deleteCampaign = async (id, e) => {
+    const pauseCampaign = async (id, e) => {
         e.stopPropagation();
         try {
-            await axios.delete(`/api/campaigns/${id}`);
-            addToast('Campaign deleted', 'info');
+            await axios.post(`/api/campaigns/${id}/pause`);
+            addToast('Campaign paused', 'success');
             fetchCampaigns();
         } catch (err) {
-            console.error('Failed to delete campaign:', err);
-            const errorMsg = err.response?.data?.error || err.message || 'Failed to delete campaign';
+            const errorMsg = err.response?.data?.error || err.message || 'Failed to pause';
+            addToast(`Error: ${errorMsg}`, 'error');
+        }
+    };
+
+    const resumeCampaign = async (id, e) => {
+        e.stopPropagation();
+        try {
+            await axios.post(`/api/campaigns/${id}/resume`);
+            addToast('Campaign resumed', 'success');
+            fetchCampaigns();
+        } catch (err) {
+            const errorMsg = err.response?.data?.error || err.message || 'Failed to resume';
+            addToast(`Error: ${errorMsg}`, 'error');
+        }
+    };
+
+    const deleteCampaign = async (id, e) => {
+        e.stopPropagation();
+        if (!window.confirm('Are you sure you want to delete this campaign?')) return;
+        try {
+            await axios.delete(`/api/campaigns/${id}`);
+            addToast('Campaign deleted', 'success');
+            fetchCampaigns();
+        } catch (err) {
+            const errorMsg = err.response?.data?.error || err.message || 'Failed to delete';
             addToast(`Error: ${errorMsg}`, 'error');
         }
     };
 
     const getStatusConfig = (status) => {
-        switch (status?.toLowerCase()) {
-            case 'active':
-                return { variant: 'default', icon: Zap, color: 'text-green-500' };
-            case 'draft':
-                return { variant: 'secondary', icon: Clock, color: 'text-yellow-500' };
-            case 'completed':
-                return { variant: 'outline', icon: CheckCircle2, color: 'text-blue-500' };
-            case 'paused':
-                return { variant: 'outline', icon: Pause, color: 'text-orange-500' };
-            default:
-                return { variant: 'outline', icon: XCircle, color: 'text-gray-500' };
-        }
+        const configs = {
+            active: {
+                icon: Zap,
+                color: '#10B981',
+                bgColor: 'rgba(16, 185, 129, 0.1)',
+                label: 'Active'
+            },
+            draft: {
+                icon: Clock,
+                color: '#F59E0B',
+                bgColor: 'rgba(245, 158, 11, 0.1)',
+                label: 'Draft'
+            },
+            paused: {
+                icon: Pause,
+                color: '#64748B',
+                bgColor: 'rgba(100, 116, 139, 0.1)',
+                label: 'Paused'
+            },
+            completed: {
+                icon: CheckCircle2,
+                color: '#8B5CF6',
+                bgColor: 'rgba(139, 92, 246, 0.1)',
+                label: 'Completed'
+            },
+        };
+        return configs[status] || configs.draft;
     };
 
-    const filteredCampaigns = campaigns.filter(camp => {
-        const matchesSearch = camp.name?.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesStatus = filterStatus === 'all' || camp.status === filterStatus;
-        const matchesGoal = filterGoal === 'all' || camp.goal === filterGoal;
-        const matchesType = filterType === 'all' || camp.type === filterType;
+    const filteredCampaigns = campaigns.filter((c) => {
+        const matchesSearch = !searchTerm ||
+            c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            c.description?.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesStatus = filterStatus === 'all' || c.status === filterStatus;
+        const matchesGoal = filterGoal === 'all' || c.goal === filterGoal;
+        const matchesType = filterType === 'all' || c.type === filterType;
         return matchesSearch && matchesStatus && matchesGoal && matchesType;
     });
 
@@ -140,91 +182,123 @@ export default function CampaignsPage() {
         total: campaigns.length,
         active: campaigns.filter(c => c.status === 'active').length,
         draft: campaigns.filter(c => c.status === 'draft').length,
-        totalLeads: campaigns.reduce((sum, c) => sum + (c.lead_count || 0), 0)
+        totalLeads: campaigns.reduce((sum, c) => sum + (c.lead_count || 0), 0),
+    };
+
+    const hasActiveFilters = filterStatus !== 'all' || filterGoal !== 'all' || filterType !== 'all';
+
+    const clearFilters = () => {
+        setFilterStatus('all');
+        setFilterGoal('all');
+        setFilterType('all');
+    };
+
+    const getResponseRateColor = (rate) => {
+        if (rate >= 30) return 'text-emerald-600 dark:text-emerald-400';
+        if (rate >= 15) return 'text-amber-600 dark:text-amber-400';
+        return 'text-slate-600 dark:text-slate-400';
     };
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div className="space-y-8 pb-8">
             {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight">Campaigns</h1>
-                    <p className="text-muted-foreground mt-1">
-                        Organize and manage your LinkedIn outreach campaigns
+                    <h1 className="text-[28px] font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                        Campaigns
+                    </h1>
+                    <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                        Manage your LinkedIn outreach campaigns
                     </p>
                 </div>
-                <Button onClick={() => setShowCreateModal(true)} className="gap-2">
+                <Button onClick={() => setShowCreateModal(true)} className="gap-2 h-9 px-4">
                     <Plus className="w-4 h-4" /> New Campaign
                 </Button>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Campaigns</CardTitle>
-                        <Target className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{stats.total}</div>
-                        <p className="text-xs text-muted-foreground">All campaigns</p>
+            {/* Summary Stats - Compact Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card className="border border-slate-200/60 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow duration-200">
+                    <CardContent className="p-5">
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">
+                            Total Campaigns
+                        </p>
+                        <p className="text-[32px] font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-none">
+                            {stats.total}
+                        </p>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Active</CardTitle>
-                        <Zap className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{stats.active}</div>
-                        <p className="text-xs text-muted-foreground">Currently running</p>
+
+                <Card className="border border-slate-200/60 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow duration-200">
+                    <CardContent className="p-5">
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">
+                            Active
+                        </p>
+                        <div className="flex items-baseline gap-2">
+                            <p className="text-[32px] font-bold tracking-tight text-emerald-600 dark:text-emerald-400 leading-none">
+                                {stats.active}
+                            </p>
+                            {stats.active > 0 && (
+                                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                            )}
+                        </div>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Draft</CardTitle>
-                        <Clock className="h-4 w-4 text-yellow-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{stats.draft}</div>
-                        <p className="text-xs text-muted-foreground">Not yet started</p>
+
+                <Card className="border border-slate-200/60 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow duration-200">
+                    <CardContent className="p-5">
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">
+                            Draft
+                        </p>
+                        <p className="text-[32px] font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-none">
+                            {stats.draft}
+                        </p>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Leads</CardTitle>
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{stats.totalLeads}</div>
-                        <p className="text-xs text-muted-foreground">Across all campaigns</p>
+
+                <Card className="border border-slate-200/60 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow duration-200">
+                    <CardContent className="p-5">
+                        <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-3">
+                            Total Leads
+                        </p>
+                        <p className="text-[32px] font-bold tracking-tight text-slate-900 dark:text-slate-100 leading-none">
+                            {stats.totalLeads.toLocaleString()}
+                        </p>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* Search and Filter */}
-            <Card>
-                <CardContent className="pt-6">
-                    <div className="flex flex-col md:flex-row gap-4">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                placeholder="Search campaigns..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="pl-9"
-                            />
-                        </div>
+            {/* Unified Toolbar - Sticky */}
+            <div className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-sm -mx-6 px-6 py-3 border-b border-slate-200/60 dark:border-slate-700/60">
+                <div className="flex flex-col sm:flex-row gap-3">
+                    {/* Search */}
+                    <div className="relative flex-1 max-w-sm">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        <Input
+                            placeholder="Search campaigns..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="pl-9 h-9 border-slate-300 dark:border-slate-600 focus:border-primary"
+                        />
+                    </div>
+
+                    {/* Filters */}
+                    <div className="flex gap-2 flex-wrap">
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="outline" className="gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={cn(
+                                        "h-9 gap-2 border-slate-300 dark:border-slate-600",
+                                        filterStatus !== 'all' && "border-primary bg-primary/5"
+                                    )}
+                                >
                                     <Filter className="h-4 w-4" />
-                                    Status: {filterStatus === 'all' ? 'All' : filterStatus}
+                                    Status {filterStatus !== 'all' && `(${filterStatus})`}
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Status</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
                                 <DropdownMenuItem onClick={() => setFilterStatus('all')}>All</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setFilterStatus('active')}>Active</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setFilterStatus('draft')}>Draft</DropdownMenuItem>
@@ -232,16 +306,22 @@ export default function CampaignsPage() {
                                 <DropdownMenuItem onClick={() => setFilterStatus('completed')}>Completed</DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
+
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="outline" className="gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={cn(
+                                        "h-9 gap-2 border-slate-300 dark:border-slate-600",
+                                        filterGoal !== 'all' && "border-primary bg-primary/5"
+                                    )}
+                                >
                                     <Target className="h-4 w-4" />
-                                    Goal: {filterGoal === 'all' ? 'All' : filterGoal}
+                                    Goal {filterGoal !== 'all' && `(${filterGoal})`}
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Goal</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
                                 <DropdownMenuItem onClick={() => setFilterGoal('all')}>All</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setFilterGoal('connections')}>Connections</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setFilterGoal('meetings')}>Meetings</DropdownMenuItem>
@@ -250,16 +330,22 @@ export default function CampaignsPage() {
                                 <DropdownMenuItem onClick={() => setFilterGoal('event_promotion')}>Event promotion</DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
+
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="outline" className="gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={cn(
+                                        "h-9 gap-2 border-slate-300 dark:border-slate-600",
+                                        filterType !== 'all' && "border-primary bg-primary/5"
+                                    )}
+                                >
                                     <Tag className="h-4 w-4" />
-                                    Type: {filterType === 'all' ? 'All' : filterType}
+                                    Type {filterType !== 'all' && `(${filterType})`}
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Type</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
                                 <DropdownMenuItem onClick={() => setFilterType('all')}>All</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setFilterType('standard')}>Standard</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setFilterType('event')}>Event</DropdownMenuItem>
@@ -269,14 +355,56 @@ export default function CampaignsPage() {
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>
-                </CardContent>
-            </Card>
+                </div>
+
+                {/* Active Filter Pills */}
+                {hasActiveFilters && (
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
+                        {filterStatus !== 'all' && (
+                            <Badge
+                                variant="secondary"
+                                className="gap-1.5 px-3 py-1 bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 cursor-pointer"
+                                onClick={() => setFilterStatus('all')}
+                            >
+                                Status: {filterStatus}
+                                <X className="h-3 w-3" />
+                            </Badge>
+                        )}
+                        {filterGoal !== 'all' && (
+                            <Badge
+                                variant="secondary"
+                                className="gap-1.5 px-3 py-1 bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 cursor-pointer"
+                                onClick={() => setFilterGoal('all')}
+                            >
+                                Goal: {filterGoal}
+                                <X className="h-3 w-3" />
+                            </Badge>
+                        )}
+                        {filterType !== 'all' && (
+                            <Badge
+                                variant="secondary"
+                                className="gap-1.5 px-3 py-1 bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 cursor-pointer"
+                                onClick={() => setFilterType('all')}
+                            >
+                                Type: {filterType}
+                                <X className="h-3 w-3" />
+                            </Badge>
+                        )}
+                        <button
+                            onClick={clearFilters}
+                            className="text-xs text-slate-600 dark:text-slate-400 hover:text-primary hover:underline ml-2"
+                        >
+                            Clear all
+                        </button>
+                    </div>
+                )}
+            </div>
 
             {/* Error State */}
             {error && (
-                <Card className="border-destructive">
+                <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20">
                     <CardContent className="pt-6">
-                        <p className="text-sm text-destructive">
+                        <p className="text-sm text-red-600 dark:text-red-400">
                             Error loading campaigns: {error}. Please ensure backend is running.
                         </p>
                     </CardContent>
@@ -284,7 +412,7 @@ export default function CampaignsPage() {
             )}
 
             {/* Campaigns Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {loading ? (
                     [...Array(6)].map((_, i) => (
                         <Card key={i} className="h-64">
@@ -303,16 +431,18 @@ export default function CampaignsPage() {
                         </Card>
                     ))
                 ) : filteredCampaigns.length === 0 ? (
-                    <Card className="col-span-full">
-                        <CardContent className="flex flex-col items-center justify-center py-12">
-                            <Target className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                            <h3 className="text-lg font-semibold mb-2">No campaigns found</h3>
-                            <p className="text-sm text-muted-foreground mb-4">
-                                {searchTerm || filterStatus !== 'all'
+                    <Card className="col-span-full border-slate-200/60 dark:border-slate-700/60">
+                        <CardContent className="flex flex-col items-center justify-center py-16">
+                            <Target className="h-12 w-12 text-slate-300 dark:text-slate-600 mb-4" />
+                            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                                No campaigns found
+                            </h3>
+                            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 text-center max-w-md">
+                                {searchTerm || hasActiveFilters
                                     ? 'Try adjusting your search or filters'
-                                    : 'Create your first campaign to get started'}
+                                    : 'Create your first campaign to start reaching out to your LinkedIn connections'}
                             </p>
-                            {!searchTerm && filterStatus === 'all' && (
+                            {!searchTerm && !hasActiveFilters && (
                                 <Button onClick={() => setShowCreateModal(true)} className="gap-2">
                                     <Plus className="w-4 h-4" /> Create Campaign
                                 </Button>
@@ -320,45 +450,45 @@ export default function CampaignsPage() {
                         </CardContent>
                     </Card>
                 ) : (
-                    filteredCampaigns.map((campaign) => {
+                    filteredCampaigns.map((campaign, index) => {
                         const statusConfig = getStatusConfig(campaign.status);
                         const StatusIcon = statusConfig.icon;
+                        const responseRate = campaign.response_rate || 0;
+                        const responseRateColor = getResponseRateColor(responseRate);
 
                         return (
                             <Card
                                 key={campaign.id}
-                                className="group hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] bg-card/40 backdrop-blur-sm border-white/5 transition-all duration-500 cursor-pointer hover:border-primary/40 relative overflow-hidden"
+                                className="group relative border border-slate-200/60 dark:border-slate-700/60 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer overflow-hidden"
                                 onClick={() => navigate(`/campaigns/${campaign.id}`)}
+                                style={{
+                                    animationDelay: `${index * 50}ms`,
+                                    animation: 'fadeInUp 300ms ease-out forwards',
+                                    opacity: 0
+                                }}
                             >
-                                {/* Hover Gradient Accent */}
-                                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                {/* Status Indicator Dot */}
+                                <div
+                                    className="absolute top-6 left-6 w-2 h-2 rounded-full"
+                                    style={{
+                                        backgroundColor: statusConfig.color,
+                                        boxShadow: campaign.status === 'active' ? `0 0 0 4px ${statusConfig.bgColor}` : 'none'
+                                    }}
+                                />
 
-                                <CardHeader className="pb-2">
-                                    <div className="flex items-start justify-between">
-                                        <div className="flex-1">
-                                            <CardTitle className="text-xl font-bold flex items-center gap-2 group-hover:text-primary transition-colors">
+                                <CardHeader className="pb-3 pl-10">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex-1 min-w-0">
+                                            <CardTitle className="text-base font-semibold text-slate-800 dark:text-slate-200 truncate group-hover:text-primary transition-colors">
                                                 {campaign.name}
                                             </CardTitle>
-                                            <CardDescription className="mt-1.5">
+                                            <CardDescription className="mt-2 text-sm line-clamp-2 leading-relaxed">
                                                 {campaign.description || 'No description'}
                                             </CardDescription>
-                                            <div className="flex flex-wrap gap-1.5 mt-2">
-                                                {campaign.goal && (
-                                                    <Badge variant="outline" className="text-[10px] capitalize">{campaign.goal}</Badge>
-                                                )}
-                                                {campaign.type && campaign.type !== 'standard' && (
-                                                    <Badge variant="outline" className="text-[10px]">{campaign.type}</Badge>
-                                                )}
-                                                {campaign.priority && campaign.priority !== 'normal' && (
-                                                    <Badge variant="outline" className="text-[10px] gap-0.5">
-                                                        <Flag className="h-2.5 w-2.5" /> {campaign.priority}
-                                                    </Badge>
-                                                )}
-                                            </div>
                                         </div>
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 -mt-1 -mr-2">
                                                     <MoreVertical className="h-4 w-4" />
                                                 </Button>
                                             </DropdownMenuTrigger>
@@ -373,18 +503,30 @@ export default function CampaignsPage() {
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem onClick={(e) => duplicateCampaign(campaign.id, e)}>
                                                     <Copy className="h-4 w-4 mr-2" />
-                                                    Duplicate Campaign
+                                                    Duplicate
                                                 </DropdownMenuItem>
-                                                {campaign.status !== 'active' && (
+                                                {campaign.status === 'draft' && (
                                                     <DropdownMenuItem onClick={(e) => launchCampaign(campaign.id, e)}>
                                                         <Play className="h-4 w-4 mr-2" />
-                                                        Launch Campaign
+                                                        Launch
+                                                    </DropdownMenuItem>
+                                                )}
+                                                {campaign.status === 'active' && (
+                                                    <DropdownMenuItem onClick={(e) => pauseCampaign(campaign.id, e)}>
+                                                        <Pause className="h-4 w-4 mr-2" />
+                                                        Pause
+                                                    </DropdownMenuItem>
+                                                )}
+                                                {campaign.status === 'paused' && (
+                                                    <DropdownMenuItem onClick={(e) => resumeCampaign(campaign.id, e)}>
+                                                        <Play className="h-4 w-4 mr-2" />
+                                                        Resume
                                                     </DropdownMenuItem>
                                                 )}
                                                 <DropdownMenuSeparator />
                                                 <DropdownMenuItem
                                                     onClick={(e) => deleteCampaign(campaign.id, e)}
-                                                    className="text-destructive"
+                                                    className="text-red-600 dark:text-red-400"
                                                 >
                                                     <Trash2 className="h-4 w-4 mr-2" />
                                                     Delete
@@ -393,58 +535,72 @@ export default function CampaignsPage() {
                                         </DropdownMenu>
                                     </div>
                                 </CardHeader>
-                                <CardContent className="space-y-4">
-                                    {/* Status Badge */}
-                                    <div className="flex items-center gap-2">
-                                        <Badge variant={statusConfig.variant} className="gap-1.5">
-                                            <StatusIcon className={`h-3 w-3 ${statusConfig.color}`} />
-                                            <span className="capitalize">{campaign.status || 'draft'}</span>
-                                        </Badge>
-                                        {campaign.status === 'active' && (
-                                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                                                Running
-                                            </div>
-                                        )}
-                                    </div>
 
-                                    {/* Stats */}
-                                    <div className="grid grid-cols-2 gap-4 pt-2">
-                                        <div>
-                                            <p className="text-xs text-muted-foreground">Leads</p>
-                                            <p className="text-2xl font-bold">{campaign.lead_count || 0}</p>
+                                <CardContent className="space-y-5 pt-2">
+                                    {/* Metrics Row */}
+                                    <div className="flex items-center gap-3 text-sm">
+                                        <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                                            <Users className="h-4 w-4" />
+                                            <span className="font-semibold text-slate-900 dark:text-slate-100">
+                                                {campaign.lead_count || 0}
+                                            </span>
                                         </div>
-                                        <div>
-                                            <p className="text-xs text-muted-foreground">Response Rate</p>
-                                            <p className="text-2xl font-bold">
-                                                {campaign.response_rate || 0}%
-                                            </p>
+                                        <span className="text-slate-300 dark:text-slate-600">•</span>
+                                        <div className={cn("flex items-center gap-1.5 font-semibold", responseRateColor)}>
+                                            {responseRate >= 30 ? (
+                                                <TrendingUp className="h-4 w-4" />
+                                            ) : responseRate >= 15 ? (
+                                                <TrendingUp className="h-4 w-4" />
+                                            ) : (
+                                                <TrendingDown className="h-4 w-4" />
+                                            )}
+                                            <span className="text-lg font-bold tracking-tight">
+                                                {responseRate}%
+                                            </span>
+                                        </div>
+                                        <span className="text-slate-300 dark:text-slate-600">•</span>
+                                        <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                                            <Clock className="h-3.5 w-3.5" />
+                                            {campaign.created_at
+                                                ? new Date(campaign.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                                : 'N/A'}
                                         </div>
                                     </div>
 
                                     {/* Progress Bar */}
-                                    <div className="space-y-1.5">
-                                        <div className="flex justify-between text-xs text-muted-foreground">
-                                            <span>Progress</span>
-                                            <span>{campaign.progress || 0}%</span>
-                                        </div>
-                                        <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                                    <div className="space-y-2">
+                                        <div className="h-[3px] bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                                             <div
-                                                className="h-full bg-primary transition-all duration-500"
-                                                style={{ width: `${campaign.progress || 0}%` }}
+                                                className="h-full rounded-full transition-all duration-500 ease-out"
+                                                style={{
+                                                    width: `${campaign.progress || 0}%`,
+                                                    backgroundColor: statusConfig.color
+                                                }}
                                             />
                                         </div>
                                     </div>
 
-                                    {/* Created Date */}
-                                    <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2 border-t">
-                                        <Calendar className="h-3 w-3" />
-                                        <span>
-                                            Created {campaign.created_at
-                                                ? new Date(campaign.created_at).toLocaleDateString()
-                                                : 'Unknown'}
-                                        </span>
-                                    </div>
+                                    {/* Tags */}
+                                    {(campaign.goal || campaign.type || campaign.priority) && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {campaign.goal && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                                    {campaign.goal}
+                                                </span>
+                                            )}
+                                            {campaign.type && campaign.type !== 'standard' && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                                    {campaign.type}
+                                                </span>
+                                            )}
+                                            {campaign.priority && campaign.priority !== 'normal' && (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+                                                    <Flag className="h-2.5 w-2.5" />
+                                                    {campaign.priority}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
                                 </CardContent>
                             </Card>
                         );
@@ -461,6 +617,19 @@ export default function CampaignsPage() {
             )}
 
             <PageGuide pageKey="campaigns" />
+
+            <style jsx>{`
+                @keyframes fadeInUp {
+                    from {
+                        opacity: 0;
+                        transform: translateY(10px);
+                    }
+                    to {
+                        opacity: 1;
+                        transform: translateY(0);
+                    }
+                }
+            `}</style>
         </div>
     );
 }

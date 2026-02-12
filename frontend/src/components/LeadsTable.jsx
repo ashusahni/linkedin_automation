@@ -201,6 +201,7 @@ export default function LeadsTable() {
             setMetaFilters(prev => ({
                 ...prev,
                 connectionDegree: connectionDegree || prev.connectionDegree,
+                quality: quality || prev.quality,
                 industry: industry || prev.industry
             }));
 
@@ -466,12 +467,15 @@ export default function LeadsTable() {
                 params.connection_degree = currentMetaFilters.connectionDegree;
             }
 
-            // Add quality filter from quick filters (Primary, Secondary, Tertiary)
-            if (currentQuickFilters.length > 0) {
-                const qualityFilters = currentQuickFilters.filter(f => ['primary', 'secondary', 'tertiary'].includes(f.toLowerCase()));
-                if (qualityFilters.length > 0) {
-                    params.quality_score = qualityFilters.join(',');
-                }
+            // Add quality filter from BOTH quick filters AND metaFilters.quality (Primary, Secondary, Tertiary)
+            const qualityFromQuick = currentQuickFilters.filter(f => ['primary', 'secondary', 'tertiary'].includes(f.toLowerCase()));
+            const qualityFromMeta = currentMetaFilters.quality?.trim() ? [currentMetaFilters.quality.toLowerCase()] : [];
+
+            // Combine both sources and deduplicate
+            const allQualityFilters = [...new Set([...qualityFromQuick, ...qualityFromMeta])];
+
+            if (allQualityFilters.length > 0) {
+                params.quality_score = allQualityFilters.join(',');
             }
 
             // Also include other meta filters if we want stats to be fully dynamic based on ALL filters
@@ -546,6 +550,7 @@ export default function LeadsTable() {
             industry: '',
             company: '',
             connectionDegree: '',
+            quality: '', // Reset quality too
             status: 'all',
             source: 'all',
             hasEmail: false,
@@ -775,6 +780,12 @@ export default function LeadsTable() {
             await axios.post('/api/leads/bulk-approve', { leadIds });
             addToast(`✅ Qualified ${leadIds.length} lead(s)`, 'success');
             setSelectedLeads(new Set());
+
+            // Clear quality filter so users can see ALL approved leads
+            // Otherwise they might not see their newly approved leads if they don't match the quality percentile
+            setMetaFilters(prev => ({ ...prev, quality: '' }));
+            setActiveQuickFilters(prev => prev.filter(f => !['primary', 'secondary', 'tertiary'].includes(f.toLowerCase())));
+
             fetchLeads();
             fetchStats(); // Update counters
         } catch (error) {

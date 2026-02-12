@@ -1,65 +1,127 @@
 import pool from '../db.js';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import '../config/index.js'; // Ensure config is loaded
 
+// Determine which AI provider to use
+const AI_PROVIDER = (process.env.AI_PROVIDER || 'openai').toLowerCase();
+
 // Initialize OpenAI client
-const apiKey = process.env.OPENAI_API_KEY || '';
+const openaiKey = process.env.OPENAI_API_KEY || '';
 let openai = null;
-if (apiKey) {
+if (openaiKey && AI_PROVIDER === 'openai') {
     openai = new OpenAI({
-        apiKey: apiKey
+        apiKey: openaiKey
+    });
+}
+
+// Initialize Anthropic (Claude) client
+const anthropicKey = process.env.ANTHROPIC_API_KEY || '';
+let anthropic = null;
+if (anthropicKey && AI_PROVIDER === 'claude') {
+    anthropic = new Anthropic({
+        apiKey: anthropicKey
     });
 }
 
 // Log configuration status on module load
 console.log(`\n🤖 AI Configuration:`);
-console.log(`   Provider: OpenAI`);
-if (apiKey) {
-    console.log(`   ✅ OpenAI API Key loaded: ${apiKey.substring(0, 7)}...${apiKey.substring(apiKey.length - 4)}`);
+console.log(`   Provider: ${AI_PROVIDER.toUpperCase()}`);
+
+if (AI_PROVIDER === 'claude') {
+    if (anthropicKey) {
+        console.log(`   ✅ Claude API Key loaded: ${anthropicKey.substring(0, 12)}...${anthropicKey.substring(anthropicKey.length - 4)}`);
+        console.log(`   Model: ${process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229'}`);
+    } else {
+        console.warn('   ⚠️ ANTHROPIC_API_KEY not found in environment variables');
+    }
 } else {
-    console.warn('   ⚠️ OPENAI_API_KEY not found in environment variables');
+    if (openaiKey) {
+        console.log(`   ✅ OpenAI API Key loaded: ${openaiKey.substring(0, 7)}...${openaiKey.substring(openaiKey.length - 4)}`);
+        console.log(`   Model: ${process.env.OPENAI_MODEL || 'gpt-4o-mini'}`);
+    } else {
+        console.warn('   ⚠️ OPENAI_API_KEY not found in environment variables');
+    }
 }
 console.log('');
 
 class AIService {
     /**
-     * Check if AI is configured (OpenAI)
+     * Check if AI is configured (OpenAI or Claude)
      */
     static isConfigured() {
-        const hasKey = !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0;
-        if (!hasKey) {
-            console.warn('⚠️ OPENAI_API_KEY not found or empty in environment variables');
-            console.warn('   Check backend/.env file and ensure OPENAI_API_KEY=sk-... is set');
+        if (AI_PROVIDER === 'claude') {
+            const hasKey = !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim().length > 0;
+            if (!hasKey) {
+                console.warn('⚠️ ANTHROPIC_API_KEY not found or empty in environment variables');
+                console.warn('   Check backend/.env file and ensure ANTHROPIC_API_KEY=sk-ant-... is set');
+            }
+            return hasKey;
+        } else {
+            const hasKey = !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim().length > 0;
+            if (!hasKey) {
+                console.warn('⚠️ OPENAI_API_KEY not found or empty in environment variables');
+                console.warn('   Check backend/.env file and ensure OPENAI_API_KEY=sk-... is set');
+            }
+            return hasKey;
         }
-        return hasKey;
     }
 
     /**
-     * Call OpenAI API
+     * Call AI API (supports both OpenAI and Claude)
      */
     static async callAI(prompt, maxTokens = 300, temperature = 0.8) {
-        if (!openai) {
-            throw new Error('OpenAI client not initialized. Please check OPENAI_API_KEY in .env file.');
+        if (AI_PROVIDER === 'claude') {
+            if (!anthropic) {
+                throw new Error('Claude client not initialized. Please check ANTHROPIC_API_KEY in .env file.');
+            }
+
+            console.log('   📡 Calling Claude API...');
+            const model = process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229';
+            console.log(`      Model: ${model}`);
+            console.log(`      Prompt length: ${prompt.length} chars`);
+
+            const response = await anthropic.messages.create({
+                model: model,
+                max_tokens: maxTokens,
+                temperature: temperature,
+                messages: [{ role: 'user', content: prompt }]
+            });
+
+            if (!response || !response.content || !response.content[0] || !response.content[0].text) {
+                throw new Error('Invalid response format from Claude');
+            }
+
+            const message = response.content[0].text.trim();
+            console.log(`   ✅ Claude API call successful (${message.length} chars)`);
+            return message;
+
+        } else {
+            // OpenAI
+            if (!openai) {
+                throw new Error('OpenAI client not initialized. Please check OPENAI_API_KEY in .env file.');
+            }
+
+            console.log('   📡 Calling OpenAI API...');
+            const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+            console.log(`      Model: ${model}`);
+            console.log(`      Prompt length: ${prompt.length} chars`);
+
+            const response = await openai.chat.completions.create({
+                model: model,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: temperature,
+                max_tokens: maxTokens
+            });
+
+            if (!response || !response.choices || !response.choices[0] || !response.choices[0].message) {
+                throw new Error('Invalid response format from OpenAI');
+            }
+
+            const message = response.choices[0].message.content.trim();
+            console.log(`   ✅ OpenAI API call successful (${message.length} chars)`);
+            return message;
         }
-
-        console.log('   📡 Calling OpenAI API...');
-        console.log(`      Model: gpt-4o-mini`);
-        console.log(`      Prompt length: ${prompt.length} chars`);
-
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: prompt }],
-            temperature: temperature,
-            max_tokens: maxTokens
-        });
-
-        if (!response || !response.choices || !response.choices[0] || !response.choices[0].message) {
-            throw new Error('Invalid response format from OpenAI');
-        }
-
-        const message = response.choices[0].message.content.trim();
-        console.log(`   ✅ OpenAI API call successful (${message.length} chars)`);
-        return message;
     }
 
     /**
@@ -177,7 +239,7 @@ RULES:
 4. NO emojis.
 5. Generate ONLY the message body. No "Hi [Name]," prefix (I'll add it). No quotes.`;
 
-            console.log(`   📡 Calling OpenAI (tone=${tone}, length=${length}, focus=${focus})...`);
+            console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} (tone=${tone}, length=${length}, focus=${focus})...`);
 
             let message = await this.callAI(prompt, length === 'short' ? 150 : 350, 0.8);
 
@@ -234,11 +296,11 @@ RULES:
         const length = options.length || 'medium';
         const focus = options.focus || 'general';
         const campaign = options.campaign || null;
-        
+
         try {
             if (!this.isConfigured()) {
-                console.warn('⚠️ OpenAI not configured, using personalized template');
-                // Even without OpenAI, use enrichment data to personalize
+                console.warn(`⚠️ ${AI_PROVIDER.toUpperCase()} not configured, using personalized template`);
+                // Even without AI, use enrichment data to personalize
                 if (enrichment && enrichment.bio) {
                     const bioSnippet = enrichment.bio.substring(0, 80);
                     return `Hi ${lead.first_name}, following up on my previous message. I saw your recent work in ${enrichment.interests?.[0] || lead.title || 'your field'} and thought you might find this relevant. Would love to hear your thoughts!`;
@@ -249,7 +311,7 @@ RULES:
             // Build rich prompt with all available data
             let enrichmentContext = '';
             let hasEnrichmentData = false;
-            
+
             if (enrichment) {
                 hasEnrichmentData = true;
                 if (enrichment.bio && enrichment.bio.trim().length > 0) {
@@ -269,7 +331,7 @@ RULES:
                     console.log(`      Recent posts: ${enrichment.recent_posts.length} items`);
                 }
             }
-            
+
             if (!hasEnrichmentData || enrichmentContext.trim().length === 0) {
                 console.log(`      ⚠️  No enrichment data available - will use basic lead info only`);
             }
@@ -345,12 +407,12 @@ Example of what TO write:
 
 Generate ONLY the message text, no quotes, no "Hi [Name]," prefix (I'll add that), just the message content.`;
 
-            console.log(`   📡 Calling OpenAI API (follow-up message, tone=${tone}, length=${length}, focus=${focus})...`);
+            console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} API (follow-up message, tone=${tone}, length=${length}, focus=${focus})...`);
             console.log(`      Enrichment data available: ${enrichment ? 'Yes' : 'No'}`);
-            
+
             const maxTokens = length === 'short' ? 150 : length === 'long' ? 400 : 300;
             let message = await this.callAI(prompt, maxTokens, 0.85);
-            
+
             // Add greeting if not present
             if (!message.toLowerCase().startsWith('hi ') && !message.toLowerCase().startsWith('hello ')) {
                 message = `Hi ${lead.first_name}, ${message}`;
@@ -400,7 +462,7 @@ Generate ONLY the message text, no quotes, no "Hi [Name]," prefix (I'll add that
     static async generateThoughtLeadershipPost(article) {
         try {
             if (!this.isConfigured()) {
-                console.warn('⚠️ OpenAI not configured, using template');
+                console.warn(`⚠️ ${AI_PROVIDER.toUpperCase()} not configured, using template`);
                 return `Interesting article: ${article.original_title}\n\n${article.source_url}\n\n#Leadership #Industry`;
             }
 
@@ -453,7 +515,7 @@ Generate ONLY the post text, no quotes or extra formatting.`;
             console.log(`   📋 Generating ${stepType} for: ${lead.first_name} ${lead.last_name}`);
             console.log(`      Enrichment: ${enrichment ? 'Available' : 'Not available'}`);
             console.log(`      Campaign context: ${campaignContext ? 'Available' : 'Not available'}`);
-            console.log(`      OpenAI: ${this.isConfigured() ? 'Configured' : 'Not configured (using template)'}`);
+            console.log(`      AI Provider: ${this.isConfigured() ? AI_PROVIDER.toUpperCase() : 'Not configured (using template)'}`);
 
             // 2. Use AI based on step type
             let message = '';
@@ -492,11 +554,11 @@ Generate ONLY the post text, no quotes or extra formatting.`;
         } catch (error) {
             console.error("❌ AI Generation Error:", error.message);
             console.error("Error stack:", error.stack);
-            
+
             // Always return a fallback message
             const leadResult = await pool.query("SELECT * FROM leads WHERE id = $1", [leadId]);
             const lead = leadResult.rows[0];
-            
+
             if (stepType === 'connection_request') {
                 return `Hi ${lead?.first_name || 'there'}, I'd love to connect and explore potential synergies between our work.`;
             } else {
