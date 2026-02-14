@@ -274,10 +274,25 @@ export async function searchLeadsComplete(req, res) {
       console.error("Failed to log import:", err.message);
     }
 
+    // Step 6: Push to external CRM (if configured)
+    let pushedToCrm = 0;
+    try {
+      const crmResult = await pushLeadsToCrm(leads);
+      pushedToCrm = crmResult.pushed ?? 0;
+      if (crmResult.error) {
+        console.log(`⚠️ CRM push error (leads still saved to DB): ${crmResult.error}`);
+      } else if (pushedToCrm > 0) {
+        console.log(`✅ Pushed ${pushedToCrm} leads to CRM`);
+      }
+    } catch (crmErr) {
+      console.error("Failed to push to CRM:", crmErr.message);
+    }
+
     console.log("\n✅ === SEARCH COMPLETED ===");
     console.log(`   Query: ${searchQuery || "(none)"}`);
     console.log(`   Total: ${leads.length}`);
     console.log(`   Saved: ${savedCount}`);
+    if (pushedToCrm > 0) console.log(`   Pushed to CRM: ${pushedToCrm}`);
     console.log(`   CSV: ${filename}\n`);
 
     return res.json({
@@ -287,6 +302,7 @@ export async function searchLeadsComplete(req, res) {
       totalLeads: leads.length,
       savedToDatabase: savedCount,
       duplicates: leads.length - savedCount,
+      pushedToCrm: pushedToCrm,
       csvFile: filename,
       csvPath: filepath
     });

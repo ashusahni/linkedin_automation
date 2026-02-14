@@ -797,6 +797,21 @@ export async function scrapeContacts(req, res) {
             await contactScraperService.initialize(sessionCookie);
         } catch (initError) {
             console.error('❌ Failed to initialize contact scraper:', initError.message);
+            
+            // Provide helpful error message for LinkedIn bot detection
+            if (initError.message.includes('ERR_TOO_MANY_REDIRECTS') || initError.message.includes('navigation failed')) {
+                return res.status(500).json({
+                    error: 'LinkedIn bot detection is blocking contact scraping',
+                    details: initError.message,
+                    suggestions: [
+                        'LinkedIn has detected automation and is blocking access',
+                        'Try using PhantomBuster Profile Scraper instead (configure PROFILE_SCRAPER_PHANTOM_ID)',
+                        'Or get a fresh LinkedIn cookie from a regular browser session',
+                        'Consider using non-headless mode: Set SCRAPER_HEADLESS=false in .env'
+                    ]
+                });
+            }
+            
             return res.status(500).json({
                 error: 'Failed to initialize LinkedIn session',
                 details: initError.message

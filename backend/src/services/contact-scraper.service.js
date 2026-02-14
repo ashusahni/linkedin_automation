@@ -46,7 +46,13 @@ class ContactScraperService {
                 '--disable-setuid-sandbox',
                 '--disable-blink-features=AutomationControlled',
                 '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process'
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu',
+                '--window-size=1920,1080'
             ]
         });
 
@@ -55,10 +61,36 @@ class ContactScraperService {
         // Set realistic viewport
         await this.page.setViewport({ width: 1920, height: 1080 });
 
-        // Set realistic user agent
+        // Set realistic user agent (use a more recent Chrome version)
         await this.page.setUserAgent(
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
         );
+
+        // Override webdriver property
+        await this.page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => false,
+            });
+        });
+
+        // Override plugins
+        await this.page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5],
+            });
+        });
+
+        // Override languages
+        await this.page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en'],
+            });
+        });
+
+        // Set extra headers
+        await this.page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+        });
 
         // 🆕 CRITICAL: Disable Puppeteer's default 30-second navigation timeout
         // This prevents "Navigation timeout of 30000 ms exceeded" errors
@@ -76,28 +108,69 @@ class ContactScraperService {
         });
 
         // Navigate to LinkedIn to verify session
-        console.log('🌐 Navigating to LinkedIn...');
+        // Strategy: Navigate to homepage first to establish session, then go to feed
+        console.log('🌐 Navigating to LinkedIn homepage...');
 
         let navigationSuccess = false;
         let lastError = null;
 
-        for (let attempt = 1; attempt <= 2; attempt++) {
+        for (let attempt = 1; attempt <= 3; attempt++) {
             try {
-                await this.page.goto('https://www.linkedin.com/feed/', {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 30000 // 30 seconds max
+                // Step 1: Navigate to homepage first (less likely to trigger redirect loops)
+                console.log(`   Attempt ${attempt}: Going to homepage...`);
+                await this.page.goto('https://www.linkedin.com/', {
+                    waitUntil: 'networkidle0',
+                    timeout: 45000
                 });
+
+                // Wait for page to settle
+                await new Promise(resolve => setTimeout(resolve, 3000));
+
+                // Check current URL - LinkedIn might redirect us
+                const currentUrl = this.page.url();
+                console.log(`   Current URL: ${currentUrl}`);
+
+                // If we're already on feed or logged in, great!
+                if (currentUrl.includes('/feed/') || 
+                    (!currentUrl.includes('/login') && !currentUrl.includes('/uas/login'))) {
+                    console.log('   ✅ Already authenticated on homepage');
+                    navigationSuccess = true;
+                    break;
+                }
+
+                // Step 2: Try navigating to feed if we're on homepage
+                if (currentUrl.includes('linkedin.com') && !currentUrl.includes('/login')) {
+                    console.log('   Navigating to feed page...');
+                    await this.page.goto('https://www.linkedin.com/feed/', {
+                        waitUntil: 'domcontentloaded',
+                        timeout: 30000
+                    });
+                    
+                    // Wait a bit
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    const feedUrl = this.page.url();
+                    console.log(`   Feed URL: ${feedUrl}`);
+                    
+                    if (!feedUrl.includes('/login') && !feedUrl.includes('/uas/login')) {
+                        navigationSuccess = true;
+                        break;
+                    }
+                }
+
+                // If we got here, navigation succeeded but might need to check login status
                 navigationSuccess = true;
                 break;
+
             } catch (error) {
                 lastError = error;
                 console.log(`⚠️  Navigation attempt ${attempt} failed: ${error.message}`);
 
-                if (attempt < 2) {
-                    console.log('   🔄 Retrying navigation...');
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                if (attempt < 3) {
+                    console.log(`   🔄 Retrying in ${attempt * 2} seconds...`);
+                    await new Promise(resolve => setTimeout(resolve, attempt * 2000));
                 } else {
-                    console.error('❌ Failed to navigate to LinkedIn after 2 attempts');
+                    console.error('❌ Failed to navigate to LinkedIn after 3 attempts');
                     throw new Error(`LinkedIn navigation failed: ${error.message}`);
                 }
             }
@@ -111,13 +184,18 @@ class ContactScraperService {
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Check if logged in
+        const finalUrl = this.page.url();
+        console.log(`   Final URL after navigation: ${finalUrl}`);
+        
         const isLoggedIn = await this.page.evaluate(() => {
             return !window.location.href.includes('/login') &&
-                !window.location.href.includes('/uas/login');
+                !window.location.href.includes('/uas/login') &&
+                !window.location.href.includes('/authwall');
         });
 
         if (!isLoggedIn) {
-            throw new Error('Failed to authenticate with LinkedIn. Check your session cookie.');
+            console.error(`   ❌ Not logged in. Final URL: ${finalUrl}`);
+            throw new Error('Failed to authenticate with LinkedIn. Check your session cookie - it may be expired or invalid.');
         }
 
         this.sessionCookie = sessionCookie;
@@ -146,31 +224,52 @@ class ContactScraperService {
         `, [leadIds]);
 
         const leads = result.rows;
+        console.log(`📋 Found ${leads.length} leads with LinkedIn URLs`);
 
         // Extract/update profile IDs if missing
         const profileIdsToScrape = [];
         for (const lead of leads) {
             let profileId = lead.linkedin_profile_id;
+            console.log(`\n🔍 Processing Lead ID ${lead.id}:`);
+            console.log(`   URL: ${lead.linkedin_url}`);
+            console.log(`   Existing Profile ID: ${profileId || 'NULL'}`);
 
             // If profile ID is missing, extract it
             if (!profileId && lead.linkedin_url) {
                 profileId = extractLinkedInProfileId(lead.linkedin_url);
+                console.log(`   Extracted Profile ID: ${profileId || 'FAILED'}`);
                 if (profileId) {
                     // Update the lead with the profile ID
                     await pool.query(
                         'UPDATE leads SET linkedin_profile_id = $1 WHERE id = $2',
                         [profileId, lead.id]
                     );
+                    console.log(`   ✅ Updated lead with profile ID`);
+                } else {
+                    console.log(`   ❌ Failed to extract profile ID from URL`);
                 }
             }
 
-            if (profileId && isValidLinkedInProfileId(profileId)) {
-                profileIdsToScrape.push(profileId);
+            if (profileId) {
+                const isValid = isValidLinkedInProfileId(profileId);
+                console.log(`   Validation: ${isValid ? '✅ VALID' : '❌ INVALID'}`);
+                if (isValid) {
+                    profileIdsToScrape.push(profileId);
+                    console.log(`   ✅ Added to scrape list`);
+                } else {
+                    console.log(`   ❌ Profile ID failed validation: "${profileId}"`);
+                }
+            } else {
+                console.log(`   ❌ No profile ID available`);
             }
         }
 
         if (profileIdsToScrape.length === 0) {
-            console.log('⚠️  No valid LinkedIn profile IDs found');
+            console.log('\n⚠️  No valid LinkedIn profile IDs found');
+            console.log('   Possible reasons:');
+            console.log('   1. LinkedIn URLs are invalid or malformed');
+            console.log('   2. URLs don\'t match pattern: linkedin.com/in/{profile-id}');
+            console.log('   3. Extracted profile IDs failed validation');
             return { jobId, message: 'No valid profiles to scrape' };
         }
 

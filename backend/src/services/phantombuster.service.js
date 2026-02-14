@@ -217,8 +217,10 @@ class PhantomBusterService {
       let hasLaunchArgs;
 
       if (options.minimalArgsForSearch || options.minimalArgs) {
-        // Search Export / Connections Export: Send absolutely NO arguments - phantom uses dashboard config
-        console.log("📌 Search Export: Using configuration from PhantomBuster dashboard (no arguments sent)");
+        // Search Export phantom REJECTS launch arguments ("argument invalid").
+        // It MUST use only the configuration saved in PhantomBuster dashboard (Search URL, limit, LinkedIn connection).
+        // Send ZERO arguments – no search URL, no cookie, nothing.
+        console.log("📌 Search Export: No arguments sent – phantom uses PhantomBuster dashboard config only");
         launchArgs = {};
         finalArgs = {};
         hasLaunchArgs = false;
@@ -403,6 +405,48 @@ class PhantomBusterService {
       console.log("📦 Container ID:", container.id);
       console.log("📦 Agent ID:", container.agentId);
 
+      // STRATEGY 0: Try /containers/fetch-result-object (gets result for this specific container)
+      try {
+        console.log("📊 Strategy 0: Trying /containers/fetch-result-object for container " + container.id + "...");
+        const resultObj = await pbRequest(`/containers/fetch-result-object?id=${container.id}`);
+        if (resultObj) {
+          console.log("   Response keys:", Object.keys(resultObj));
+          const roRaw = resultObj.resultObject ?? resultObj.url ?? resultObj.resultUrl ?? resultObj.outputUrl;
+          const roType = roRaw == null ? "null" : Array.isArray(roRaw) ? "array" : typeof roRaw;
+          if (roRaw != null) {
+            const preview = typeof roRaw === "string" ? roRaw.slice(0, 120) : JSON.stringify(roRaw).slice(0, 120);
+            console.log("   resultObject type:", roType, "| preview:", preview + (typeof roRaw === "string" && roRaw.length > 120 ? "..." : ""));
+          }
+          // PhantomBuster returns { resultObject: "url" } or { resultObject: { ... } }
+          const ro = roRaw;
+          if (ro && typeof ro === "string" && (ro.startsWith("http") || ro.startsWith("https"))) {
+            console.log(`✅ Found result URL from fetch-result-object`);
+            const data = await this.downloadResultFile(ro);
+            if (data && data.length > 0) {
+              console.log(`✅ Fetched ${data.length} records from container result object`);
+              return data;
+            }
+            console.log("   URL download returned 0 records (may need auth or empty file)");
+          } else if (ro && typeof ro === "object") {
+            const inline = Array.isArray(ro) ? this.parseResultData(ro) : this.extractInlineResult(ro);
+            if (inline && inline.length > 0) {
+              console.log(`✅ Found ${inline.length} records inline from fetch-result-object`);
+              return inline;
+            }
+          }
+          const inline = Array.isArray(resultObj)
+            ? this.parseResultData(resultObj)
+            : this.extractInlineResult(resultObj);
+          if (inline && inline.length > 0) {
+            console.log(`✅ Found ${inline.length} records inline from fetch-result-object`);
+            return inline;
+          }
+        }
+      } catch (e0) {
+        console.log(`⚠️  Strategy 0 failed: ${e0.message}`);
+        if (e0.response?.data) console.log("   API response:", JSON.stringify(e0.response.data).slice(0, 200));
+      }
+
       // STRATEGY 1: Try /agents/fetch-output (PhantomBuster API - URL or inline JSON)
       if (container.agentId) {
         try {
@@ -547,10 +591,15 @@ class PhantomBusterService {
         return empty;
       }
       const fileType = isCSV ? 'CSV' : 'JSON';
-      console.log(`📥 Downloading ${fileType} from: ${url}`);
+      console.log(`📥 Downloading ${fileType} from: ${url.substring(0, 80)}...`);
+      const headers = {};
+      if (getApiKey() && (url.includes('phantombuster.com') || url.includes('phantombuster.s3'))) {
+        headers["X-Phantombuster-Key"] = getApiKey();
+      }
       const response = await axios.get(url, {
         timeout: 60000,
         responseType: isCSV ? 'text' : 'json',
+        headers,
         validateStatus: () => true
       });
       const status = response.status;
@@ -880,46 +929,13 @@ class PhantomBusterService {
           ? Number(numberOfResults)
           : null;
 
-      // PhantomBuster LinkedIn Search Export often rejects launch args → "argument-invalid".
-      // Default: send NO custom args; phantom uses only what's set in its PhantomBuster dashboard.
-      // User must set the search URL (and limit) in PhantomBuster → LinkedIn Search Export agent.
-      // To try passing search URL/limit from the app, set SEARCH_EXPORT_USE_APP_ARGS=true (may still fail).
-      const useAppArgs = /^(1|true|yes)$/i.test(
-        String(process.env.SEARCH_EXPORT_USE_APP_ARGS || "").trim()
-      );
-      const argStyle = String(process.env.SEARCH_EXPORT_ARG_STYLE || "legacy").trim().toLowerCase();
-      const sendLimit = /^(1|true|yes)$/i.test(
-        String(process.env.SEARCH_EXPORT_SEND_LIMIT || "").trim()
-      );
-
+      // This phantom REJECTS all launch arguments – must use dashboard config only
       const additionalArgs = {};
-      if (useAppArgs) {
-        if (searchUrl) {
-          if (argStyle === "spreadsheet") {
-            additionalArgs.spreadsheetUrl = searchUrl;
-          } else {
-            additionalArgs.search = searchUrl;
-          }
-        }
-        if (sendLimit && limitNum != null) {
-          if (argStyle === "spreadsheet") {
-            additionalArgs.numberOfResults = limitNum;
-          } else {
-            additionalArgs.numberOfProfiles = limitNum;
-          }
-        }
-      }
 
       console.log("\n🔵 === STARTING LEAD SEARCH ===\n");
-      if (!useAppArgs) {
-        console.log("🔍 No custom args sent – phantom uses search URL & limit from PhantomBuster dashboard.");
-        if (searchUrl) console.log(`   (App built URL for reference: ${searchUrl})`);
-        console.log("");
-      } else {
-        if (searchUrl) console.log(`🔍 Search URL: ${searchUrl}`);
-        if (limitNum != null) console.log(`📊 Limit: ${limitNum}`);
-        console.log("");
-      }
+      console.log("🔍 Phantom uses search URL & limit from PhantomBuster dashboard (no args sent).");
+      if (searchUrl) console.log(`   (Reference: ${searchUrl})`);
+      console.log("");
 
       // LinkedIn Search Export phantom ID (must be set in .env)
       const phantomId = process.env.SEARCH_EXPORT_PHANTOM_ID || process.env.SEARCH_LEADS_PHANTOM_ID;

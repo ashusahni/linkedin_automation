@@ -127,7 +127,26 @@ export async function startScraping(req, res) {
         }
         
         // Force re-initialization if needed or just use existing
-        await contactScraperService.initialize(sessionCookie);
+        try {
+            await contactScraperService.initialize(sessionCookie);
+        } catch (initError) {
+            // LinkedIn is blocking Puppeteer automation - provide helpful error message
+            if (initError.message.includes('ERR_TOO_MANY_REDIRECTS') || initError.message.includes('navigation failed')) {
+                console.error('❌ LinkedIn is blocking automated browser access');
+                return res.status(500).json({ 
+                    error: 'LinkedIn bot detection is blocking contact scraping',
+                    details: initError.message,
+                    suggestions: [
+                        'LinkedIn has detected automation and is blocking access',
+                        'Try using PhantomBuster Profile Scraper instead (configure PROFILE_SCRAPER_PHANTOM_ID)',
+                        'Or get a fresh LinkedIn cookie from a regular browser session',
+                        'Consider using non-headless mode: Set SCRAPER_HEADLESS=false in .env'
+                    ]
+                });
+            }
+            throw initError; // Re-throw other errors
+        }
+        
         const result = await contactScraperService.scrapeApprovedLeads(targetLeadIds);
         
         res.json({
