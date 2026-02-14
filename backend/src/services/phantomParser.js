@@ -44,8 +44,15 @@ export function parsePhantomResults(resultData) {
 
   console.log(`📊 Found ${rows.length} raw entries`);
 
-  const leads = rows.map(row => {
+  const leads = rows.map((row, index) => {
     const r = normalizeRow(row);
+    
+    // Debug: Log available fields for first few rows
+    if (index < 3) {
+      console.log(`\n🔍 Row ${index + 1} - Available fields:`, Object.keys(r));
+      console.log(`   Sample values:`, Object.entries(r).slice(0, 5).map(([k, v]) => `${k}: ${v}`).join(', '));
+    }
+    
     // Extract LinkedIn URL – Connections Export & Search Export use various column names
     const linkedinUrl = r.profileUrl
       || r.linkedinProfileUrl
@@ -55,8 +62,31 @@ export function parsePhantomResults(resultData) {
       || r.profile
       || r.linkedin
       || r.vmid
+      || r.profileUrl
+      || r.linkedInProfileUrl
+      || r['Profile URL']
+      || r['LinkedIn URL']
+      || r['LinkedIn Profile URL']
+      || r['profile_url']
+      || r['linkedin_url']
       || (typeof r.profile === "string" && r.profile.includes("linkedin.com") ? r.profile : null)
       || null;
+    
+    // Debug: Log URL extraction result for first few rows
+    if (index < 3) {
+      if (linkedinUrl) {
+        console.log(`   ✅ Found LinkedIn URL: ${linkedinUrl.substring(0, 50)}...`);
+      } else {
+        console.log(`   ❌ No LinkedIn URL found in row ${index + 1}`);
+        // Try to find any field that might contain a LinkedIn URL
+        const possibleUrlFields = Object.entries(r).filter(([k, v]) => 
+          typeof v === 'string' && (v.includes('linkedin.com') || v.includes('linkedin'))
+        );
+        if (possibleUrlFields.length > 0) {
+          console.log(`   💡 Found potential URL fields:`, possibleUrlFields.map(([k, v]) => `${k}: ${v.substring(0, 50)}`).join(', '));
+        }
+      }
+    }
 
     // Build full name if not present
     let fullName = r.fullName || r.name || r.scraperFullName || null;
@@ -96,8 +126,31 @@ export function parsePhantomResults(resultData) {
   console.log(`✅ Parsed ${leads.length} valid leads (from ${rows.length} raw)`);
 
   if (leads.length === 0 && rows.length > 0) {
-    console.warn("⚠️ No valid leads (missing LinkedIn URL). Sample row keys:", Object.keys(normalizeRow(rows[0])));
+    console.warn("\n⚠️ No valid leads (missing LinkedIn URL)");
+    console.warn("Sample row keys:", Object.keys(normalizeRow(rows[0])));
     console.warn("Sample row:", JSON.stringify(rows[0], null, 2));
+    
+    // Check all rows to see if any have LinkedIn URLs
+    const rowsWithUrls = rows.filter((row, idx) => {
+      const r = normalizeRow(row);
+      const url = r.profileUrl || r.linkedinProfileUrl || r.linkedInUrl || r.linkedinUrl || r.url || r.profile || r.linkedin;
+      return url && typeof url === 'string' && url.includes('linkedin.com');
+    });
+    console.warn(`\n📊 Analysis: ${rowsWithUrls.length} out of ${rows.length} rows have LinkedIn URLs`);
+  } else if (leads.length < rows.length) {
+    const missingCount = rows.length - leads.length;
+    console.warn(`\n⚠️ ${missingCount} rows were filtered out (missing LinkedIn URL)`);
+    
+    // Show sample of rows that were filtered
+    const filteredRows = rows.filter((row, idx) => {
+      const r = normalizeRow(row);
+      const url = r.profileUrl || r.linkedinProfileUrl || r.linkedInUrl || r.linkedinUrl || r.url || r.profile || r.linkedin;
+      return !url || (typeof url === 'string' && !url.includes('linkedin.com'));
+    }).slice(0, 3);
+    
+    if (filteredRows.length > 0) {
+      console.warn("Sample filtered row keys:", Object.keys(normalizeRow(filteredRows[0])));
+    }
   }
 
   // Debug: Log connection degree and company extraction

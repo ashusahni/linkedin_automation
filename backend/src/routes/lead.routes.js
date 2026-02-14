@@ -12,6 +12,8 @@ import {
     importLeadsFromExcel,
     deleteCSVLeads,
     deleteAllLeads,
+    deleteAllImportedLeads,
+    bulkDeleteLeads,
     enrichLead,
     enrichLeadsBatch,
     getLeadEnrichment,
@@ -48,6 +50,8 @@ router.get("/:id/enrichment", getLeadEnrichment);
 router.put("/:id", updateLead);
 // Destructive routes - order matters (specific before param routes)
 router.delete("/csv-imports/all", deleteCSVLeads);
+router.delete("/imported/all", deleteAllImportedLeads);
+router.post("/bulk-delete", bulkDeleteLeads);
 router.delete("/all", deleteAllLeads);
 router.delete("/:id", deleteLead);
 router.post("/import", importLeads);

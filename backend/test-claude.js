@@ -4,7 +4,8 @@ import Anthropic from '@anthropic-ai/sdk';
 
 dotenv.config();
 
-const AI_PROVIDER = process.env.AI_PROVIDER || 'openai';
+// const AI_PROVIDER = process.env.AI_PROVIDER || 'openai';
+const AI_PROVIDER = 'claude';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 console.log('\n🧪 Testing Claude API Integration...\n');

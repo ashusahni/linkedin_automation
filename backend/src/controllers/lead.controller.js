@@ -237,8 +237,18 @@ export async function getLeads(req, res) {
 
       // Simple equality filters
       if (source && source !== 'all') {
-        conditionClauses.push(`source = $${params.length + 1}`);
-        params.push(source);
+        // Support comma-separated sources for imported leads filter
+        if (source.includes(',')) {
+          const sources = source.split(',').map(s => s.trim()).filter(s => s);
+          if (sources.length > 0) {
+            const placeholders = sources.map((_, i) => `$${params.length + i + 1}`).join(', ');
+            conditionClauses.push(`source IN (${placeholders})`);
+            params.push(...sources);
+          }
+        } else {
+          conditionClauses.push(`source = $${params.length + 1}`);
+          params.push(source);
+        }
       }
 
       if (status && status !== 'all') {
@@ -1402,6 +1412,82 @@ export async function deleteCSVLeads(req, res) {
   }
 }
 
+// DELETE /api/leads/imported/all - Delete all imported leads (CSV and Excel)
+export async function deleteAllImportedLeads(req, res) {
+  try {
+    // Count leads before deletion
+    const countResult = await pool.query(
+      "SELECT COUNT(*) FROM leads WHERE source IN ($1, $2)",
+      ['csv_import', 'excel_import']
+    );
+    const count = parseInt(countResult.rows[0].count, 10);
+
+    if (count === 0) {
+      return res.json({
+        success: true,
+        message: "No imported leads found",
+        deleted: 0
+      });
+    }
+
+    // Delete all leads with source = 'csv_import' or 'excel_import'
+    const result = await pool.query(
+      "DELETE FROM leads WHERE source IN ($1, $2)",
+      ['csv_import', 'excel_import']
+    );
+
+    console.log(`🗑️ Deleted ${count} imported leads (CSV and Excel)`);
+
+    return res.json({
+      success: true,
+      message: `Successfully deleted ${count} imported leads`,
+      deleted: count
+    });
+  } catch (err) {
+    console.error("❌ Delete imported leads error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/bulk-delete - Delete multiple leads by IDs
+export async function bulkDeleteLeads(req, res) {
+  try {
+    const { leadIds } = req.body;
+
+    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ error: 'leadIds array is required' });
+    }
+
+    // Delete leads and related data
+    // First delete from dependent tables
+    await pool.query(
+      "DELETE FROM lead_enrichment WHERE lead_id = ANY($1)",
+      [leadIds]
+    );
+    await pool.query(
+      "DELETE FROM campaign_leads WHERE lead_id = ANY($1)",
+      [leadIds]
+    );
+
+    // Then delete the leads
+    const result = await pool.query(
+      "DELETE FROM leads WHERE id = ANY($1) RETURNING id",
+      [leadIds]
+    );
+
+    console.log(`🗑️ Deleted ${result.rowCount} leads`);
+
+    return res.json({
+      success: true,
+      message: `Successfully deleted ${result.rowCount} leads`,
+      deleted: result.rowCount
+    });
+  } catch (err) {
+    console.error("❌ Bulk delete leads error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 // ============================================================================
 // PHASE 4: Lead Review & Approval Endpoints
 // ============================================================================
@@ -1788,11 +1874,26 @@ export async function getReviewStats(req, res) {
         `, params);
     }
 
+    // Also get imported leads count (csv_import or excel_import)
+    const importedWhereClause = whereConditions.length > 0
+      ? whereClause + ' AND (source = $' + (params.length + 1) + ' OR source = $' + (params.length + 2) + ')'
+      : 'WHERE (source = $1 OR source = $2)';
+    const importedParams = whereConditions.length > 0 
+      ? [...params, 'csv_import', 'excel_import']
+      : ['csv_import', 'excel_import'];
+    
+    const importedResult = await pool.query(`
+      SELECT COUNT(*) as count
+      FROM leads
+      ${importedWhereClause}
+    `, importedParams);
+
     // Format response with default values
     const stats = {
       to_be_reviewed: 0,
       approved: 0,
       rejected: 0,
+      imported: parseInt(importedResult.rows[0]?.count || 0, 10),
       total: 0
     };
 
