@@ -35,6 +35,9 @@ CORS_ORIGIN=https://your-app.vercel.app
 PHANTOMBUSTER_API_KEY=your_key_here
 CONNECTIONS_EXPORT_PHANTOM_ID=your_id_here
 SEARCH_EXPORT_PHANTOM_ID=your_id_here
+# Required for phantom to run the search (not just launch)
+SEARCH_EXPORT_DEFAULT_URL=https://www.linkedin.com/search/results/people/?keywords=CEO&origin=GLOBAL_SEARCH_HEADER
+SEARCH_EXPORT_DEFAULT_LIMIT=50
 MESSAGE_SENDER_PHANTOM_ID=your_id_here
 LINKEDIN_SESSION_COOKIE=li_at=...
 

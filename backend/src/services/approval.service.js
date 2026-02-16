@@ -22,7 +22,7 @@ export const ApprovalService = {
     // Get pending items (optionally filtered by campaign)
     async getPendingItems(campaignId = null) {
         let query = `
-            SELECT aq.*, l.first_name, l.last_name, l.company, l.title, l.linkedin_url, c.name as campaign_name
+            SELECT aq.*, l.first_name, l.last_name, l.company, l.title, l.linkedin_url, l.email, c.name as campaign_name
             FROM approval_queue aq
             JOIN campaign_leads cl ON aq.campaign_id = cl.campaign_id AND aq.lead_id = cl.lead_id
             JOIN leads l ON cl.lead_id = l.id

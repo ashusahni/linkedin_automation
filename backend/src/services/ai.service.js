@@ -639,6 +639,106 @@ Generate ONLY the email body (no subject line).`;
     }
 
     /**
+     * Generate a Gmail/email draft with subject line and longer body (for approval queue).
+     * Returns { subject, body } for use in gmail_outreach step_type.
+     * @param {Object} lead - Lead information
+     * @param {Object} enrichment - Enriched profile data (optional)
+     * @param {Object} options - { tone, length, focus, campaign }
+     */
+    static async generateGmailDraft(lead, enrichment = null, options = {}) {
+        const tone = options.tone || 'professional';
+        const length = options.length || 'medium';
+        const focus = options.focus || 'general';
+        const campaign = options.campaign || null;
+
+        try {
+            if (!this.isConfigured()) {
+                const fallbackSubject = `Quick thought for ${lead.first_name}`;
+                const fallbackBody = `Hi ${lead.first_name},\n\nI came across your profile and was impressed by your work at ${lead.company || 'your company'}. I'd love to connect and explore potential collaboration.\n\nWould you be open to a quick chat?\n\nBest regards`;
+                return { subject: fallbackSubject, body: fallbackBody };
+            }
+
+            let enrichmentContext = '';
+            if (enrichment) {
+                if (enrichment.bio?.trim()) enrichmentContext += `\nProfile Bio:\n${enrichment.bio}`;
+                if (enrichment.interests?.length) enrichmentContext += `\nInterests: ${enrichment.interests.slice(0, 8).join(', ')}`;
+                if (enrichment.recent_posts?.length) {
+                    enrichmentContext += '\nRecent activity (mention if relevant):';
+                    enrichment.recent_posts.slice(0, 3).forEach((p, i) => {
+                        const t = p.title || p.text || JSON.stringify(p);
+                        enrichmentContext += `\n${i + 1}. ${t.substring(0, 180)}`;
+                    });
+                }
+            }
+
+            let campaignContext = '';
+            if (campaign) {
+                campaignContext = '\nCampaign context (align with this):';
+                if (campaign.goal) campaignContext += ` Goal: ${campaign.goal}`;
+                if (campaign.type) campaignContext += ` | Type: ${campaign.type}`;
+                if (campaign.description) campaignContext += ` | ${campaign.description}`;
+            }
+
+            const toneMap = {
+                professional: 'Professional and polished, no slang.',
+                friendly: 'Warm and approachable, conversational.',
+                casual: 'Relaxed and conversational.',
+                formal: 'Formal and businesslike.',
+                warm: 'Warm and personable, genuine interest.'
+            };
+            const lengthMap = {
+                short: 'Body: 120-180 words. Subject: concise, under 60 characters.',
+                medium: 'Body: 180-280 words. Subject: clear, under 80 characters.',
+                long: 'Body: 280-400 words. Subject: descriptive, under 100 characters.'
+            };
+
+            const prompt = `You are writing a personalized outreach EMAIL (Gmail) to a prospect. Generate a complete draft.
+
+Lead:
+- Name: ${lead.full_name}
+- Title: ${lead.title || 'N/A'}
+- Company: ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+
+Requirements:
+- TONE: ${toneMap[tone] || toneMap.professional}
+- LENGTH: ${lengthMap[length] || lengthMap.medium}
+- FOCUS: Reference specific details from their profile/company when possible. ${focus === 'recent_post' ? 'Mention recent post/activity if available.' : focus === 'company' ? 'Focus on their company and role.' : 'Balanced personalization.'}
+
+OUTPUT FORMAT (strict):
+1. First line must be exactly: SUBJECT: <your subject line>
+2. Then one blank line.
+3. Then the full email body. Start with a greeting (e.g. Hi ${lead.first_name},). Use proper paragraphs. Sign off professionally (e.g. Best regards).
+- No quotes around subject or body.
+- No "Subject:" in the body text—only in the first line as SUBJECT: ...
+- Body should be longer and more substantive than a short LinkedIn message (multiple paragraphs, 150-350 words depending on length).`;
+
+            console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} (Gmail draft, tone=${tone}, length=${length})...`);
+            const maxTokens = length === 'long' ? 650 : length === 'short' ? 350 : 500;
+            const raw = await this.callAI(prompt, maxTokens, 0.8);
+            if (!raw || typeof raw !== 'string') {
+                throw new Error('Invalid AI response');
+            }
+
+            const subjectMatch = raw.match(/^\s*SUBJECT:\s*(.+?)(?:\n|$)/im);
+            const subject = subjectMatch ? subjectMatch[1].trim() : `Quick thought for ${lead.first_name}`;
+            let body = raw;
+            if (subjectMatch) {
+                body = raw.slice(raw.indexOf('\n')).replace(/^\s*\n?/, '').trim();
+            }
+            if (body.length > 4000) body = body.substring(0, 3997) + '...';
+
+            console.log(`   ✅ Gmail draft generated (subject: ${subject.length} chars, body: ${body.length} chars)`);
+            return { subject, body };
+        } catch (error) {
+            console.error('❌ AI Gmail Draft Error:', error.message);
+            return {
+                subject: `Quick thought for ${lead.first_name}`,
+                body: `Hi ${lead.first_name},\n\nI came across your profile and was impressed by your work at ${lead.company || 'your company'}. I'd love to connect and explore potential collaboration.\n\nWould you be open to a quick chat?\n\nBest regards`
+            };
+        }
+    }
+
+    /**
      * Generate personalized SMS message (max 160 chars)
      */
     async generateSMSOutreach(lead, enrichment = null) {

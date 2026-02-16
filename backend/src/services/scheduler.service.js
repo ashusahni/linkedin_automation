@@ -81,7 +81,7 @@ async function executeStepForLead(lead) {
     console.log(`🤖 Processing Lead ${lead.lead_id} -> Step ${lead.current_step} (${lead.step_type})`);
 
     const linkedInStepTypes = ['connection_request', 'message'];
-    const supportedStepTypes = ['connection_request', 'message', 'email'];
+    const supportedStepTypes = ['connection_request', 'message', 'email', 'gmail_outreach'];
 
     // 1. SAFETY CHECK: Have we hit the LinkedIn daily limit?
     const isLinkedInAction = linkedInStepTypes.includes(lead.step_type);
@@ -109,7 +109,7 @@ async function executeStepForLead(lead) {
         const profile = leadDetails.rows[0];
 
         // --- HUMAN-IN-THE-LOOP CHECK ---
-        const requiresApproval = ['message', 'connection_request'].includes(lead.step_type);
+        const requiresApproval = ['message', 'connection_request', 'gmail_outreach'].includes(lead.step_type);
         const queueItemRes = await pool.query(
             "SELECT * FROM approval_queue WHERE campaign_id = $1 AND lead_id = $2 AND step_type = $3 ORDER BY created_at DESC LIMIT 1",
             [lead.campaign_id, lead.lead_id, lead.step_type]
@@ -119,17 +119,39 @@ async function executeStepForLead(lead) {
         if (requiresApproval && (!queueItem || queueItem.status !== 'approved')) {
             console.log(`✋ Admin Approval Required for Lead ${lead.lead_id}, Step ${lead.current_step}`);
             if (!queueItem) {
-                const templateContent = lead.step_content || `Hi {firstName}, I'd like to connect.`;
-                let content = templateContent;
-                if (profile) {
-                    content = content.replace(/\{firstName\}/g, profile.first_name || "there")
-                        .replace(/\{lastName\}/g, profile.last_name || "")
-                        .replace(/\{fullName\}/g, profile.full_name || "there")
-                        .replace(/\{company\}/g, profile.company || "your company")
-                        .replace(/\{title\}/g, profile.title || "your role");
+                if (lead.step_type === 'gmail_outreach') {
+                    try {
+                        const enrichmentRes = await pool.query("SELECT * FROM lead_enrichment WHERE lead_id = $1", [lead.lead_id]);
+                        const enrichment = enrichmentRes.rows[0] || null;
+                        let campaignContext = null;
+                        const campRes = await pool.query("SELECT goal, type, description, target_audience FROM campaigns WHERE id = $1", [lead.campaign_id]);
+                        if (campRes.rows[0]) campaignContext = campRes.rows[0];
+                        const { default: AIService } = await import('./ai.service.js');
+                        const draft = await AIService.generateGmailDraft(profile, enrichment, { campaign: campaignContext });
+                        const content = JSON.stringify({ subject: draft.subject, body: draft.body });
+                        await ApprovalService.addToQueue(lead.campaign_id, lead.lead_id, lead.step_type, content);
+                        console.log(`📝 Gmail draft generated and added to approval queue`);
+                    } catch (err) {
+                        console.error('Gmail draft generation failed:', err.message);
+                        const content = JSON.stringify({
+                            subject: `Quick thought for ${profile.first_name}`,
+                            body: `Hi ${profile.first_name},\n\nI came across your profile and would like to connect.\n\nBest regards`
+                        });
+                        await ApprovalService.addToQueue(lead.campaign_id, lead.lead_id, lead.step_type, content);
+                    }
+                } else {
+                    const templateContent = lead.step_content || `Hi {firstName}, I'd like to connect.`;
+                    let content = templateContent;
+                    if (profile) {
+                        content = content.replace(/\{firstName\}/g, profile.first_name || "there")
+                            .replace(/\{lastName\}/g, profile.last_name || "")
+                            .replace(/\{fullName\}/g, profile.full_name || "there")
+                            .replace(/\{company\}/g, profile.company || "your company")
+                            .replace(/\{title\}/g, profile.title || "your role");
+                    }
+                    console.log(`📝 Using template message (no AI generation)`);
+                    await ApprovalService.addToQueue(lead.campaign_id, lead.lead_id, lead.step_type, content);
                 }
-                console.log(`📝 Using template message (no AI generation)`);
-                await ApprovalService.addToQueue(lead.campaign_id, lead.lead_id, lead.step_type, content);
             }
             await pool.query("UPDATE campaign_leads SET status = 'needs_approval' WHERE campaign_id = $1 AND lead_id = $2", [lead.campaign_id, lead.lead_id]);
             return;
@@ -257,6 +279,10 @@ async function executeStepForLead(lead) {
                 );
                 await advanceStep(lead);
             }
+        } else if (lead.step_type === 'gmail_outreach') {
+            // Gmail draft was approved; no automatic send (user can copy to Gmail). Just advance.
+            console.log(`📬 Gmail draft approved for lead ${lead.lead_id}, advancing step`);
+            await advanceStep(lead);
         } else {
             console.warn(`⚠️ Unknown step_type "${lead.step_type}". Marking failed.`);
             await pool.query("UPDATE campaign_leads SET status = 'failed' WHERE campaign_id = $1 AND lead_id = $2", [lead.campaign_id, lead.lead_id]);

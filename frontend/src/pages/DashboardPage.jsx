@@ -20,6 +20,8 @@ import {
     Search,
     Filter,
     X,
+    ChevronDown,
+    ChevronRight,
     Info,
     Sparkles,
     MoveRight,
@@ -155,8 +157,10 @@ export default function DashboardPage() {
     const [loading, setLoading] = useState(true);
     const [industrySearchTerm, setIndustrySearchTerm] = useState('');
     const [selectedIndustries, setSelectedIndustries] = useState(new Set());
+    const [expandedIndustries, setExpandedIndustries] = useState(new Set());
     const [hoveredIndustry, setHoveredIndustry] = useState(null);
     const [activeCampaignIndex, setActiveCampaignIndex] = useState(null);
+    const [selectedConnectionDegree, setSelectedConnectionDegree] = useState(null); // null | '1st' | '2nd' | '3rd'
 
     // Preferences & Chart Interaction
     const [settings, setSettings] = useState(null);
@@ -174,7 +178,7 @@ export default function DashboardPage() {
 
     useEffect(() => {
         fetchAnalytics();
-    }, [period]);
+    }, [period, selectedConnectionDegree]);
 
     useEffect(() => {
         axios.get('/api/leads/imports?limit=5').then((r) => setImports(r.data || [])).catch(() => { });
@@ -212,10 +216,16 @@ export default function DashboardPage() {
 
     const hasProfileUrl = !!settings?.preferences?.linkedinProfileUrl;
 
+    const toggleConnectionDegreeFilter = (degree) => {
+        setSelectedConnectionDegree((prev) => (prev === degree ? null : degree));
+    };
+
     const fetchAnalytics = async () => {
         try {
             setLoading(true);
-            const res = await axios.get(`/api/analytics/dashboard?period=${period}&preferences=${preferencesApplied}`);
+            const params = new URLSearchParams({ period, preferences: preferencesApplied });
+            if (selectedConnectionDegree) params.set('connection_degree', selectedConnectionDegree);
+            const res = await axios.get(`/api/analytics/dashboard?${params.toString()}`);
             setAnalytics(res.data);
         } catch (err) {
             console.error('Failed to fetch dashboard analytics', err);
@@ -396,10 +406,32 @@ export default function DashboardPage() {
         }
     });
 
-    // Filter industries based on search term (top-level only)
-    const filteredIndustryData = industryPieData.filter((item) =>
-        item.name.toLowerCase().includes(industrySearchTerm.toLowerCase())
-    );
+    // Filter industries based on search term (top-level and subcategories)
+    const searchLower = industrySearchTerm.toLowerCase().trim();
+    const filteredIndustryData = searchLower
+        ? industryPieData.filter((item) => {
+            const nameMatches = item.name.toLowerCase().includes(searchLower);
+            const subMatches = (item.subCategories || []).some(
+                (sub) => sub.name.toLowerCase().includes(searchLower)
+            );
+            return nameMatches || subMatches;
+        })
+        : industryPieData;
+
+    // Auto-expand industries when search matches a subcategory
+    useEffect(() => {
+        if (!searchLower) return;
+        const toExpand = industryPieData
+            .filter((item) =>
+                (item.subCategories || []).some((sub) =>
+                    sub.name.toLowerCase().includes(searchLower)
+                )
+            )
+            .map((item) => item.name);
+        if (toExpand.length > 0) {
+            setExpandedIndustries((prev) => new Set([...prev, ...toExpand]));
+        }
+    }, [searchLower]);
 
     // Toggle industry selection
     const toggleIndustrySelection = (industryName) => {
@@ -416,6 +448,20 @@ export default function DashboardPage() {
     const clearSelections = () => {
         setSelectedIndustries(new Set());
         setIndustrySearchTerm('');
+    };
+
+    // Toggle industry expand/collapse for subcategories
+    const toggleIndustryExpanded = (industryName, e) => {
+        e?.stopPropagation?.();
+        setExpandedIndustries((prev) => {
+            const next = new Set(prev);
+            if (next.has(industryName)) {
+                next.delete(industryName);
+            } else {
+                next.add(industryName);
+            }
+            return next;
+        });
     };
 
     // If exactly one industry is selected AND we have sub-categories for it,
@@ -500,6 +546,11 @@ export default function DashboardPage() {
                             <p className="text-muted-foreground">
                                 Search, lead generation & campaign analytics
                             </p>
+                            {selectedConnectionDegree && (
+                                <Badge variant="secondary" className="text-xs font-medium">
+                                    Filtered by {selectedConnectionDegree} degree (past year)
+                                </Badge>
+                            )}
                         </div>
                     </div>
                     <div className="flex flex-col items-end gap-2">
@@ -646,7 +697,7 @@ export default function DashboardPage() {
                                             <div
                                                 key={idx}
                                                 className="cursor-pointer flex flex-col p-4 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all group relative overflow-hidden space-y-2"
-                                                onClick={() => navigate(`/leads?quality=${item.id}`)}
+                                                onClick={() => navigate(selectedConnectionDegree ? `/leads?quality=${item.id}&connection_degree=${selectedConnectionDegree}` : `/leads?quality=${item.id}`)}
                                                 role="button"
                                                 tabIndex={0}
                                             >
@@ -705,22 +756,49 @@ export default function DashboardPage() {
                             )}
                         </div>
 
+                        {/* Connection degree filter: no results hint */}
+                        {selectedConnectionDegree && !loading && (ls.totalLeads ?? 0) === 0 && (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/50 p-4 flex items-start gap-3">
+                                <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="font-medium text-amber-900 dark:text-amber-100">No {selectedConnectionDegree} degree leads found</p>
+                                    <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                                        Connection degree is set when importing from PhantomBuster. CSV/Excel imports may not include it. Clear the filter to see all leads.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Connection Type - Moved Up */}
                         <div className="rounded-lg border bg-muted/20 p-4 transition-all hover:bg-muted/30">
                             <div className="flex items-center justify-between mb-4">
                                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                                     <UserCheck className="h-3.5 w-3.5 text-primary" />
                                     Connection Type
-                                    <InfoTooltip content="Distribution of 1st, 2nd, and 3rd degree connections." />
+                                    <InfoTooltip content={selectedConnectionDegree ? `Showing only ${selectedConnectionDegree} degree leads. Click a card to filter, click again to clear.` : "Distribution of 1st, 2nd, and 3rd degree connections. Click a card to filter dashboard by that degree."} />
                                 </p>
+                                {selectedConnectionDegree && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setSelectedConnectionDegree(null)}
+                                        className="h-7 px-2 text-xs gap-1"
+                                    >
+                                        <X className="h-3 w-3" />
+                                        Clear filter
+                                    </Button>
+                                )}
                             </div>
                             {loading ? (
                                 <div className="h-20 flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
                             ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                     <div
-                                        className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
-                                        onClick={() => navigate('/leads?connection_degree=1st')}
+                                        className={cn(
+                                            "flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group",
+                                            selectedConnectionDegree === '1st' && "ring-2 ring-primary bg-primary/10 border-primary/50"
+                                        )}
+                                        onClick={() => toggleConnectionDegreeFilter('1st')}
                                     >
                                         <div className="flex items-center gap-2">
                                             <div className="p-1.5 rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
@@ -734,8 +812,11 @@ export default function DashboardPage() {
                                         </div>
                                     </div>
                                     <div
-                                        className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
-                                        onClick={() => navigate('/leads?connection_degree=2nd')}
+                                        className={cn(
+                                            "flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group",
+                                            selectedConnectionDegree === '2nd' && "ring-2 ring-primary bg-primary/10 border-primary/50"
+                                        )}
+                                        onClick={() => toggleConnectionDegreeFilter('2nd')}
                                     >
                                         <div className="flex items-center gap-2">
                                             <div className="p-1.5 rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
@@ -749,8 +830,11 @@ export default function DashboardPage() {
                                         </div>
                                     </div>
                                     <div
-                                        className="flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group"
-                                        onClick={() => navigate('/leads?connection_degree=3rd')}
+                                        className={cn(
+                                            "flex items-center justify-between p-3 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all cursor-pointer group",
+                                            selectedConnectionDegree === '3rd' && "ring-2 ring-primary bg-primary/10 border-primary/50"
+                                        )}
+                                        onClick={() => toggleConnectionDegreeFilter('3rd')}
                                     >
                                         <div className="flex items-center gap-2">
                                             <div className="p-1.5 rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
@@ -968,7 +1052,12 @@ export default function DashboardPage() {
                                                             variant="outline"
                                                             size="sm"
                                                             className="gap-2 bg-background/50 hover:bg-background"
-                                                            onClick={() => navigate(`/leads?industry=${encodeURIComponent(Array.from(selectedIndustries)[0])}`)}
+                                                            onClick={() => {
+                                                                const params = new URLSearchParams();
+                                                                params.set('industry', Array.from(selectedIndustries)[0]);
+                                                                if (selectedConnectionDegree) params.set('connection_degree', selectedConnectionDegree);
+                                                                navigate(`/leads?${params.toString()}`);
+                                                            }}
                                                         >
                                                             <MoveRight className="h-4 w-4" />
                                                             View in Leads List
@@ -1105,88 +1194,142 @@ export default function DashboardPage() {
                                                     />
                                                 </div>
 
-                                                {/* Industry List with Details */}
+                                                {/* Industry List with Details and Subcategories */}
                                                 <div className="border rounded-lg bg-background/50 p-3 max-h-[340px] overflow-y-auto relative">
-                                                    <div className="space-y-2">
+                                                    <div className="space-y-1">
                                                         {filteredIndustryData.length > 0 ? (
                                                             filteredIndustryData.map((entry, i) => {
                                                                 const isSelected = selectedIndustries.has(entry.name);
                                                                 const isHovered = hoveredIndustry === entry.name;
+                                                                const subSlices = subIndustryMap[entry.name] || [];
+                                                                const hasSubcategories = subSlices.length > 0;
+                                                                const isExpanded = expandedIndustries.has(entry.name);
                                                                 return (
-                                                                    <div
-                                                                        key={i}
-                                                                        onClick={() => toggleIndustrySelection(entry.name)}
-                                                                        onMouseEnter={() => setHoveredIndustry(entry.name)}
-                                                                        onMouseLeave={() => setHoveredIndustry(null)}
-                                                                        className={cn(
-                                                                            "flex items-center gap-3 p-3 rounded-md transition-all cursor-pointer border relative group",
-                                                                            isSelected
-                                                                                ? "bg-primary/10 border-primary/50 shadow-sm"
-                                                                                : "hover:bg-muted/50 border-transparent hover:border-border"
-                                                                        )}
-                                                                    >
+                                                                    <div key={i} className="space-y-1">
                                                                         <div
-                                                                            className="w-5 h-5 rounded-full flex-shrink-0 border-2 border-background shadow-sm"
-                                                                            style={{ backgroundColor: entry.fill }}
-                                                                        />
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <p className={cn(
-                                                                                "text-sm font-medium text-foreground",
-                                                                                isSelected && "text-primary"
-                                                                            )}>
-                                                                                {entry.name}
-                                                                            </p>
-                                                                            <div className="flex items-center gap-3 mt-0.5">
-                                                                                <p className="text-xs text-muted-foreground">
-                                                                                    {entry.value} {entry.value === 1 ? 'lead' : 'leads'}
-                                                                                </p>
-                                                                                <span className="text-xs text-muted-foreground">·</span>
-                                                                                <p className="text-xs font-semibold text-foreground">
-                                                                                    {entry.percentage}%
-                                                                                </p>
-                                                                            </div>
-                                                                        </div>
-
-                                                                        <Button
-                                                                            variant="ghost"
-                                                                            size="icon"
+                                                                            onClick={() => toggleIndustrySelection(entry.name)}
+                                                                            onMouseEnter={() => setHoveredIndustry(entry.name)}
+                                                                            onMouseLeave={() => setHoveredIndustry(null)}
                                                                             className={cn(
-                                                                                "h-8 w-8 ml-1 shrink-0 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all",
-                                                                                !isHovered && !isSelected && "opacity-0 group-hover:opacity-100"
+                                                                                "flex items-center gap-3 p-3 rounded-md transition-all cursor-pointer border relative group",
+                                                                                isSelected
+                                                                                    ? "bg-primary/10 border-primary/50 shadow-sm"
+                                                                                    : "hover:bg-muted/50 border-transparent hover:border-border"
                                                                             )}
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                navigate(`/leads?industry=${encodeURIComponent(entry.name)}`);
-                                                                            }}
-                                                                            title="View leads"
                                                                         >
-                                                                            <ArrowRight className="h-4 w-4" />
-                                                                        </Button>
-
-                                                                        {isSelected && (
-                                                                            <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0 ml-1" />
-                                                                        )}
-
-                                                                        {/* Hover Tooltip - Similar to Chart Tooltip */}
-                                                                        {isHovered && (
-                                                                            <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 z-50 pointer-events-none">
-                                                                                <div className="bg-background border border-border rounded-lg shadow-lg p-3 min-w-[200px]">
-                                                                                    <p className="font-semibold text-foreground text-sm mb-1">
-                                                                                        {entry.name}
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={(e) => toggleIndustryExpanded(entry.name, e)}
+                                                                                className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-foreground"
+                                                                                title={hasSubcategories ? "Expand subcategories" : "Expand"}
+                                                                            >
+                                                                                {isExpanded ? (
+                                                                                    <ChevronDown className="h-4 w-4" />
+                                                                                ) : (
+                                                                                    <ChevronRight className="h-4 w-4" />
+                                                                                )}
+                                                                            </button>
+                                                                            <div
+                                                                                className="w-5 h-5 rounded-full flex-shrink-0 border-2 border-background shadow-sm"
+                                                                                style={{ backgroundColor: entry.fill }}
+                                                                            />
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <p className={cn(
+                                                                                    "text-sm font-medium text-foreground",
+                                                                                    isSelected && "text-primary"
+                                                                                )}>
+                                                                                    {entry.name}
+                                                                                </p>
+                                                                                <div className="flex items-center gap-3 mt-0.5">
+                                                                                    <p className="text-xs text-muted-foreground">
+                                                                                        {entry.value} {entry.value === 1 ? 'lead' : 'leads'}
                                                                                     </p>
-                                                                                    <div className="flex items-center gap-2">
-                                                                                        <div
-                                                                                            className="w-3 h-3 rounded-full flex-shrink-0"
-                                                                                            style={{ backgroundColor: entry.fill }}
-                                                                                        />
-                                                                                        <p className="text-foreground text-sm">
-                                                                                            <span className="font-medium">{entry.value}</span> leads
-                                                                                        </p>
-                                                                                    </div>
-                                                                                    <p className="text-muted-foreground text-xs mt-1">
-                                                                                        {entry.percentage}% of total
+                                                                                    <span className="text-xs text-muted-foreground">·</span>
+                                                                                    <p className="text-xs font-semibold text-foreground">
+                                                                                        {entry.percentage}%
                                                                                     </p>
                                                                                 </div>
+                                                                            </div>
+
+                                                                            <Button
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                className={cn(
+                                                                                    "h-8 w-8 ml-1 shrink-0 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all",
+                                                                                    !isHovered && !isSelected && "opacity-0 group-hover:opacity-100"
+                                                                                )}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    const params = new URLSearchParams();
+                                                                                    params.set('industry', entry.name);
+                                                                                    if (selectedConnectionDegree) params.set('connection_degree', selectedConnectionDegree);
+                                                                                    navigate(`/leads?${params.toString()}`);
+                                                                                }}
+                                                                                title="View leads"
+                                                                            >
+                                                                                <ArrowRight className="h-4 w-4" />
+                                                                            </Button>
+
+                                                                            {isSelected && (
+                                                                                <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0 ml-1" />
+                                                                            )}
+
+                                                                            {/* Hover Tooltip */}
+                                                                            {isHovered && (
+                                                                                <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 z-50 pointer-events-none">
+                                                                                    <div className="bg-background border border-border rounded-lg shadow-lg p-3 min-w-[200px]">
+                                                                                        <p className="font-semibold text-foreground text-sm mb-1">
+                                                                                            {entry.name}
+                                                                                        </p>
+                                                                                        <div className="flex items-center gap-2">
+                                                                                            <div
+                                                                                                className="w-3 h-3 rounded-full flex-shrink-0"
+                                                                                                style={{ backgroundColor: entry.fill }}
+                                                                                            />
+                                                                                            <p className="text-foreground text-sm">
+                                                                                                <span className="font-medium">{entry.value}</span> leads
+                                                                                            </p>
+                                                                                        </div>
+                                                                                        <p className="text-muted-foreground text-xs mt-1">
+                                                                                            {entry.percentage}% of total
+                                                                                        </p>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+
+                                                                        {/* Expandable Subcategories */}
+                                                                        {isExpanded && (
+                                                                            <div className="ml-6 pl-4 border-l-2 border-muted/60 space-y-1">
+                                                                                {hasSubcategories ? subSlices.map((sub) => (
+                                                                                    <div
+                                                                                        key={sub.name}
+                                                                                        className="flex items-center gap-2 py-2 px-3 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors"
+                                                                                    >
+                                                                                        <div
+                                                                                            className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                                                                            style={{ backgroundColor: sub.fill }}
+                                                                                        />
+                                                                                        <div className="flex-1 min-w-0">
+                                                                                            <p className="text-xs font-medium text-foreground">
+                                                                                                {sub.name}
+                                                                                            </p>
+                                                                                            <div className="flex items-center gap-2 mt-0.5">
+                                                                                                <span className="text-[11px] text-muted-foreground">
+                                                                                                    {sub.value} {sub.value === 1 ? 'lead' : 'leads'}
+                                                                                                </span>
+                                                                                                <span className="text-[11px] text-muted-foreground">·</span>
+                                                                                                <span className="text-[11px] font-medium text-foreground">
+                                                                                                    {sub.percentage}%
+                                                                                                </span>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                )) : (
+                                                                                    <p className="py-2 px-3 text-xs text-muted-foreground">
+                                                                                        No subcategory breakdown available
+                                                                                    </p>
+                                                                                )}
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -1464,7 +1607,7 @@ export default function DashboardPage() {
                                 View, filter, and run outreach from Leads and Campaigns.
                             </p>
                             <div className="flex gap-2">
-                                <Button onClick={() => navigate('/leads')} variant="default" className="gap-2">
+                                <Button onClick={() => navigate(selectedConnectionDegree ? `/leads?connection_degree=${selectedConnectionDegree}` : '/leads')} variant="default" className="gap-2">
                                     Leads <ArrowRight className="h-4 w-4" />
                                 </Button>
                                 <Button onClick={() => navigate('/campaigns')} variant="outline" className="gap-2">

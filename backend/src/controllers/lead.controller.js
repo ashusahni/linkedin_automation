@@ -3,6 +3,7 @@ import pool from "../db.js";
 import { parse } from 'csv-parse/sync';
 import fs from 'fs';
 import { INDUSTRY_KEYWORDS } from '../config/industries.js';
+import { matchesUserNiche } from '../services/lead.service.js';
 
 // ============================================================================
 // CONTACT SCRAPING INTEGRATION (PHASE 6)
@@ -256,8 +257,8 @@ export async function getLeads(req, res) {
         params.push(status);
       }
 
-      // PHASE 4: Review status filter
-      if (review_status && review_status !== 'all') {
+      // PHASE 4: Review status filter (omit when quality is set so list ranks ALL leads, then filters by tab to match review-stats counts)
+      if (review_status && review_status !== 'all' && !quality) {
         conditionClauses.push(`review_status = $${params.length + 1}`);
         params.push(review_status);
       }
@@ -388,6 +389,8 @@ export async function getLeads(req, res) {
       // Calculate score for ALL matching leads to return correct set
       // We'll use a CTE to score and rank.
 
+      // Filter by review_status in outer WHERE so ranking is over ALL leads (matches review-stats logic); then apply tab filter
+      const reviewStatusFilter = ` AND ($${params.length + 2}::text IS NULL OR review_status = $${params.length + 2})`;
       const qualityQuery = `
          WITH scored_leads AS (
            SELECT *,
@@ -402,14 +405,14 @@ export async function getLeads(req, res) {
          )
          SELECT * FROM ranked_leads
          WHERE 
-           CASE 
+           (CASE 
              WHEN $${params.length + 1} = 'primary' THEN pct_rank <= 0.20
              WHEN $${params.length + 1} = 'secondary' THEN pct_rank > 0.20 AND pct_rank <= 0.50
              WHEN $${params.length + 1} = 'tertiary' THEN pct_rank > 0.50
-           END
+           END)${reviewStatusFilter}
          ORDER BY score DESC, created_at DESC
-         LIMIT $${params.length + 2}
-         OFFSET $${params.length + 3}
+         LIMIT $${params.length + 3}
+         OFFSET $${params.length + 4}
        `;
 
       const qualityCountQuery = `
@@ -420,22 +423,19 @@ export async function getLeads(req, res) {
            ${whereClause}
          ),
          ranked_leads AS (
-            SELECT pct_rank
-            FROM (
-                SELECT PERCENT_RANK() OVER (ORDER BY score DESC, created_at DESC) as pct_rank
-                FROM scored_leads
-            ) sub
+            SELECT *, PERCENT_RANK() OVER (ORDER BY score DESC, created_at DESC) as pct_rank
+            FROM scored_leads
          )
          SELECT COUNT(*) as count FROM ranked_leads
          WHERE 
-           CASE 
+           (CASE 
              WHEN $${params.length + 1} = 'primary' THEN pct_rank <= 0.20
              WHEN $${params.length + 1} = 'secondary' THEN pct_rank > 0.20 AND pct_rank <= 0.50
              WHEN $${params.length + 1} = 'tertiary' THEN pct_rank > 0.50
-           END
+           END)${reviewStatusFilter}
        `;
 
-      const qualityParams = [...params, quality];
+      const qualityParams = [...params, quality, review_status || null];
       const qualityDataParams = [...qualityParams, pageLimit, offset];
 
       const qResult = await pool.query(qualityQuery, qualityDataParams);
@@ -618,19 +618,28 @@ export async function createLead(req, res) {
     const finalLastName = last_name || lastName;
     const finalFullName = full_name || `${finalFirstName || ''} ${finalLastName || ''}`.trim();
 
+    // Check if lead matches user's niche for auto-qualification
+    const leadForNicheCheck = { company, title };
+    const matchesNiche = await matchesUserNiche(leadForNicheCheck);
+    const reviewStatus = matchesNiche ? 'approved' : 'to_be_reviewed';
+
     const result = await pool.query(
       `INSERT INTO leads (
          full_name, first_name, last_name, company, title, 
          email, phone, linkedin_url, location, source, 
-         notes, profile_image, status, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'new', NOW(), NOW())
+         notes, profile_image, status, review_status, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'new', $13, NOW(), NOW())
        RETURNING *`,
       [
         finalFullName, finalFirstName, finalLastName, company, title,
         email, phone, linkedin_url, location, source || 'manual',
-        notes, profile_image
+        notes, profile_image, reviewStatus
       ]
     );
+
+    if (matchesNiche) {
+      console.log(`🎯 Auto-qualified manually created lead: ${company || 'Unknown'} - ${title || 'Unknown'}`);
+    }
 
     return res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -868,6 +877,95 @@ export async function generatePersonalizedMessage(req, res) {
     return res.json({ message, hasEnrichment: !!enrichment });
   } catch (err) {
     console.error("Generate personalized message error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/:id/generate-gmail
+// Generate a Gmail/email draft (subject + body) for this lead; optionally add to campaign approval queue
+export async function generateGmail(req, res) {
+  try {
+    const { id } = req.params;
+    const { campaignId, tone, length, focus } = req.body || {};
+
+    const leadResult = await pool.query("SELECT * FROM leads WHERE id = $1", [id]);
+    const lead = leadResult.rows[0];
+    if (!lead) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    const enrichmentResult = await pool.query("SELECT * FROM lead_enrichment WHERE lead_id = $1", [id]);
+    const enrichment = enrichmentResult.rows[0] || null;
+
+    let campaignContext = null;
+    if (campaignId) {
+      const campaignRes = await pool.query(
+        "SELECT goal, type, description, target_audience FROM campaigns WHERE id = $1",
+        [parseInt(campaignId, 10)]
+      );
+      if (campaignRes.rows[0]) {
+        campaignContext = campaignRes.rows[0];
+      }
+    }
+
+    const AIService = (await import("../services/ai.service.js")).default;
+    const options = {
+      tone: tone || "professional",
+      length: length || "medium",
+      focus: focus || "general",
+      campaign: campaignContext
+    };
+    const { subject, body } = await AIService.generateGmailDraft(lead, enrichment, options);
+
+    const cid = campaignId ? parseInt(campaignId, 10) : null;
+    if (cid) {
+      const { ApprovalService } = await import("../services/approval.service.js");
+      const content = JSON.stringify({ subject, body });
+      await ApprovalService.addToQueue(cid, lead.id, "gmail_outreach", content);
+    }
+
+    return res.json({ subject, body, hasEnrichment: !!enrichment, addedToQueue: !!cid });
+  } catch (err) {
+    console.error("Generate Gmail error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/:id/add-gmail-to-approvals
+// Add an existing Gmail draft (subject + body) to a campaign's approval queue
+export async function addGmailToApprovals(req, res) {
+  try {
+    const { id } = req.params;
+    const { campaignId, subject, body } = req.body || {};
+    if (!campaignId || subject == null || body == null) {
+      return res.status(400).json({ error: "campaignId, subject, and body are required" });
+    }
+    const leadId = parseInt(id, 10);
+    const cid = parseInt(campaignId, 10);
+    const leadCheck = await pool.query("SELECT id FROM leads WHERE id = $1", [leadId]);
+    if (leadCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+    const campaignCheck = await pool.query("SELECT id FROM campaigns WHERE id = $1", [cid]);
+    if (campaignCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+    const clCheck = await pool.query(
+      "SELECT 1 FROM campaign_leads WHERE campaign_id = $1 AND lead_id = $2",
+      [cid, leadId]
+    );
+    if (clCheck.rows.length === 0) {
+      await pool.query(
+        "INSERT INTO campaign_leads (campaign_id, lead_id, status) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        [cid, leadId, "new"]
+      );
+    }
+    const { ApprovalService } = await import("../services/approval.service.js");
+    const content = JSON.stringify({ subject: String(subject), body: String(body) });
+    const row = await ApprovalService.addToQueue(cid, leadId, "gmail_outreach", content);
+    return res.json({ id: row.id, added: true });
+  } catch (err) {
+    console.error("Add Gmail to approvals error:", err);
     res.status(500).json({ error: err.message });
   }
 }
@@ -1158,6 +1256,11 @@ export async function importLeadsFromCSV(req, res) {
           continue;
         }
 
+        // Check if lead matches user's niche for auto-qualification
+        const leadForNicheCheck = { company: leadData.company, title: leadData.title };
+        const matchesNiche = await matchesUserNiche(leadForNicheCheck);
+        const reviewStatus = matchesNiche ? 'approved' : 'to_be_reviewed';
+
         // Apply DB-safe truncation to respect column sizes
         const values = [
           safeTruncate(leadData.full_name, 255),      // full_name VARCHAR(255)
@@ -1170,16 +1273,17 @@ export async function importLeadsFromCSV(req, res) {
           safeTruncate(leadData.email, 255),          // email VARCHAR(255)
           safeTruncate(leadData.phone, 50),           // phone VARCHAR(50)
           safeTruncate(leadData.source, 100),         // source VARCHAR(100)
-          leadData.status                             // status VARCHAR(50) default 'new'
+          leadData.status,                            // status VARCHAR(50) default 'new'
+          reviewStatus                                // review_status VARCHAR(50)
         ];
 
         // Try to insert, handle duplicates
         const result = await pool.query(
           `INSERT INTO leads (
             full_name, first_name, last_name, title, company, 
-            location, linkedin_url, email, phone, source, status
+            location, linkedin_url, email, phone, source, status, review_status
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (linkedin_url) DO NOTHING
           RETURNING id`,
           values
@@ -1298,6 +1402,11 @@ export async function importLeadsFromExcel(req, res) {
           continue;
         }
 
+        // Check if lead matches user's niche for auto-qualification
+        const leadForNicheCheck = { company: leadData.company, title: leadData.title };
+        const matchesNiche = await matchesUserNiche(leadForNicheCheck);
+        const reviewStatus = matchesNiche ? 'approved' : 'to_be_reviewed';
+
         // Apply DB-safe truncation to respect column sizes
         const values = [
           safeTruncate(leadData.full_name, 255),
@@ -1310,16 +1419,17 @@ export async function importLeadsFromExcel(req, res) {
           safeTruncate(leadData.email, 255),
           safeTruncate(leadData.phone, 50),
           safeTruncate(leadData.source, 100),
-          leadData.status
+          leadData.status,
+          reviewStatus
         ];
 
         // Try to insert, handle duplicates
         const result = await pool.query(
           `INSERT INTO leads (
             full_name, first_name, last_name, title, company, 
-            location, linkedin_url, email, phone, source, status
+            location, linkedin_url, email, phone, source, status, review_status
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           ON CONFLICT (linkedin_url) DO NOTHING
           RETURNING id`,
           values
@@ -1695,6 +1805,87 @@ export async function moveToReview(req, res) {
 
   } catch (err) {
     console.error('❌ Move to review error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// POST /api/leads/qualify-by-niche
+// Qualify all leads that match the user's profile niche
+export async function qualifyLeadsByNiche(req, res) {
+  try {
+    const { reviewStatus = 'to_be_reviewed' } = req.body; // Optional: filter by current review_status
+
+    // Get all leads that are in review (or specified status)
+    const leadsQuery = `
+      SELECT id, company, title, review_status 
+      FROM leads 
+      WHERE review_status = $1
+    `;
+    const leadsResult = await pool.query(leadsQuery, [reviewStatus]);
+
+    if (leadsResult.rows.length === 0) {
+      return res.json({ 
+        success: true, 
+        message: `No leads found with status '${reviewStatus}'`,
+        qualified: 0,
+        total: 0
+      });
+    }
+
+    // Check each lead against user's niche
+    const leadsToQualify = [];
+    for (const lead of leadsResult.rows) {
+      const matchesNiche = await matchesUserNiche({ company: lead.company, title: lead.title });
+      if (matchesNiche) {
+        leadsToQualify.push(lead.id);
+      }
+    }
+
+    if (leadsToQualify.length === 0) {
+      return res.json({ 
+        success: true, 
+        message: `No leads match your profile niche`,
+        qualified: 0,
+        total: leadsResult.rows.length
+      });
+    }
+
+    // Get current status for audit logging
+    const currentLeads = await pool.query(
+      `SELECT id, review_status FROM leads WHERE id = ANY($1)`,
+      [leadsToQualify]
+    );
+
+    // Update matching leads to approved
+    const result = await pool.query(
+      `UPDATE leads 
+       SET review_status = 'approved',
+           approved_at = CASE WHEN approved_at IS NULL THEN CURRENT_TIMESTAMP ELSE approved_at END,
+           approved_by = $1,
+           rejected_reason = NULL,
+           rejected_at = NULL,
+           rejected_by = NULL
+       WHERE id = ANY($2)
+       RETURNING id`,
+      [req.user?.id || null, leadsToQualify]
+    );
+
+    // Log audit trail
+    for (const lead of currentLeads.rows) {
+      if (lead.review_status !== 'approved') {
+        await logStatusChange(lead.id, lead.review_status, 'approved', req.user?.id || null, 'Auto-qualified by niche match');
+      }
+    }
+
+    console.log(`🎯 Qualified ${result.rowCount} leads matching user's niche`);
+    res.json({ 
+      success: true, 
+      message: `Qualified ${result.rowCount} lead(s) matching your profile niche`,
+      qualified: result.rowCount,
+      total: leadsResult.rows.length
+    });
+  } catch (err) {
+    console.error('❌ Qualify by niche error:', err);
     res.status(500).json({ error: err.message });
   }
 }

@@ -13,6 +13,7 @@ import {
     deleteSequenceStep,
     getCampaignLeads,
     bulkEnrichAndGenerate,
+    generateGmailDrafts,
     pauseCampaign,
     resumeCampaign,
     getCampaignTemplates,
@@ -37,6 +38,7 @@ router.post('/:id/launch', launchCampaign);
 router.put('/:id/pause', pauseCampaign);
 router.put('/:id/resume', resumeCampaign);
 router.post('/:id/bulk-enrich-generate', bulkEnrichAndGenerate);
+router.post('/:id/generate-gmail-drafts', generateGmailDrafts);
 router.post('/:id/scrape-contacts', scrapeContacts);
 router.post('/:id/auto-connect', autoConnectCampaign);
 router.delete('/:id', deleteCampaign);

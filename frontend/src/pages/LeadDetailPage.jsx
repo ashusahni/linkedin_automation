@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { ArrowLeft, Linkedin, Save, Check, X, Edit2, ExternalLink, Zap, Sparkles, MessageCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Linkedin, Save, Check, X, Edit2, ExternalLink, Zap, Sparkles, MessageCircle, Loader2, Mail } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -28,10 +28,23 @@ export default function LeadDetailPage() {
     const [sendingMessage, setSendingMessage] = useState(false);
     const [generatingMessage, setGeneratingMessage] = useState(false);
 
+    // Gmail draft state
+    const [gmailDraft, setGmailDraft] = useState(null); // { subject, body }
+    const [generatingGmail, setGeneratingGmail] = useState(false);
+    const [campaigns, setCampaigns] = useState([]);
+    const [addToCampaignId, setAddToCampaignId] = useState('');
+    const [addingToCampaign, setAddingToCampaign] = useState(false);
+
     useEffect(() => {
         fetchLead();
         fetchEnrichment();
     }, [id]);
+
+    useEffect(() => {
+        if (gmailDraft) {
+            axios.get('/api/campaigns').then(res => setCampaigns(Array.isArray(res.data) ? res.data : [])).catch(() => setCampaigns([]));
+        }
+    }, [gmailDraft]);
 
     const fetchLead = async () => {
         try {
@@ -121,6 +134,44 @@ export default function LeadDetailPage() {
             addToast(error.response?.data?.error || 'Failed to generate message', 'error');
         } finally {
             setGeneratingMessage(false);
+        }
+    };
+
+    const handleGenerateGmail = async () => {
+        try {
+            setGeneratingGmail(true);
+            setGmailDraft(null);
+            const res = await axios.post(`/api/leads/${id}/generate-gmail`, {
+                tone: 'professional',
+                length: 'medium',
+                focus: 'general'
+            });
+            if (res.data?.subject != null && res.data?.body != null) {
+                setGmailDraft({ subject: res.data.subject, body: res.data.body });
+                addToast(res.data.hasEnrichment ? 'Gmail draft generated using profile data' : 'Gmail draft generated (enrich profile for better personalization)', 'success');
+            }
+        } catch (error) {
+            addToast(error.response?.data?.error || 'Failed to generate Gmail draft', 'error');
+        } finally {
+            setGeneratingGmail(false);
+        }
+    };
+
+    const handleAddGmailToCampaign = async () => {
+        if (!addToCampaignId || !gmailDraft) return;
+        try {
+            setAddingToCampaign(true);
+            await axios.post(`/api/leads/${id}/add-gmail-to-approvals`, {
+                campaignId: addToCampaignId,
+                subject: gmailDraft.subject,
+                body: gmailDraft.body
+            });
+            addToast('Gmail draft added to campaign approvals. Check the campaign’s Approvals → Gmail tab.', 'success');
+            setAddToCampaignId('');
+        } catch (error) {
+            addToast(error.response?.data?.error || 'Failed to add to approvals', 'error');
+        } finally {
+            setAddingToCampaign(false);
         }
     };
 
@@ -375,6 +426,46 @@ export default function LeadDetailPage() {
                                         </div>
                                     )}
                                 </>
+                            )}
+
+                            <Button
+                                className="w-full gap-2 bg-rose-600 hover:bg-rose-700 text-white"
+                                onClick={handleGenerateGmail}
+                                disabled={generatingGmail}
+                            >
+                                {generatingGmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                                {generatingGmail ? 'Generating...' : 'Gmail Generate'}
+                            </Button>
+                            {gmailDraft && (
+                                <div className="p-3 border rounded-lg bg-muted/30 space-y-3">
+                                    <p className="text-xs font-medium text-muted-foreground">Subject</p>
+                                    <p className="text-sm font-medium break-words">{gmailDraft.subject}</p>
+                                    <p className="text-xs font-medium text-muted-foreground mt-2">Body</p>
+                                    <p className="text-sm whitespace-pre-wrap break-words">{gmailDraft.body}</p>
+                                    {campaigns.length > 0 && (
+                                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+                                            <select
+                                                value={addToCampaignId}
+                                                onChange={(e) => setAddToCampaignId(e.target.value)}
+                                                className="h-9 px-3 rounded-md border border-input bg-background text-sm min-w-[180px]"
+                                            >
+                                                <option value="">Add to campaign...</option>
+                                                {campaigns.map(c => (
+                                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                                ))}
+                                            </select>
+                                            <Button
+                                                size="sm"
+                                                variant="secondary"
+                                                onClick={handleAddGmailToCampaign}
+                                                disabled={!addToCampaignId || addingToCampaign}
+                                            >
+                                                {addingToCampaign ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                                                Add to Approvals
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
                             )}
 
                             <Button

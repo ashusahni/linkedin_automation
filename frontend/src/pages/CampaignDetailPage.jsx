@@ -89,6 +89,7 @@ export default function CampaignDetailPage() {
         focus: 'general'
     });
     const [optionsByApproval, setOptionsByApproval] = useState({}); // { approvalId: { tone, length, focus } }
+    const [approvalSubTab, setApprovalSubTab] = useState('linkedin'); // 'linkedin' | 'gmail'
 
     // Contact Scraper State
     const [scraping, setScraping] = useState(false);
@@ -431,57 +432,32 @@ export default function CampaignDetailPage() {
 
     // Multi-channel Outreach Handlers
     const handleEmailOutreach = async () => {
-        const leadsToContact = selectedLeads.length > 0 ? selectedLeads : leads.map(l => l.lead_id || l.id);
-
-        if (leadsToContact.length === 0) {
-            addToast('No leads to contact', 'error');
-            return;
-        }
-
-        // Count leads with email
-        const leadsWithEmail = leads.filter(l =>
-            (selectedLeads.length === 0 || selectedLeads.includes(l.lead_id || l.id)) && l.email
-        );
-
+        const leadsWithEmail = leads.filter(l => l.email);
         if (leadsWithEmail.length === 0) {
-            addToast('No leads have email addresses. Please Enrich Contact Info first!', 'error');
+            addToast('No leads have email addresses. Use "Get Contact Info" to enrich contacts first.', 'error');
             return;
         }
-
-        const confirmed = confirm(
-            `Send AI-generated personalized emails to ${leadsWithEmail.length} leads?\n\n` +
-            `This will use the enriched email addresses and generate personalized content using AI.\n\n` +
-            `Continue?`
-        );
-
-        if (!confirmed) return;
 
         try {
             setSendingEmail(true);
-            addToast(`Sending emails to ${leadsWithEmail.length} leads...`, 'info');
-
-            const res = await axios.post(`/api/campaigns/${id}/outreach/email`, {
-                leadIds: leadsToContact,
-                options: {
-                    useAI: true,
-                    subject: `Quick question, {firstName}`,
-                    companyName: 'Your Company',
-                    senderName: 'Your Name'
-                }
-            });
-
-            if (res.data.success) {
-                addToast(`✅ ${res.data.message}`, 'success');
-                fetchCampaignDetails(); // Refresh to show updated stats
-            } else {
-                addToast(`⚠️ ${res.data.message}`, 'warning');
-            }
-        } catch (error) {
-            console.error('Email outreach error:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Failed to send emails';
-            addToast(`Error: ${errorMsg}`, 'error');
-        } finally {
+            addToast(`Generating Gmail drafts for ${leadsWithEmail.length} lead(s) with email...`, 'info');
+            const res = await axios.post(`/api/campaigns/${id}/generate-gmail-drafts`);
             setSendingEmail(false);
+            if (res.data.success || res.data.generated > 0) {
+                addToast(res.data.message || 'Gmail drafts generated. Review and approve in the Gmail tab.', 'success');
+                setActiveTab('approvals');
+                setApprovalSubTab('gmail');
+                await fetchApprovals();
+            } else {
+                addToast(res.data.message || 'No new drafts. All leads with email may already have a pending draft.', 'info');
+                setActiveTab('approvals');
+                setApprovalSubTab('gmail');
+                await fetchApprovals();
+            }
+        } catch (err) {
+            setSendingEmail(false);
+            const msg = err.response?.data?.error || err.message || 'Failed to generate Gmail drafts';
+            addToast(msg, 'error');
         }
     };
 
@@ -1195,6 +1171,7 @@ export default function CampaignDetailPage() {
                                             <option value="connection_request">Connection request</option>
                                             <option value="message">Message</option>
                                             <option value="email">Email</option>
+                                            <option value="gmail_outreach">Gmail outreach</option>
                                         </select>
                                         <Input
                                             type="number"
@@ -1454,7 +1431,23 @@ export default function CampaignDetailPage() {
                     </Card>
                 )}
 
-                {activeTab === 'approvals' && (
+                {activeTab === 'approvals' && (() => {
+                    const linkedinApprovals = approvals.filter(a => ['connection_request', 'message'].includes(a.step_type));
+                    const gmailApprovalsAll = approvals.filter(a => ['gmail_outreach', 'email'].includes(a.step_type));
+                    // Gmail tab: only show approval mail generation for leads who have an email
+                    const gmailApprovals = gmailApprovalsAll.filter(a => a.email);
+                    const currentApprovals = approvalSubTab === 'gmail' ? gmailApprovals : linkedinApprovals;
+                    const isGmailApproval = (a) => ['gmail_outreach', 'email'].includes(a.step_type);
+                    const parseGmailContent = (content) => {
+                        if (!content) return { subject: '', body: '' };
+                        try {
+                            const p = JSON.parse(content);
+                            return { subject: p.subject ?? '', body: p.body ?? '' };
+                        } catch {
+                            return { subject: '', body: content || '' };
+                        }
+                    };
+                    return (
                     <div className="space-y-6">
                         {/* Info Banner */}
                         <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
@@ -1543,33 +1536,74 @@ export default function CampaignDetailPage() {
                             </CardContent>
                         </Card>
 
+                        {/* LinkedIn vs Gmail sub-tabs */}
+                        <div className="flex border-b border-white/10 gap-4">
+                            <button
+                                type="button"
+                                onClick={() => setApprovalSubTab('linkedin')}
+                                className={cn(
+                                    "pb-3 text-sm font-medium transition-all border-b-2 -mb-px",
+                                    approvalSubTab === 'linkedin' ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-white"
+                                )}
+                            >
+                                <MessageSquare className="w-4 h-4 inline-block mr-2" />
+                                LinkedIn ({linkedinApprovals.length})
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setApprovalSubTab('gmail')}
+                                className={cn(
+                                    "pb-3 text-sm font-medium transition-all border-b-2 -mb-px",
+                                    approvalSubTab === 'gmail' ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-white"
+                                )}
+                            >
+                                <Mail className="w-4 h-4 inline-block mr-2" />
+                                Gmail ({gmailApprovals.length})
+                            </button>
+                        </div>
+
                         <div className="flex justify-between items-center">
                             <div>
-                                <h2 className="text-xl font-bold text-white">AI-Generated Messages ({approvals.length})</h2>
-                                <p className="text-sm text-muted-foreground mt-1">Choose tone, length & focus → Regenerate → edit for a human touch → Approve & Send</p>
+                                <h2 className="text-xl font-bold text-white">
+                                    {approvalSubTab === 'gmail' ? 'Gmail drafts' : 'AI-Generated Messages'} ({currentApprovals.length})
+                                </h2>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                    {approvalSubTab === 'gmail'
+                                        ? 'Review and approve email drafts. Edit subject and body as needed.'
+                                        : 'Choose tone, length & focus → Regenerate → edit for a human touch → Approve & Send'}
+                                </p>
                             </div>
                             <div className="flex gap-2">
-                                {approvals.length > 0 && (
+                                {currentApprovals.length > 0 && (
                                     <Button
-                                        onClick={toggleSelectAllApprovals}
+                                        onClick={() => {
+                                            const ids = currentApprovals.map(a => a.id);
+                                            setSelectedApprovals(prev =>
+                                                prev.length === ids.length && ids.every(id => prev.includes(id)) ? [] : ids
+                                            );
+                                        }}
                                         variant="outline"
                                         size="sm"
                                         className="gap-2"
                                     >
                                         <CheckCheck className="w-4 h-4" />
-                                        {selectedApprovals.length === approvals.length ? 'Deselect All' : `Select All (${approvals.length})`}
+                                        {currentApprovals.every(a => selectedApprovals.includes(a.id)) ? 'Deselect All' : `Select All (${currentApprovals.length})`}
                                     </Button>
                                 )}
-                                {selectedApprovals.length > 0 && (
+                                {selectedApprovals.length > 0 && (() => {
+                                    const selectedInTab = selectedApprovals.filter(sid => currentApprovals.some(a => a.id === sid));
+                                    return selectedInTab.length > 0 ? (
                                     <>
-                                        <Button
-                                            onClick={() => setShowBulkPersonalizeModal(true)}
-                                            variant="outline"
-                                            className="gap-2 border-purple-500/30 text-purple-500 hover:bg-purple-500/10"
-                                        >
-                                            <RefreshCw className="w-4 h-4" />
-                                            Bulk Personalize ({selectedApprovals.length})
-                                        </Button>
+                                        {approvalSubTab === 'linkedin' && (
+                                            <Button
+                                                onClick={() => setShowBulkPersonalizeModal(true)}
+                                                variant="outline"
+                                                className="gap-2 border-purple-500/30 text-purple-500 hover:bg-purple-500/10"
+                                            >
+                                                <RefreshCw className="w-4 h-4" />
+                                                Bulk Personalize ({selectedInTab.length})
+                                            </Button>
+                                        )}
                                         <Button
                                             variant="outline"
                                             onClick={handleRejectSelected}
@@ -1581,7 +1615,7 @@ export default function CampaignDetailPage() {
                                             ) : (
                                                 <XCircle className="w-4 h-4" />
                                             )}
-                                            Reject ({selectedApprovals.length})
+                                            Reject ({selectedInTab.length})
                                         </Button>
                                         <Button
                                             onClick={handleApproveSelected}
@@ -1596,41 +1630,49 @@ export default function CampaignDetailPage() {
                                             ) : (
                                                 <CheckCheck className="w-4 h-4" />
                                             )}
-                                            {bulkActioning ? 'Processing...' : `Approve & Send (${selectedApprovals.length})`}
+                                            {bulkActioning ? 'Processing...' : approvalSubTab === 'gmail' ? `Approve (${selectedInTab.length})` : `Approve & Send (${selectedInTab.length})`}
                                         </Button>
                                     </>
-                                )}
+                                    ) : null;
+                                })()}
                             </div>
                         </div>
 
-                        {approvals.length === 0 ? (
+                        {currentApprovals.length === 0 ? (
                             <div className="text-center py-20 bg-white/5 rounded-2xl border border-dashed border-white/10">
                                 <div className="bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                                     <Eye className="w-8 h-8 text-primary" />
                                 </div>
-                                <h3 className="text-lg font-bold text-white mb-2">No AI messages yet</h3>
+                                <h3 className="text-lg font-bold text-white mb-2">
+                                    {approvalSubTab === 'gmail' ? 'No Gmail drafts for leads with email' : 'No AI messages yet'}
+                                </h3>
                                 <p className="text-muted-foreground max-w-md mx-auto mb-6">
-                                    <strong className="text-white">Step 1:</strong> Go to <strong className="text-primary">Leads Tab</strong> and click
-                                    <strong className="text-primary"> "Bulk Enrich & Generate AI Messages"</strong>
+                                    {approvalSubTab === 'gmail' ? (
+                                        <>Use <strong className="text-primary">Contact Actions → Contact Emails</strong> to generate Gmail drafts for leads who have an email address. Only those leads appear here.</>
+                                    ) : (
+                                        <>Go to <strong className="text-primary">Leads Tab</strong> and click <strong className="text-primary">"Bulk Enrich & Generate AI Messages"</strong></>
+                                    )}
                                 </p>
-                                <div className="bg-white/5 rounded-lg p-4 max-w-md mx-auto mb-6 text-left">
-                                    <p className="text-xs text-muted-foreground mb-2"><strong className="text-white">What happens:</strong></p>
-                                    <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-                                        <li>System enriches all leads (scrapes LinkedIn profiles)</li>
-                                        <li>AI generates personalized messages using that data</li>
-                                        <li>Messages appear here in Approvals Tab</li>
-                                        <li>You review, edit, and approve them</li>
-                                        <li>Scheduler sends approved messages automatically</li>
-                                    </ol>
-                                </div>
+                                {approvalSubTab === 'linkedin' && (
+                                    <div className="bg-white/5 rounded-lg p-4 max-w-md mx-auto mb-6 text-left">
+                                        <p className="text-xs text-muted-foreground mb-2"><strong className="text-white">What happens:</strong></p>
+                                        <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+                                            <li>System enriches all leads (scrapes LinkedIn profiles)</li>
+                                            <li>AI generates personalized messages using that data</li>
+                                            <li>Messages appear here in Approvals Tab</li>
+                                            <li>You review, edit, and approve them</li>
+                                            <li>Scheduler sends approved messages automatically</li>
+                                        </ol>
+                                    </div>
+                                )}
                                 <Button onClick={() => setActiveTab('leads')} className="bg-primary hover:bg-primary/90 gap-2">
                                     <Sparkles className="w-4 h-4" />
-                                    Go to Leads Tab to Start
+                                    Go to Leads Tab
                                 </Button>
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                {approvals.map((approval) => (
+                                {currentApprovals.map((approval) => (
                                     <Card key={approval.id} className={cn(
                                         "bg-card/40 border transition-all duration-300",
                                         selectedApprovals.includes(approval.id) ? "border-primary/50 bg-primary/5" : "border-white/5"
@@ -1659,9 +1701,10 @@ export default function CampaignDetailPage() {
                                                                 <Badge variant="outline" className={cn(
                                                                     "text-[10px] font-bold uppercase",
                                                                     approval.step_type === 'connection_request' && "border-blue-500/50 text-blue-500 bg-blue-500/5",
-                                                                    approval.step_type === 'message' && "border-green-500/50 text-green-500 bg-green-500/5"
+                                                                    approval.step_type === 'message' && "border-green-500/50 text-green-500 bg-green-500/5",
+                                                                    (approval.step_type === 'gmail_outreach' || approval.step_type === 'email') && "border-rose-500/50 text-rose-500 bg-rose-500/5"
                                                                 )}>
-                                                                    {approval.step_type === 'connection_request' ? 'Connection' : 'Message'}
+                                                                    {approval.step_type === 'connection_request' ? 'Connection' : approval.step_type === 'message' ? 'Message' : approval.step_type === 'gmail_outreach' ? 'Gmail' : 'Email'}
                                                                 </Badge>
                                                             </div>
                                                             <p className="text-sm text-muted-foreground mt-1">
@@ -1771,7 +1814,65 @@ export default function CampaignDetailPage() {
                                                     </div>
 
                                                     {/* Message Content */}
-                                                    {editingApproval === approval.id ? (
+                                                    {isGmailApproval(approval) ? (
+                                                        <>
+                                                            {editingApproval === approval.id ? (
+                                                                <div className="space-y-3">
+                                                                    <div>
+                                                                        <label className="text-xs font-medium text-muted-foreground">Subject</label>
+                                                                        <input
+                                                                            id={`edit-subject-${approval.id}`}
+                                                                            defaultValue={parseGmailContent(approval.generated_content).subject}
+                                                                            className="w-full mt-1 px-3 py-2 bg-white/5 border border-primary/30 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="text-xs font-medium text-muted-foreground">Body</label>
+                                                                        <textarea
+                                                                            id={`edit-body-${approval.id}`}
+                                                                            defaultValue={parseGmailContent(approval.generated_content).body}
+                                                                            className="w-full mt-1 min-h-[140px] px-3 py-2 bg-white/5 border border-primary/30 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="flex gap-2">
+                                                                        <Button
+                                                                            size="sm"
+                                                                            onClick={() => {
+                                                                                const subject = document.getElementById(`edit-subject-${approval.id}`).value;
+                                                                                const body = document.getElementById(`edit-body-${approval.id}`).value;
+                                                                                handleEditApproval(approval.id, JSON.stringify({ subject, body }));
+                                                                                setEditingApproval(null);
+                                                                            }}
+                                                                            className="bg-primary hover:bg-primary/90"
+                                                                        >
+                                                                            <Save className="w-4 h-4 mr-2" /> Save Changes
+                                                                        </Button>
+                                                                        <Button size="sm" variant="ghost" onClick={() => setEditingApproval(null)}>Cancel</Button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div
+                                                                    className="relative bg-white/5 rounded-lg p-4 border border-white/10 group cursor-pointer hover:border-primary/30 transition-all"
+                                                                    onClick={() => setEditingApproval(approval.id)}
+                                                                >
+                                                                    {(() => {
+                                                                        const { subject, body } = parseGmailContent(approval.generated_content);
+                                                                        return (
+                                                                            <>
+                                                                                {subject && <p className="text-sm font-medium text-slate-200 mb-2">Re: {subject}</p>}
+                                                                                <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">{body}</p>
+                                                                            </>
+                                                                        );
+                                                                    })()}
+                                                                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                        <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs">
+                                                                            <Edit2 className="w-3 h-3" /> Edit
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    ) : editingApproval === approval.id ? (
                                                         <div className="space-y-2">
                                                             <textarea
                                                                 defaultValue={approval.generated_content}
@@ -2012,7 +2113,8 @@ export default function CampaignDetailPage() {
                             </div>
                         )}
                     </div>
-                )}
+                    );
+                })()}
 
                 {activeTab === 'analytics' && (
                     <motion.div

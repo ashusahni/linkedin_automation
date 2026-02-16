@@ -55,7 +55,7 @@ export default function LeadsTable() {
     const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
 
     // Combined Meta Filters (includes all filters)
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [metaFilters, setMetaFilters] = useState({
         // Lead search filters
         title: '',
@@ -130,11 +130,12 @@ export default function LeadsTable() {
     });
 
     // PHASE 4: Review Workflow State
-    const [reviewStatusTab, setReviewStatusTab] = useState('approved'); // 'approved' | 'to_be_reviewed' | 'rejected'
+    const [reviewStatusTab, setReviewStatusTab] = useState('approved'); // 'approved' | 'to_be_reviewed' | 'rejected' | 'imported'
     const [reviewStats, setReviewStats] = useState({
         to_be_reviewed: 0,
         approved: 0,
         rejected: 0,
+        imported: 0,
         total: 0
     });
     const [showRejectModal, setShowRejectModal] = useState(false);
@@ -168,6 +169,39 @@ export default function LeadsTable() {
         } catch (error) {
             console.error('Delete rejected failed:', error);
             const errorMsg = error.response?.data?.error || error.message || 'Failed to delete rejected leads';
+            addToast(`Error: ${errorMsg}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const handleBulkDeleteImported = async () => {
+        const isDeleteAll = selectedLeads.size === leads.length && leads.length > 0;
+
+        const confirmMessage = isDeleteAll
+            ? 'Are you sure you want to PERMANENTLY delete ALL imported leads? This action cannot be undone.'
+            : `Are you sure you want to PERMANENTLY delete these ${selectedLeads.size} imported leads? This action cannot be undone.`;
+
+        if (!window.confirm(confirmMessage)) {
+            return;
+        }
+
+        try {
+            setDeleting(true);
+
+            if (isDeleteAll) {
+                await axios.delete('/api/leads/imported/all');
+            } else {
+                await axios.post('/api/leads/bulk-delete', { leadIds: Array.from(selectedLeads) });
+            }
+
+            addToast(`✅ ${isDeleteAll ? 'All' : selectedLeads.size} imported leads permanently deleted`, 'success');
+            setSelectedLeads(new Set());
+            fetchLeads();
+            fetchStats();
+        } catch (error) {
+            console.error('Delete imported failed:', error);
+            const errorMsg = error.response?.data?.error || error.message || 'Failed to delete imported leads';
             addToast(`Error: ${errorMsg}`, 'error');
         } finally {
             setDeleting(false);
@@ -394,8 +428,13 @@ export default function LeadsTable() {
             }
 
             // PHASE 4: Filter by Review Status Tab
-            if (reviewStatusTab) {
+            if (reviewStatusTab && reviewStatusTab !== 'imported') {
                 params.set('review_status', reviewStatusTab);
+            }
+            
+            // Filter by imported sources when imported tab is active
+            if (reviewStatusTab === 'imported') {
+                params.set('source', 'csv_import,excel_import');
             }
 
             // Quick / Advanced Logic construction
@@ -715,6 +754,7 @@ export default function LeadsTable() {
             addToast('Cannot export rejected leads.', 'error');
             return;
         }
+        // Imported leads can be exported
 
         try {
             const params = {
@@ -809,13 +849,10 @@ export default function LeadsTable() {
             addToast(`✅ Qualified ${leadIds.length} lead(s)`, 'success');
             setSelectedLeads(new Set());
 
-            // Clear quality filter so users can see ALL approved leads
-            // Otherwise they might not see their newly approved leads if they don't match the quality percentile
-            setMetaFilters(prev => ({ ...prev, quality: '' }));
-            setActiveQuickFilters(prev => prev.filter(f => !['primary', 'secondary', 'tertiary'].includes(f.toLowerCase())));
-
+            // Keep current filters (quality, connection_degree) so counts and list stay in sync:
+            // e.g. Secondary Review 60 → qualify 20 → Review 40, Qualified +20, same view
             fetchLeads();
-            fetchStats(); // Update counters
+            fetchStats();
         } catch (error) {
             console.error('Approve failed:', error);
             addToast('Failed to approve leads', 'error');
@@ -856,6 +893,28 @@ export default function LeadsTable() {
         } catch (error) {
             console.error('Move to review failed:', error);
             addToast('Failed to move leads', 'error');
+        }
+    };
+
+    const handleQualifyByNiche = async () => {
+        try {
+            const res = await axios.post('/api/leads/qualify-by-niche', { 
+                reviewStatus: reviewStatusTab === 'to_be_reviewed' ? 'to_be_reviewed' : undefined 
+            });
+            const { qualified, total, message } = res.data;
+            addToast(
+                qualified > 0 
+                    ? `🎯 ${message}` 
+                    : `No leads match your profile niche (checked ${total} leads)`,
+                qualified > 0 ? 'success' : 'info'
+            );
+            setSelectedLeads(new Set());
+            fetchLeads();
+            fetchStats();
+        } catch (error) {
+            console.error('Qualify by niche failed:', error);
+            const errorMsg = error.response?.data?.error || error.message || 'Failed to qualify leads by niche';
+            addToast(`Error: ${errorMsg}`, 'error');
         }
     };
 
@@ -948,11 +1007,12 @@ export default function LeadsTable() {
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
             {/* Header Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <StatCard label="Total Leads" value={reviewStats.total || stats.totalLeads} />
                 <StatCard label="Qualified" value={reviewStats.approved} className="text-green-600" />
                 <StatCard label="Review" value={reviewStats.to_be_reviewed} className="text-yellow-600" />
                 <StatCard label="Rejected" value={reviewStats.rejected} className="text-red-600" />
+                <StatCard label="Imported" value={reviewStats.imported || 0} className="text-blue-600" />
             </div>
 
             {/* Main Content Card */}
@@ -973,7 +1033,7 @@ export default function LeadsTable() {
                                 </CardDescription>
                             </div>
                             <div className="flex gap-2">
-                                {reviewStatusTab === 'approved' && (
+                                {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
                                     <Button
                                         variant="outline"
                                         className="gap-2 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
@@ -1368,40 +1428,66 @@ export default function LeadsTable() {
                 </CardHeader >
                 <CardContent className="pt-0">
                     {/* PHASE 4: Review Status Tabs */}
-                    <div className="flex gap-2 mb-4 border-b">
-                        <button
-                            onClick={() => setReviewStatusTab('approved')}
-                            className={cn(
-                                "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
-                                reviewStatusTab === 'approved'
-                                    ? "border-green-500 text-green-600"
-                                    : "border-transparent text-muted-foreground hover:text-foreground"
-                            )}
-                        >
-                            🟢 Qualified Leads ({reviewStats.approved})
-                        </button>
-                        <button
-                            onClick={() => setReviewStatusTab('to_be_reviewed')}
-                            className={cn(
-                                "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
-                                reviewStatusTab === 'to_be_reviewed'
-                                    ? "border-yellow-500 text-yellow-600"
-                                    : "border-transparent text-muted-foreground hover:text-foreground"
-                            )}
-                        >
-                            🟡 Review ({reviewStats.to_be_reviewed})
-                        </button>
-                        <button
-                            onClick={() => setReviewStatusTab('rejected')}
-                            className={cn(
-                                "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
-                                reviewStatusTab === 'rejected'
-                                    ? "border-red-500 text-red-600"
-                                    : "border-transparent text-muted-foreground hover:text-foreground"
-                            )}
-                        >
-                            🔴 Rejected ({reviewStats.rejected})
-                        </button>
+                    <div className="flex gap-2 mb-4 border-b items-center">
+                        <div className="flex gap-2 flex-1">
+                            <button
+                                onClick={() => setReviewStatusTab('approved')}
+                                className={cn(
+                                    "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
+                                    reviewStatusTab === 'approved'
+                                        ? "border-green-500 text-green-600"
+                                        : "border-transparent text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                🟢 Qualified Leads ({reviewStats.approved})
+                            </button>
+                            <button
+                                onClick={() => setReviewStatusTab('to_be_reviewed')}
+                                className={cn(
+                                    "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
+                                    reviewStatusTab === 'to_be_reviewed'
+                                        ? "border-yellow-500 text-yellow-600"
+                                        : "border-transparent text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                🟡 Review ({reviewStats.to_be_reviewed})
+                            </button>
+                            <button
+                                onClick={() => setReviewStatusTab('rejected')}
+                                className={cn(
+                                    "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
+                                    reviewStatusTab === 'rejected'
+                                        ? "border-red-500 text-red-600"
+                                        : "border-transparent text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                🔴 Rejected ({reviewStats.rejected})
+                            </button>
+                            <button
+                                onClick={() => setReviewStatusTab('imported')}
+                                className={cn(
+                                    "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
+                                    reviewStatusTab === 'imported'
+                                        ? "border-blue-500 text-blue-600"
+                                        : "border-transparent text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                📥 Imported Leads ({reviewStats.imported || 0})
+                            </button>
+                        </div>
+                        {/* Qualify by Niche Button */}
+                        {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-2 border-primary/50 text-primary hover:bg-primary/10"
+                                onClick={handleQualifyByNiche}
+                                title="Qualify all leads matching your profile niche (preferred keywords, industry, etc.)"
+                            >
+                                <Sparkles className="h-4 w-4" />
+                                Qualify by Niche
+                            </Button>
+                        )}
                     </div>
 
                     {/* Selection Toolbar */}
@@ -1420,7 +1506,7 @@ export default function LeadsTable() {
                                         </Button>
                                     </>
                                 )}
-                                {(reviewStatusTab === 'approved' || reviewStatusTab === 'rejected') && (
+                                {(reviewStatusTab === 'approved' || reviewStatusTab === 'rejected' || reviewStatusTab === 'imported') && (
                                     <Button size="sm" variant="outline" onClick={handleMoveToReview}>
                                         ↩ Move to Review
                                     </Button>
@@ -1437,13 +1523,24 @@ export default function LeadsTable() {
                                         {deleting ? 'Deleting...' : (selectedLeads.size === leads.length ? 'Delete All Rejected' : `Delete (${selectedLeads.size})`)}
                                     </Button>
                                 )}
+                                {reviewStatusTab === 'imported' && (
+                                    <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={handleBulkDeleteImported}
+                                        disabled={deleting}
+                                    >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        {deleting ? 'Deleting...' : (selectedLeads.size === leads.length ? 'Delete All Imported' : `Delete (${selectedLeads.size})`)}
+                                    </Button>
+                                )}
 
                                 <div className="w-px h-6 bg-primary/20 mx-1" />
 
                                 <Button variant="ghost" size="sm" onClick={() => setSelectedLeads(new Set())} >
                                     Cancel
                                 </Button>
-                                {reviewStatusTab === 'approved' && (
+                                {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
                                     <>
                                         <Button
                                             size="sm"
@@ -1458,7 +1555,7 @@ export default function LeadsTable() {
                                             <Sparkles className={cn("h-4 w-4", enriching && "animate-spin")} />
                                             {enriching ? 'Enriching...' : 'Bulk Enrich & Personalize'}
                                         </Button>
-                                        {reviewStatusTab === 'approved' && (
+                                        {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
                                             <Button
                                                 size="sm"
                                                 variant="outline"
@@ -1509,8 +1606,8 @@ export default function LeadsTable() {
                                     <TableHead>Company</TableHead>
                                     <TableHead>Title</TableHead>
 
-                                    {/* Contact column only visible in Approved tab */}
-                                    {reviewStatusTab === 'approved' && (
+                                    {/* Contact column visible in Approved and Imported tabs */}
+                                    {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
                                         <TableHead className="min-w-[180px]">Contact</TableHead>
                                     )}
                                     <TableHead className="text-center">Profile</TableHead>
@@ -1520,13 +1617,13 @@ export default function LeadsTable() {
                             <TableBody>
                                 {loading ? (
                                     <TableRow>
-                                        <TableCell colSpan={reviewStatusTab === 'approved' ? 7 : 6} className="p-0">
-                                            <TableSkeleton rows={8} cols={reviewStatusTab === 'approved' ? 7 : 6} />
+                                        <TableCell colSpan={(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') ? 7 : 6} className="p-0">
+                                            <TableSkeleton rows={8} cols={(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') ? 7 : 6} />
                                         </TableCell>
                                     </TableRow>
                                 ) : leads.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={reviewStatusTab === 'approved' ? 7 : 6} className="h-24 text-center">
+                                        <TableCell colSpan={(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') ? 7 : 6} className="h-24 text-center">
                                             No leads found.
                                         </TableCell>
                                     </TableRow>
@@ -1581,8 +1678,8 @@ export default function LeadsTable() {
                                                 </span>
                                             </TableCell>
 
-                                            {/* Contact column only visible in Approved tab */}
-                                            {reviewStatusTab === 'approved' && (
+                                            {/* Contact column visible in Approved and Imported tabs */}
+                                            {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
                                                 <TableCell className="min-w-[180px]">
                                                     <div className="flex flex-col gap-1.5">
                                                         {/* Email */}

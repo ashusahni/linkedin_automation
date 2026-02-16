@@ -20,11 +20,14 @@ import {
     getEnrichedLeads,
     bulkEnrichAndPersonalize,
     generatePersonalizedMessage,
+    generateGmail,
+    addGmailToApprovals,
     // PHASE 4: Review & Approval
     bulkApproveLeads,
     bulkRejectLeads,
     moveToReview,
     getReviewStats,
+    qualifyLeadsByNiche,
     createLead,
     exportLeads
 } from "../controllers/lead.controller.js";
@@ -37,6 +40,7 @@ router.get("/review-stats", getReviewStats);
 router.post("/bulk-approve", bulkApproveLeads);
 router.post("/bulk-reject", bulkRejectLeads);
 router.post("/move-to-review", moveToReview);
+router.post("/qualify-by-niche", qualifyLeadsByNiche);
 
 router.get("/", getLeads);
 router.post("/", createLead);
@@ -61,6 +65,8 @@ router.post("/enrich-batch", enrichLeadsBatch);
 router.post("/bulk-enrich-personalize", bulkEnrichAndPersonalize);
 router.post("/:id/enrich", enrichLead);
 router.post("/:id/generate-message", generatePersonalizedMessage);
+router.post("/:id/generate-gmail", generateGmail);
+router.post("/:id/add-gmail-to-approvals", addGmailToApprovals);
 
 // End of routes
 

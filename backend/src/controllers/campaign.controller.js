@@ -7,7 +7,8 @@ import pool from "../db.js";
 const ALLOWED_SEQUENCE_STEP_TYPES = [
     "connection_request",
     "message",
-    "email"
+    "email",
+    "gmail_outreach"
 ];
 
 // GET /api/campaigns
@@ -1282,6 +1283,102 @@ export async function bulkEnrichAndGenerate(req, res) {
 
     } catch (err) {
         console.error('Bulk enrich & generate error:', err);
+        res.status(500).json({ error: err.message });
+    }
+}
+
+/**
+ * POST /api/campaigns/:id/generate-gmail-drafts
+ * Generate Gmail drafts for all campaign leads that have an email address.
+ * Only leads with email are processed; skips leads that already have a pending gmail_outreach approval.
+ */
+export async function generateGmailDrafts(req, res) {
+    try {
+        const campaignId = parseInt(req.params.id, 10);
+        const campaignRes = await pool.query(
+            'SELECT id, goal, type, description, target_audience FROM campaigns WHERE id = $1',
+            [campaignId]
+        );
+        if (campaignRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Campaign not found' });
+        }
+        const campaign = campaignRes.rows[0];
+        const campaignContext = {
+            goal: campaign.goal,
+            type: campaign.type,
+            description: campaign.description,
+            target_audience: campaign.target_audience
+        };
+
+        const leadsWithEmailRes = await pool.query(
+            `SELECT l.id, l.first_name, l.last_name, l.full_name, l.title, l.company, l.email
+             FROM campaign_leads cl
+             JOIN leads l ON cl.lead_id = l.id
+             WHERE cl.campaign_id = $1 AND l.email IS NOT NULL AND TRIM(l.email) != ''`,
+            [campaignId]
+        );
+        const leadsWithEmail = leadsWithEmailRes.rows;
+        if (leadsWithEmail.length === 0) {
+            return res.json({
+                success: false,
+                message: 'No leads in this campaign have an email address. Enrich contact info first.',
+                generated: 0,
+                skipped: 0,
+                totalWithEmail: 0
+            });
+        }
+
+        const { default: AIService } = await import('../services/ai.service.js');
+        const { ApprovalService } = await import('../services/approval.service.js');
+
+        let generated = 0;
+        let skipped = 0;
+
+        for (const lead of leadsWithEmail) {
+            const existing = await pool.query(
+                `SELECT id FROM approval_queue 
+                 WHERE campaign_id = $1 AND lead_id = $2 AND step_type = 'gmail_outreach' AND status = 'pending'`,
+                [campaignId, lead.id]
+            );
+            if (existing.rows.length > 0) {
+                skipped++;
+                continue;
+            }
+
+            const enrichmentRes = await pool.query('SELECT * FROM lead_enrichment WHERE lead_id = $1', [lead.id]);
+            const enrichment = enrichmentRes.rows[0] || null;
+
+            let draft;
+            try {
+                draft = await AIService.generateGmailDraft(lead, enrichment, { campaign: campaignContext });
+            } catch (err) {
+                console.error(`Gmail draft failed for lead ${lead.id}:`, err.message);
+                draft = {
+                    subject: `Quick thought for ${lead.first_name}`,
+                    body: `Hi ${lead.first_name},\n\nI came across your profile and would like to connect.\n\nBest regards`
+                };
+            }
+            const content = JSON.stringify({ subject: draft.subject, body: draft.body });
+            await ApprovalService.addToQueue(campaignId, lead.id, 'gmail_outreach', content);
+            generated++;
+            if (generated < leadsWithEmail.length) {
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
+
+        return res.json({
+            success: generated > 0,
+            message: generated > 0
+                ? `Generated ${generated} Gmail draft(s) for leads with email.${skipped > 0 ? ` ${skipped} already had a pending draft.` : ''}`
+                : skipped === leadsWithEmail.length
+                    ? 'All leads with email already have a pending Gmail draft.'
+                    : 'No new drafts generated.',
+            generated,
+            skipped,
+            totalWithEmail: leadsWithEmail.length
+        });
+    } catch (err) {
+        console.error('Generate Gmail drafts error:', err);
         res.status(500).json({ error: err.message });
     }
 }

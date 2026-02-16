@@ -19,7 +19,8 @@ import {
     Loader2,
     Mail,
     Phone,
-    Database
+    Database,
+    Trash2
 } from 'lucide-react';
 import PageGuide from '../components/PageGuide';
 import { Button } from '@/components/ui/button';
@@ -171,6 +172,48 @@ const SettingsPage = () => {
             addToast('Failed to start process', 'error');
         } finally {
             setIsTriggering(false);
+        }
+    };
+
+    const [isDeletingAll, setIsDeletingAll] = useState(false);
+    const handleDeleteAllLeads = async () => {
+        // Double confirmation for safety
+        const firstConfirm = window.confirm(
+            '⚠️ WARNING: This will PERMANENTLY delete ALL leads from the database.\n\n' +
+            'This includes:\n' +
+            '- All leads (qualified, review, rejected, imported)\n' +
+            '- All lead enrichment data\n' +
+            '- All campaign associations\n\n' +
+            'This action CANNOT be undone!\n\n' +
+            'Are you absolutely sure you want to proceed?'
+        );
+
+        if (!firstConfirm) {
+            return;
+        }
+
+        const secondConfirm = window.prompt(
+            'Type "DELETE ALL" to confirm deletion of all leads:'
+        );
+
+        if (secondConfirm !== 'DELETE ALL') {
+            addToast('Deletion cancelled. You must type "DELETE ALL" to confirm.', 'warning');
+            return;
+        }
+
+        try {
+            setIsDeletingAll(true);
+            const res = await axios.delete('/api/leads/all?confirm=true');
+            addToast(
+                `✅ Successfully deleted ${res.data.deleted || 0} leads and all related data`,
+                'success'
+            );
+        } catch (error) {
+            console.error('Failed to delete all leads:', error);
+            const errorMsg = error.response?.data?.error || error.message || 'Failed to delete all leads';
+            addToast(`Error: ${errorMsg}`, 'error');
+        } finally {
+            setIsDeletingAll(false);
         }
     };
 
@@ -527,6 +570,62 @@ const SettingsPage = () => {
                             disabled={isLoading}
                         >
                             {isLoading ? 'Saving...' : <><Save className="w-4 h-4" /> Save Configuration</>}
+                        </Button>
+                    </CardFooter>
+                </Card>
+
+                {/* Danger Zone */}
+                <Card className="border-red-500/50 bg-red-500/5 backdrop-blur-sm md:col-span-2">
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                            <AlertCircle className="w-5 h-5" />
+                            Danger Zone
+                        </CardTitle>
+                        <CardDescription className="text-red-600/80 dark:text-red-400/80">
+                            Irreversible and destructive actions. Use with extreme caution.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                            <div className="flex items-start gap-3">
+                                <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                                <div className="flex-1">
+                                    <h4 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">
+                                        Delete All Leads
+                                    </h4>
+                                    <p className="text-xs text-red-700/80 dark:text-red-300/80 mb-3">
+                                        This will permanently delete <strong>ALL</strong> leads from the database, including:
+                                    </p>
+                                    <ul className="text-xs text-red-700/80 dark:text-red-300/80 list-disc list-inside space-y-1 mb-3">
+                                        <li>All leads (qualified, review, rejected, imported)</li>
+                                        <li>All lead enrichment data</li>
+                                        <li>All campaign associations</li>
+                                    </ul>
+                                    <p className="text-xs font-semibold text-red-600 dark:text-red-400">
+                                        ⚠️ This action CANNOT be undone!
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </CardContent>
+                    <CardFooter>
+                        <Button
+                            variant="destructive"
+                            className="gap-2"
+                            onClick={handleDeleteAllLeads}
+                            disabled={isDeletingAll}
+                        >
+                            {isDeletingAll ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Deleting...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete All Leads
+                                </>
+                            )}
                         </Button>
                     </CardFooter>
                 </Card>

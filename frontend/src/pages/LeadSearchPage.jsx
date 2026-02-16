@@ -15,7 +15,7 @@ const IMPORT_SOURCE_OPTIONS = [
 
 export default function LeadSearchPage() {
     const { addToast } = useToast();
-    const [importSource, setImportSource] = useState('connections_export');
+    const [importSource, setImportSource] = useState('search_export');
     const [loading, setLoading] = useState(false);
     const [results, setResults] = useState(null);
     const [error, setError] = useState(null);

@@ -1,4 +1,5 @@
 import pool from "../db.js";
+import profileEnrichmentService from "./profileEnrichment.service.js";
 
 // Ensure we never exceed database column limits
 function safeTruncate(value, maxLength) {
@@ -7,7 +8,102 @@ function safeTruncate(value, maxLength) {
   return str.length > maxLength ? str.slice(0, maxLength) : str;
 }
 
+/**
+ * Check if a lead matches the user's profile niche
+ * Auto-qualifies leads that match:
+ * - Preferred company keywords (from PREFERRED_COMPANY_KEYWORDS env var)
+ * - User's industry (from their LinkedIn profile in database)
+ * - User's company/title keywords
+ */
+export async function matchesUserNiche(lead) {
+  try {
+    const userProfileUrl = process.env.LINKEDIN_PROFILE_URL;
+    const preferredKeywords = (process.env.PREFERRED_COMPANY_KEYWORDS || '')
+      .toLowerCase()
+      .split(',')
+      .map(k => k.trim())
+      .filter(Boolean);
+
+    // If no profile URL and no keywords configured, don't auto-qualify
+    if (!userProfileUrl && preferredKeywords.length === 0) {
+      return false;
+    }
+
+    const leadText = `${lead.company || ''} ${lead.title || ''}`.toLowerCase();
+    
+    // Check preferred company keywords
+    if (preferredKeywords.length > 0) {
+      const matchesKeyword = preferredKeywords.some(keyword => 
+        leadText.includes(keyword.toLowerCase())
+      );
+      if (matchesKeyword) {
+        console.log(`✅ Auto-qualifying lead: "${lead.company}" matches preferred keyword`);
+        return true;
+      }
+    }
+
+    // Check user's profile data if available
+    if (userProfileUrl) {
+      const userProfile = await profileEnrichmentService.enrichProfileFromUrl(userProfileUrl);
+      
+      if (userProfile) {
+        // Check industry match
+        if (userProfile.industry) {
+          // Extract industry from lead's company/title
+          const leadIndustry = profileEnrichmentService.extractIndustryFromCompany(
+            lead.company || '', 
+            lead.title || ''
+          );
+          
+          if (leadIndustry && leadIndustry === userProfile.industry) {
+            console.log(`✅ Auto-qualifying lead: Industry match (${leadIndustry})`);
+            return true;
+          }
+        }
+
+        // Check company/title keyword match from user's profile
+        const userText = `${userProfile.company || ''} ${userProfile.title || ''}`.toLowerCase();
+        if (userText) {
+          // Extract meaningful keywords from user's company/title (2+ chars, not common words)
+          const commonWords = ['the', 'and', 'of', 'in', 'at', 'for', 'to', 'a', 'an'];
+          const userKeywords = userText
+            .split(/\s+/)
+            .filter(word => word.length >= 3 && !commonWords.includes(word))
+            .slice(0, 5); // Top 5 keywords
+          
+          const matchesUserKeywords = userKeywords.some(keyword => 
+            leadText.includes(keyword)
+          );
+          
+          if (matchesUserKeywords && userKeywords.length > 0) {
+            console.log(`✅ Auto-qualifying lead: Matches user profile keywords`);
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  } catch (error) {
+    console.error('Error checking user niche match:', error);
+    // On error, don't auto-qualify (fail safe)
+    return false;
+  }
+}
+
 export async function saveLead(lead) {
+  // Check if lead matches user's niche BEFORE determining review_status
+  const matchesNiche = await matchesUserNiche(lead);
+  const shouldAutoApprove = matchesNiche || 
+                            (lead.connectionDegree && lead.connectionDegree.toLowerCase().includes('1st')) ||
+                            lead.reviewStatus === 'approved';
+
+  // Determine initial review_status
+  let initialReviewStatus = lead.reviewStatus || 'to_be_reviewed';
+  if (shouldAutoApprove) {
+    initialReviewStatus = 'approved';
+  }
+
   const query = `
     INSERT INTO leads
     (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, source, connection_degree, review_status)
@@ -24,7 +120,8 @@ export async function saveLead(lead) {
       connection_degree = EXCLUDED.connection_degree,
       -- Auto-promote to approved if:
       -- 1. New connection_degree is '1st' (case insensitive)
-      -- 2. New review_status is 'approved' (from auto-approval logic)
+      -- 2. Lead matches user's niche (preferred keywords, industry, profile keywords)
+      -- 3. New review_status is 'approved' (from auto-approval logic)
       -- Never downgrade from 'approved' back to 'to_be_reviewed'
       review_status = CASE
         WHEN LOWER(EXCLUDED.connection_degree) LIKE '%1st%' THEN 'approved'
@@ -54,10 +151,37 @@ export async function saveLead(lead) {
     safeTruncate(lead.profileImage, 500),  // VARCHAR(500)
     safeTruncate(lead.source, 100),        // VARCHAR(100) e.g. 'connections_export', 'search_export'
     safeTruncate(lead.connectionDegree || lead.connection_degree, 50), // VARCHAR(50) e.g. '1st', '2nd', '3rd'
-    safeTruncate(lead.reviewStatus || 'to_be_reviewed', 50) // Default to to_be_reviewed for imported leads
+    safeTruncate(initialReviewStatus, 50) // Use determined review_status (auto-approved if matches niche)
   ];
 
   const result = await pool.query(query, values);
+  const wasInserted = result.rows[0]?.inserted;
+  
+  // If lead matches niche and was updated (not inserted), check if we need to auto-approve
+  if (matchesNiche && !wasInserted) {
+    // Check current status - if it's 'to_be_reviewed', auto-approve it
+    const currentLead = await pool.query(
+      'SELECT review_status FROM leads WHERE linkedin_url = $1',
+      [safeTruncate(lead.linkedinUrl, 500)]
+    );
+    
+    if (currentLead.rows[0]?.review_status === 'to_be_reviewed') {
+      await pool.query(
+        `UPDATE leads 
+         SET review_status = 'approved', 
+             approved_at = CASE WHEN approved_at IS NULL THEN NOW() ELSE approved_at END
+         WHERE linkedin_url = $1 AND review_status = 'to_be_reviewed'`,
+        [safeTruncate(lead.linkedinUrl, 500)]
+      );
+      console.log(`🎯 Auto-qualified existing lead matching your niche: ${lead.company || 'Unknown'} - ${lead.title || 'Unknown'}`);
+    }
+  }
+  
+  // Log auto-qualification if it happened for new leads
+  if (matchesNiche && wasInserted) {
+    console.log(`🎯 Auto-qualified new lead matching your niche: ${lead.company || 'Unknown'} - ${lead.title || 'Unknown'}`);
+  }
+  
   // Return the lead if it was inserted (not a duplicate)
-  return result.rows[0]?.inserted ? result.rows[0] : null;
+  return wasInserted ? result.rows[0] : null;
 }

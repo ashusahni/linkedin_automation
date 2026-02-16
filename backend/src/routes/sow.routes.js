@@ -164,6 +164,9 @@ router.post('/approvals/:id/regenerate', async (req, res) => {
         let content;
         if (approval.step_type === 'connection_request') {
             content = await AIService.generateConnectionRequest(lead, enrichment, options);
+        } else if (approval.step_type === 'gmail_outreach' || approval.step_type === 'email') {
+            const draft = await AIService.generateGmailDraft(lead, enrichment, options);
+            content = JSON.stringify({ subject: draft.subject, body: draft.body });
         } else {
             content = await AIService.generateFollowUpMessage(lead, enrichment, [], options);
         }
@@ -248,6 +251,9 @@ router.post('/approvals/bulk-personalize', async (req, res) => {
                 let content;
                 if (approval.step_type === 'connection_request') {
                     content = await AIService.generateConnectionRequest(lead, enrichment, options);
+                } else if (approval.step_type === 'gmail_outreach' || approval.step_type === 'email') {
+                    const draft = await AIService.generateGmailDraft(lead, enrichment, options);
+                    content = JSON.stringify({ subject: draft.subject, body: draft.body });
                 } else {
                     content = await AIService.generateFollowUpMessage(lead, enrichment, [], options);
                 }
