@@ -81,7 +81,7 @@ export default function PageGuide({ pageKey }) {
 
             <div className="flex-1 space-y-4 text-center md:text-left">
               <div>
-                <p className="text-xs font-bold uppercase tracking-widest text-primary/60 mb-1">Coming Up Next</p>
+                <p className="text-xs font-bold uppercase tracking-widest text-primary/60 mb-1">Next best action</p>
                 <h4 className="font-semibold text-foreground text-sm">{guide.nextPage.name}</h4>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                   {guide.nextPage.info}

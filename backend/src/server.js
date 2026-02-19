@@ -5,6 +5,7 @@ import { initScheduler } from "./services/scheduler.service.js";
 import { runMigrations } from "./db/migrations.js";
 import logger from "./utils/logger.js";
 import industryHierarchyService from "./services/industryHierarchy.service.js";
+import { ensureNotificationsTable } from "./db/ensure_notifications.js"; // 👈 Explicit fix for notifications
 
 const PORT = config.server.port;
 
@@ -26,6 +27,9 @@ async function init() {
   try {
     // Run database migrations
     await runMigrations();
+
+    // Explicitly ensure critical tables (Notifications) exist even if schema migrations skipped them
+    await ensureNotificationsTable();
   } catch (err) {
     logger.error("❌ Migration failed:", err.message);
     // Don't exit - allow server to start even if migrations fail

@@ -4,6 +4,7 @@ import { parse } from 'csv-parse/sync';
 import fs from 'fs';
 import { INDUSTRY_KEYWORDS } from '../config/industries.js';
 import { matchesUserNiche } from '../services/lead.service.js';
+import { NotificationService } from '../services/notification.service.js';
 
 // ============================================================================
 // CONTACT SCRAPING INTEGRATION (PHASE 6)
@@ -640,6 +641,13 @@ export async function createLead(req, res) {
     if (matchesNiche) {
       console.log(`🎯 Auto-qualified manually created lead: ${company || 'Unknown'} - ${title || 'Unknown'}`);
     }
+
+    await NotificationService.create({
+      type: 'lead_created',
+      title: 'Lead added',
+      message: `${finalFullName || company || 'New lead'} was added to your contacts`,
+      data: { leadId: result.rows[0].id, link: `/leads/${result.rows[0].id}` },
+    });
 
     return res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1315,6 +1323,15 @@ export async function importLeadsFromCSV(req, res) {
       console.error('Failed to log import:', err.message);
     }
 
+    if (saved > 0) {
+      await NotificationService.create({
+        type: 'lead_imported',
+        title: 'CSV import completed',
+        message: `Imported ${saved} leads from CSV${duplicates > 0 ? ` (${duplicates} duplicates skipped)` : ''}`,
+        data: { saved, duplicates, errors, link: '/leads' },
+      });
+    }
+
     return res.json({
       success: true,
       summary: {
@@ -1656,6 +1673,13 @@ export async function bulkApproveLeads(req, res) {
 
     console.log(`✅ Approved ${result.rowCount} leads`);
 
+    await NotificationService.create({
+      type: 'approval_approved',
+      title: 'Leads approved',
+      message: `${result.rowCount} leads approved for campaigns`,
+      data: { leadIds, count: result.rowCount, link: '/leads' },
+    });
+
     // 🆕 PHASE 6: Trigger contact scraping asynchronously (non-blocking)
     // DISABLED: User wants manual control via button
     /*
@@ -1724,6 +1748,13 @@ export async function bulkRejectLeads(req, res) {
     }
 
     console.log(`❌ Rejected ${result.rowCount} leads (reason: ${reason || 'not specified'})`);
+
+    await NotificationService.create({
+      type: 'approval_rejected',
+      title: 'Leads rejected',
+      message: `${result.rowCount} leads rejected${reason ? ` (${reason})` : ''}`,
+      data: { leadIds, count: result.rowCount, reason, link: '/leads' },
+    });
 
     res.json({
       success: true,

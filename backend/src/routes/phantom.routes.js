@@ -13,6 +13,7 @@ import {
 } from "../controllers/phantom.controller.js";
 import phantomService from "../services/phantombuster.service.js";
 import pool from "../db.js";
+import { NotificationService } from "../services/notification.service.js";
 
 const router = express.Router();
 
@@ -181,12 +182,24 @@ router.get("/status/:jobId", async (req, res) => {
               jobInfo.savedCount = savedCount;
               jobInfo.duplicateCount = duplicateCount;
               jobInfo.totalProcessed = savedCount + duplicateCount;
+              await NotificationService.create({
+                type: 'phantom_completed',
+                title: 'Lead import completed',
+                message: `Successfully imported ${savedCount} leads from LinkedIn search`,
+                data: { jobId, savedCount, duplicateCount, type: 'search_export', link: '/leads' },
+              });
             }
             jobInfo.processing = false;
             jobInfo.completed = true;
           } catch (error) {
             jobInfo.error = error.message;
             jobInfo.processing = false;
+            await NotificationService.create({
+              type: 'phantom_failed',
+              title: 'Lead import failed',
+              message: error.message,
+              data: { jobId, type: 'search_export', link: '/leads' },
+            });
           }
         })();
       }
@@ -210,6 +223,12 @@ router.get("/status/:jobId", async (req, res) => {
       progress = 0;
       status = 'error';
       message = 'Import failed. Check PhantomBuster configuration.';
+      await NotificationService.create({
+        type: 'phantom_failed',
+        title: 'Lead import failed',
+        message: 'PhantomBuster job failed. Check configuration.',
+        data: { jobId, type: jobInfo?.type || 'search_export', link: '/leads' },
+      });
       activeJobs.delete(jobId);
     }
 
@@ -230,6 +249,80 @@ router.get("/status/:jobId", async (req, res) => {
       status: 'error',
       progress: 0,
       message: error.message
+    });
+  }
+});
+
+// ============================================
+// PHANTOM STATUS CHECK (for UI sync controls)
+// ============================================
+/**
+ * GET /api/phantom/status-check
+ * Check if any phantom is currently running
+ * Returns status for both CONNECTIONS_EXPORT and SEARCH_EXPORT phantoms
+ */
+router.get("/status-check", async (req, res) => {
+  try {
+    const connectionsPhantomId = process.env.CONNECTIONS_EXPORT_PHANTOM_ID;
+    const searchPhantomId = process.env.SEARCH_EXPORT_PHANTOM_ID || process.env.SEARCH_LEADS_PHANTOM_ID;
+
+    const statuses = {
+      connections: { status: 'idle', phantomId: connectionsPhantomId },
+      search: { status: 'idle', phantomId: searchPhantomId }
+    };
+
+    // Check connections phantom
+    if (connectionsPhantomId) {
+      try {
+        const agent = await phantomService.fetchAgent(connectionsPhantomId);
+        if (agent && agent.lastContainerId) {
+          const container = await phantomService.fetchContainerStatus(agent.lastContainerId);
+          if (container && container.status === 'running') {
+            statuses.connections.status = 'running';
+          } else if (container && container.status === 'error') {
+            statuses.connections.status = 'error';
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not check connections phantom status:', err.message);
+      }
+    }
+
+    // Check search phantom
+    if (searchPhantomId) {
+      try {
+        const agent = await phantomService.fetchAgent(searchPhantomId);
+        if (agent && agent.lastContainerId) {
+          const container = await phantomService.fetchContainerStatus(agent.lastContainerId);
+          if (container && container.status === 'running') {
+            statuses.search.status = 'running';
+          } else if (container && container.status === 'error') {
+            statuses.search.status = 'error';
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not check search phantom status:', err.message);
+      }
+    }
+
+    // Determine if any phantom is running
+    const anyRunning = statuses.connections.status === 'running' || statuses.search.status === 'running';
+
+    res.json({
+      success: true,
+      anyRunning,
+      statuses
+    });
+  } catch (error) {
+    console.error('❌ Status check error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      anyRunning: false,
+      statuses: {
+        connections: { status: 'idle' },
+        search: { status: 'idle' }
+      }
     });
   }
 });

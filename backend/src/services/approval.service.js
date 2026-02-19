@@ -1,4 +1,5 @@
 import pool from '../db.js';
+import { NotificationService } from './notification.service.js';
 
 export const ApprovalService = {
     // Add item to review queue
@@ -16,7 +17,17 @@ export const ApprovalService = {
        VALUES ($1, $2, $3, $4, 'pending') RETURNING *`,
             [campaignId, leadId, stepType, content]
         );
-        return result.rows[0];
+        const row = result.rows[0];
+        if (row) {
+            const stepLabel = stepType === 'connection_request' ? 'Connection request' : stepType === 'message' ? 'Message' : stepType === 'gmail_outreach' ? 'Gmail draft' : stepType;
+            await NotificationService.create({
+                type: 'approval_needed',
+                title: 'Approval required',
+                message: `${stepLabel} for lead needs your approval`,
+                data: { campaignId, leadId, stepType, approvalId: row.id, link: '/campaigns' },
+            });
+        }
+        return row;
     },
 
     // Get pending items (optionally filtered by campaign)
@@ -123,6 +134,51 @@ export const ApprovalService = {
                      WHERE campaign_id = $1 AND lead_id = $2`,
                     [item.campaign_id, item.lead_id]
                 );
+            }
+        }
+
+        // Create per-campaign notification summarizing queued work
+        if (result.rows.length > 0) {
+            try {
+                const campaignIds = [...new Set(result.rows.map(r => r.campaign_id).filter(Boolean))];
+                let campaignNamesById = {};
+                if (campaignIds.length > 0) {
+                    const campaignsRes = await pool.query(
+                        'SELECT id, name FROM campaigns WHERE id = ANY($1::int[])',
+                        [campaignIds]
+                    );
+                    campaignNamesById = campaignsRes.rows.reduce((acc, row) => {
+                        acc[row.id] = row.name;
+                        return acc;
+                    }, {});
+                }
+
+                const byCampaign = new Map();
+                for (const row of result.rows) {
+                    if (!row.campaign_id) continue;
+                    const current = byCampaign.get(row.campaign_id) || [];
+                    current.push(row);
+                    byCampaign.set(row.campaign_id, current);
+                }
+
+                for (const [campaignId, items] of byCampaign.entries()) {
+                    const campaignName = campaignNamesById[campaignId] || `Campaign #${campaignId}`;
+                    const count = items.length;
+                    await NotificationService.create({
+                        type: 'campaign_queued',
+                        title: 'Campaign queued',
+                        message: `Queued ${count} approval${count === 1 ? '' : 's'} for "${campaignName}"`,
+                        data: {
+                            campaignId,
+                            count,
+                            stepTypes: [...new Set(items.map(i => i.step_type))],
+                            approvalIds: items.map(i => i.id),
+                            link: `/campaigns/${campaignId}`,
+                        },
+                    });
+                }
+            } catch (notifyErr) {
+                console.error('NotificationService (campaign_queued) error:', notifyErr.message);
             }
         }
 

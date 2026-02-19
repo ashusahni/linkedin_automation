@@ -2,6 +2,7 @@ import pool from '../db.js';
 import phantomService from './phantombuster.service.js';
 import logger from '../utils/logger.js';
 import emailService from './email.service.js';
+import { NotificationService } from './notification.service.js';
 
 class ReplyDetectionService {
     /**
@@ -96,6 +97,14 @@ class ReplyDetectionService {
                     "INSERT INTO automation_logs (campaign_id, lead_id, action, status, details) VALUES ($1, $2, $3, $4, $5)",
                     [lead.campaign_id, lead.lead_id, 'reply_detected', 'detected', JSON.stringify({ detected_at: new Date() })]
                 );
+
+                const leadName = lead.first_name || lead.full_name || 'A lead';
+                await NotificationService.create({
+                    type: 'reply_detected',
+                    title: 'Lead replied!',
+                    message: `${leadName} replied to your message`,
+                    data: { campaignId: lead.campaign_id, leadId: lead.lead_id, link: `/campaigns/${lead.campaign_id}` },
+                });
             }
         } catch (error) {
             logger.error(`❌ Error checking reply for lead ${lead.lead_id}:`, error.message);

@@ -8,6 +8,7 @@ import { saveLead } from "../services/lead.service.js";
 import { getSearchCriteriaFromCrm, pushLeadsToCrm, isCrmConfigured } from "../services/crm.service.js";
 import { buildLinkedInSearchUrl, buildSearchQueryFromCriteria } from "../utils/linkedinSearchUrl.js";
 import pool from "../db.js";
+import { NotificationService } from "../services/notification.service.js";
 
 // Centralized helper to map PhantomBuster errors into clear API responses
 function handlePhantomError(res, context, error) {
@@ -127,10 +128,19 @@ export async function exportConnectionsComplete(req, res) {
     const result = await phantomService.exportConnections();
 
     if (result.data.length === 0) {
+      // Provide helpful guidance if no data found
       return res.json({
-        success: true,
-        message: "No connections found",
-        totalLeads: 0
+        success: false,
+        message: "No connections found in PhantomBuster result",
+        totalLeads: 0,
+        containerId: result.containerId,
+        tips: [
+          "The phantom completed but no result data was found.",
+          "This might happen if PhantomBuster's storage is private (403 Forbidden).",
+          "You can manually import results using the /api/phantom/import-results endpoint:",
+          "POST /api/phantom/import-results with body: { resultUrl: 'https://cache1.phantombooster.com/.../result.json' }",
+          "Or check the PhantomBuster dashboard for container " + result.containerId + " and copy the result URL."
+        ]
       });
     }
 
@@ -179,6 +189,25 @@ export async function exportConnectionsComplete(req, res) {
     console.log(`   Saved: ${savedCount}`);
     console.log(`   Duplicates: ${leads.length - savedCount}`);
     console.log(`   CSV: ${filename}\n`);
+
+    try {
+      await NotificationService.create({
+        type: 'phantom_completed',
+        title: 'Connections export completed',
+        message: `Extracted ${savedCount} new connections from LinkedIn`,
+        data: {
+          source: leadSource,
+          containerId: result.containerId || null,
+          totalLeads: leads.length,
+          saved: savedCount,
+          duplicates: leads.length - savedCount,
+          csvFile: filename,
+          link: '/leads',
+        },
+      });
+    } catch (notifyErr) {
+      console.error('NotificationService (exportConnectionsComplete) error:', notifyErr.message);
+    }
 
     return res.json({
       success: true,
@@ -295,6 +324,27 @@ export async function searchLeadsComplete(req, res) {
     if (pushedToCrm > 0) console.log(`   Pushed to CRM: ${pushedToCrm}`);
     console.log(`   CSV: ${filename}\n`);
 
+    try {
+      await NotificationService.create({
+        type: 'phantom_completed',
+        title: 'Lead search completed',
+        message: `Imported ${savedCount} leads from LinkedIn search`,
+        data: {
+          source: leadSource,
+          containerId: result.containerId || null,
+          query: searchQuery || null,
+          totalLeads: leads.length,
+          saved: savedCount,
+          duplicates: leads.length - savedCount,
+          pushedToCrm,
+          csvFile: filename,
+          link: '/leads',
+        },
+      });
+    } catch (notifyErr) {
+      console.error('NotificationService (searchLeadsComplete) error:', notifyErr.message);
+    }
+
     return res.json({
       success: true,
       message: "Lead search completed",
@@ -367,6 +417,25 @@ export async function importByContainerId(req, res) {
       );
     } catch (err) {
       console.error("Failed to log import:", err.message);
+    }
+
+    try {
+      await NotificationService.create({
+        type: 'phantom_completed',
+        title: 'Leads imported from PhantomBuster',
+        message: `Imported ${savedCount} leads from container ${result.containerId}`,
+        data: {
+          source: leadSource,
+          containerId: result.containerId,
+          totalLeads: leads.length,
+          saved: savedCount,
+          duplicates: leads.length - savedCount,
+          csvFile: filename,
+          link: '/leads',
+        },
+      });
+    } catch (notifyErr) {
+      console.error('NotificationService (importByContainerId) error:', notifyErr.message);
     }
 
     return res.json({
@@ -442,6 +511,22 @@ export async function enrichProfilesComplete(req, res) {
     console.log(`   Total: ${leads.length}`);
     console.log(`   Saved: ${savedCount}`);
     console.log(`   CSV: ${filename}\n`);
+
+    try {
+      await NotificationService.create({
+        type: 'lead_enriched',
+        title: 'Profile enrichment completed',
+        message: `Enriched ${savedCount} profiles from LinkedIn`,
+        data: {
+          totalProfiles: leads.length,
+          saved: savedCount,
+          csvFile: filename,
+          link: '/leads',
+        },
+      });
+    } catch (notifyErr) {
+      console.error('NotificationService (enrichProfilesComplete) error:', notifyErr.message);
+    }
 
     return res.json({
       success: true,
@@ -558,6 +643,27 @@ export async function crmSearchRun(req, res) {
 
     log("CRM search run completed", { totalLeads: leads.length, savedToDatabase: savedCount, pushedToCrm });
 
+    try {
+      await NotificationService.create({
+        type: 'phantom_completed',
+        title: 'CRM search completed',
+        message: `Imported ${savedCount} leads from CRM search`,
+        data: {
+          criteria,
+          linkedInUrl,
+          query: queryString,
+          totalLeads: leads.length,
+          saved: savedCount,
+          duplicates: leads.length - savedCount,
+          pushedToCrm,
+          csvFile: filename,
+          link: '/leads',
+        },
+      });
+    } catch (notifyErr) {
+      console.error('NotificationService (crmSearchRun) error:', notifyErr.message);
+    }
+
     return res.json({
       success: true,
       message: "CRM search run completed",
@@ -650,6 +756,22 @@ export async function sendMessageComplete(req, res) {
 
     console.log("\n✅ === MESSAGE SENT ===");
     console.log(`   Container: ${result.containerId}\n`);
+
+    try {
+      await NotificationService.create({
+        type: 'message_sent',
+        title: 'Message sent',
+        message: `LinkedIn message sent to ${profile.full_name || profile.linkedin_url || 'lead'}`,
+        data: {
+          leadId: leadId || null,
+          containerId: result.containerId || null,
+          profileUrl: profile.linkedin_url,
+          link: leadId ? `/leads/${leadId}` : undefined,
+        },
+      });
+    } catch (notifyErr) {
+      console.error('NotificationService (sendMessageComplete) error:', notifyErr.message);
+    }
 
     return res.json({
       success: true,

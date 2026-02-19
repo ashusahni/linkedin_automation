@@ -1,4 +1,5 @@
 import pool from "../db.js";
+import { NotificationService } from "../services/notification.service.js";
 
 // Allowed automation step types for sequences.
 // These MUST stay in sync with:
@@ -478,6 +479,14 @@ export async function launchCampaign(req, res) {
             );
         }
 
+        const campaignName = campaignRes.rows[0]?.name || 'Campaign';
+        await NotificationService.create({
+            type: 'campaign_launched',
+            title: 'Campaign launched',
+            message: `${campaignName}: ${pendingLeads.rows.length} connection requests sent`,
+            data: { campaignId: parseInt(id, 10), leadsProcessed: pendingLeads.rows.length, link: `/campaigns/${id}` },
+        });
+
         return res.json({
             success: true,
             message: "Campaign launched successfully (connections sent, no automation flow).",
@@ -504,6 +513,13 @@ export async function pauseCampaign(req, res) {
             return res.status(404).json({ error: "Campaign not found" });
         }
 
+        await NotificationService.create({
+            type: 'campaign_paused',
+            title: 'Campaign paused',
+            message: `"${result.rows[0].name}" has been paused`,
+            data: { campaignId: parseInt(id, 10), link: `/campaigns/${id}` },
+        });
+
         return res.json({ success: true, message: "Campaign paused", campaign: result.rows[0] });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -522,6 +538,13 @@ export async function resumeCampaign(req, res) {
         if (result.rows.length === 0) {
             return res.status(404).json({ error: "Campaign not found" });
         }
+
+        await NotificationService.create({
+            type: 'campaign_resumed',
+            title: 'Campaign resumed',
+            message: `"${result.rows[0].name}" is now active`,
+            data: { campaignId: parseInt(id, 10), link: `/campaigns/${id}` },
+        });
 
         return res.json({ success: true, message: "Campaign resumed", campaign: result.rows[0] });
     } catch (err) {

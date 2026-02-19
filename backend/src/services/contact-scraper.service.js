@@ -4,6 +4,7 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import pool from '../db.js';
 import { extractLinkedInProfileId, getProfileUrl, isValidLinkedInProfileId } from '../utils/linkedin.utils.js';
+import { NotificationService } from './notification.service.js';
 
 // Add stealth plugin to avoid detection
 puppeteer.use(StealthPlugin());
@@ -566,6 +567,29 @@ class ContactScraperService {
             console.log(`   Contacts found: ${job.found}`);
             console.log(`   Failed: ${job.failed}`);
             console.log(`   Skipped (cached): ${job.skipped}`);
+
+            // Create CRM notification with summary of newly synced contacts
+            const totalProfiles = (job.total || 0) + (job.skipped || 0);
+            if (job.found > 0) {
+                try {
+                    await NotificationService.create({
+                        type: 'lead_enriched',
+                        title: 'Contacts synced',
+                        message: `${job.found} new contacts synced from LinkedIn`,
+                        data: {
+                            jobId,
+                            totalProfiles,
+                            newContacts: job.found,
+                            failed: job.failed || 0,
+                            skipped: job.skipped || 0,
+                            jobType: job.jobType || null,
+                            campaignId: job.campaignId || null,
+                        },
+                    });
+                } catch (notifyErr) {
+                    console.error('NotificationService (contacts synced) error:', notifyErr.message);
+                }
+            }
 
         } catch (error) {
             if (job.status !== 'cancelled') {

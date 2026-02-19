@@ -235,7 +235,15 @@ class PhantomBusterService {
         // For phantoms that need args but NOT session cookie (e.g., LinkedIn Outreach for messages)
         // These phantoms use dashboard LinkedIn connection
         console.log("📌 Using dashboard LinkedIn connection (no session cookie sent)");
-        launchArgs = { ...additionalArgs };
+        // Update: We SHOULD include resultFileArgs and defaults so we can track results properly
+        launchArgs = {
+          ...resultFileArgs,
+          keepOnlyCurrentResultsInJson: true,
+          saveToCloud: true,
+          saveResultsToDatabase: true,
+          saveResultInDatabase: true,
+          ...additionalArgs
+        };
         finalArgs = launchArgs;
         hasLaunchArgs = Object.keys(launchArgs).length > 0;
       } else {
@@ -411,16 +419,40 @@ class PhantomBusterService {
         const resultObj = await pbRequest(`/containers/fetch-result-object?id=${container.id}`);
         if (resultObj) {
           console.log("   Response keys:", Object.keys(resultObj));
-          const roRaw = resultObj.resultObject ?? resultObj.url ?? resultObj.resultUrl ?? resultObj.outputUrl;
+
+          // Log the actual resultObject value if it exists
+          if (resultObj.resultObject !== undefined) {
+            const roValue = resultObj.resultObject;
+            const roType = roValue == null ? "null" : Array.isArray(roValue) ? "array" : typeof roValue;
+            if (typeof roValue === "string") {
+              console.log(`   resultObject value (string): ${roValue.substring(0, 150)}`);
+            } else {
+              console.log(`   resultObject value (${roType}):`, JSON.stringify(roValue).slice(0, 300));
+            }
+          }
+
+          // Try multiple possible fields for the result URL
+          const roRaw = resultObj.resultObject ?? resultObj.url ?? resultObj.resultUrl ?? resultObj.outputUrl
+            ?? resultObj.csvUrl ?? resultObj.jsonUrl ?? resultObj.result;
+
           const roType = roRaw == null ? "null" : Array.isArray(roRaw) ? "array" : typeof roRaw;
           if (roRaw != null) {
             const preview = typeof roRaw === "string" ? roRaw.slice(0, 120) : JSON.stringify(roRaw).slice(0, 120);
-            console.log("   resultObject type:", roType, "| preview:", preview + (typeof roRaw === "string" && roRaw.length > 120 ? "..." : ""));
+            console.log("   Extracted resultObject type:", roType, "| preview:", preview + (typeof roRaw === "string" && roRaw.length > 120 ? "..." : ""));
+          } else {
+            console.log("   ⚠️ resultObject is null/undefined - checking all response values...");
+            // Log all string values that look like URLs
+            for (const [key, value] of Object.entries(resultObj)) {
+              if (typeof value === "string" && (value.includes("http") || value.includes("cache") || value.includes("phantombooster"))) {
+                console.log(`   💡 Found potential URL in ${key}: ${value.substring(0, 100)}`);
+              }
+            }
           }
+
           // PhantomBuster returns { resultObject: "url" } or { resultObject: { ... } }
           const ro = roRaw;
           if (ro && typeof ro === "string" && (ro.startsWith("http") || ro.startsWith("https"))) {
-            console.log(`✅ Found result URL from fetch-result-object`);
+            console.log(`✅ Found result URL from fetch-result-object: ${ro.substring(0, 100)}...`);
             const data = await this.downloadResultFile(ro);
             if (data && data.length > 0) {
               console.log(`✅ Fetched ${data.length} records from container result object`);
@@ -434,6 +466,8 @@ class PhantomBusterService {
               return inline;
             }
           }
+
+          // Also check if resultObj itself contains inline data
           const inline = Array.isArray(resultObj)
             ? this.parseResultData(resultObj)
             : this.extractInlineResult(resultObj);
@@ -441,10 +475,17 @@ class PhantomBusterService {
             console.log(`✅ Found ${inline.length} records inline from fetch-result-object`);
             return inline;
           }
+        } else {
+          console.log("   ⚠️ fetch-result-object returned null/undefined");
         }
       } catch (e0) {
         console.log(`⚠️  Strategy 0 failed: ${e0.message}`);
-        if (e0.response?.data) console.log("   API response:", JSON.stringify(e0.response.data).slice(0, 200));
+        if (e0.response?.data) {
+          console.log("   API response:", JSON.stringify(e0.response.data).slice(0, 500));
+        }
+        if (e0.response?.status) {
+          console.log(`   HTTP Status: ${e0.response.status}`);
+        }
       }
 
       // STRATEGY 1: Try /agents/fetch-output (PhantomBuster API - URL or inline JSON)
@@ -552,6 +593,10 @@ class PhantomBusterService {
         if (!output) {
           console.log("⚠️  No container output");
         } else {
+          // Log a sample of the output to help debug
+          const outputSample = output.length > 500 ? output.substring(0, 500) + "..." : output;
+          console.log(`   Output sample (first 500 chars): ${outputSample}`);
+
           const dataUrl = this.extractResultUrlFromLog(output);
           if (dataUrl) {
             console.log(`✅ Found result URL in logs: ${dataUrl}`);
@@ -562,6 +607,14 @@ class PhantomBusterService {
             }
           } else {
             console.log("⚠️  No CSV/JSON URL found in output logs");
+            // Try to find any URL in the output that might be a result URL
+            const urlMatches = output.match(/https?:\/\/[^\s"<>]+/g);
+            if (urlMatches && urlMatches.length > 0) {
+              console.log(`   💡 Found ${urlMatches.length} potential URLs in output:`);
+              urlMatches.slice(0, 5).forEach((url, idx) => {
+                console.log(`      ${idx + 1}. ${url.substring(0, 100)}`);
+              });
+            }
           }
         }
       } catch (outputError) {
@@ -709,6 +762,35 @@ class PhantomBusterService {
   // ============================================
   extractResultUrlFromLog(log) {
     if (!log || typeof log !== "string") return null;
+
+    // First, try to find cache URLs (cache1.phantombooster.com) - these are public and work even when S3 is private
+    const cacheJsonPatterns = [
+      /(https:\/\/cache\d*\.phantombooster\.com\/[^\s"]+\.json)/i,
+      /(https:\/\/cache\d*\.phantombooster\.com\/[^\s"]+\.json)/i,
+      /result\.json.*?(https:\/\/cache\d*\.phantombooster\.com\/[^\s"]+)/i
+    ];
+    const cacheCsvPatterns = [
+      /(https:\/\/cache\d*\.phantombooster\.com\/[^\s"]+\.csv)/i,
+      /result\.csv.*?(https:\/\/cache\d*\.phantombooster\.com\/[^\s"]+)/i
+    ];
+
+    // Try cache URLs first (they're public and reliable)
+    for (const re of cacheJsonPatterns) {
+      const m = log.match(re);
+      if (m && m[1]) {
+        console.log(`   ✅ Found cache JSON URL: ${m[1]}`);
+        return m[1];
+      }
+    }
+    for (const re of cacheCsvPatterns) {
+      const m = log.match(re);
+      if (m && m[1]) {
+        console.log(`   ✅ Found cache CSV URL: ${m[1]}`);
+        return m[1];
+      }
+    }
+
+    // Then try standard patterns
     const jsonPatterns = [
       /JSON saved at (https:\/\/[^\s"]+\.json)/i,
       /saved at (https:\/\/[^\s"]+\.json)/i,
@@ -777,7 +859,9 @@ class PhantomBusterService {
 
       // Connection Export: Use PhantomBuster dashboard LinkedIn connection (same as Search Export)
       // Do NOT send cookie from .env - phantom uses the LinkedIn account connected in dashboard
-      console.log("📌 Connection Export: Using LinkedIn account from PhantomBuster dashboard (no cookie sent)");
+      // Also do not send result file names as arguments - this phantom (LinkedIn Connections Export)
+      // often fails if ANY arguments are passed.
+      console.log("📌 Connection Export: Using LinkedIn account from PhantomBuster dashboard (no args sent)");
       const { containerId, uniqueResultBase } = await this.launchPhantom(phantomId, {}, { minimalArgs: true });
       const container = await this.waitForCompletion(containerId, phantomId);
       container.uniqueResultBase = uniqueResultBase;
@@ -791,22 +875,30 @@ class PhantomBusterService {
         data = await this.fetchResultData(container);
       }
 
-      // Check if data is valid leads or just an error message like "No new profile found"
-      const hasValidLeads = data.length > 0 && !data[0].error && (data[0].profileUrl || data[0].linkedinUrl || data[0].url);
+      // ALWAYS fetch ALL connections from PhantomBuster database
+      // The phantom may only return "new" connections, but we want to compare ALL connections
+      // against our database to ensure we have everything
+      console.log("📥 Fetching ALL connections from PhantomBuster database for comparison...");
 
-      // If no valid leads found (empty OR just "No new profile found" error), fetch ALL existing data
-      if (!hasValidLeads) {
-        console.log("⚠️ No new connections found (or error). Fetching ALL existing connections from PhantomBuster database...");
+      // Try to get all connections from the database (pass container to try resultObject first)
+      const allConnections = await this.fetchAllConnectionsFromDatabase(phantomId, container);
 
-        // If the data was an error object, log it
-        if (data.length > 0 && data[0].error) {
-          console.log(`   Phantom message: ${data[0].error}`);
-        }
-
-        data = await this.fetchAllConnectionsFromDatabase(phantomId);
-        console.log(`📊 Retrieved ${data.length} existing connections from PhantomBuster database`);
+      // Use all connections if we found them, otherwise use the latest run data
+      if (allConnections.length > 0) {
+        console.log(`📊 Retrieved ${allConnections.length} total connections from PhantomBuster database`);
+        data = allConnections;
       } else {
-        console.log(`📊 Retrieved ${data.length} new connections from latest run`);
+        // Check if latest run data is valid
+        const hasValidLeads = data.length > 0 && !data[0].error && (data[0].profileUrl || data[0].linkedinUrl || data[0].url);
+        if (hasValidLeads) {
+          console.log(`📊 Using ${data.length} connections from latest run (database fetch returned empty)`);
+        } else {
+          console.log("⚠️ No connections found in PhantomBuster database or latest run");
+          // If the data was an error object, log it
+          if (data.length > 0 && data[0].error) {
+            console.log(`   Phantom message: ${data[0].error}`);
+          }
+        }
       }
 
       return {
@@ -826,9 +918,23 @@ class PhantomBusterService {
   // ============================================
   // FETCH ALL CONNECTIONS FROM PHANTOMBUSTER DATABASE
   // ============================================
-  async fetchAllConnectionsFromDatabase(phantomId) {
+  async fetchAllConnectionsFromDatabase(phantomId, container = null) {
     try {
       console.log("📥 Fetching all connections from PhantomBuster database...");
+
+      // First, try to use the container's resultObject URL if available
+      if (container && container.resultObject) {
+        try {
+          console.log(`   Trying container resultObject: ${container.resultObject}`);
+          const data = await this.downloadResultFile(container.resultObject);
+          if (data && data.length > 0) {
+            console.log(`   ✅ Retrieved ${data.length} connections from container resultObject`);
+            return data;
+          }
+        } catch (err) {
+          console.log(`   ⚠️ Could not fetch from container resultObject: ${err.message}`);
+        }
+      }
 
       // Try multiple database file names that PhantomBuster might use
       const databaseFiles = [
@@ -897,6 +1003,25 @@ class PhantomBusterService {
               return data;
             }
           }
+        }
+
+        // Try fetching the agent's last container and get its resultObject
+        try {
+          const agent = await this.fetchAgent(phantomId);
+          if (agent && agent.lastContainerId) {
+            console.log(`   📦 Trying to fetch result from last container: ${agent.lastContainerId}`);
+            const lastContainer = await this.fetchContainerStatus(agent.lastContainerId);
+            if (lastContainer && lastContainer.resultObject) {
+              console.log(`   ✅ Found resultObject in last container: ${lastContainer.resultObject}`);
+              const data = await this.downloadResultFile(lastContainer.resultObject);
+              if (data && data.length > 0) {
+                console.log(`   ✅ Retrieved ${data.length} connections from last container`);
+                return data;
+              }
+            }
+          }
+        } catch (containerErr) {
+          console.log(`   ⚠️ Could not fetch from last container: ${containerErr.message}`);
         }
       } catch (err) {
         console.log(`   ⚠️ Could not fetch from agent output: ${err.message}`);

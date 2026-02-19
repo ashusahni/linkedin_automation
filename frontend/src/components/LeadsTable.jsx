@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageGuide from './PageGuide';
 import axios from 'axios';
-import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus } from 'lucide-react';
+import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -225,30 +225,69 @@ export default function LeadsTable() {
 
     // Fetch data on mount
     // Fetch data on mount
+    // Sync URL params to state when they change (Handles navigation via Sidebar and Deep Links)
     useEffect(() => {
-        // Apply filters from URL params without expanding the panel
-        const connectionDegree = searchParams.get('connection_degree');
-        const quality = searchParams.get('quality');
-        const industry = searchParams.get('industry');
+        const connectionDegree = searchParams.get('connection_degree') || '';
+        const quality = searchParams.get('quality') || '';
+        const industry = searchParams.get('industry') || '';
 
-        if (connectionDegree || quality || industry) {
-            setMetaFilters(prev => ({
-                ...prev,
-                connectionDegree: connectionDegree || prev.connectionDegree,
-                quality: quality || prev.quality,
-                industry: industry || prev.industry
-            }));
+        // Check if URL params differ from current state to determine if we need to update/fetch
+        // We treat empty URL params as "clear filter" (unlike previous logic which preserved state)
+        // to support navigating from a filtered view (Sidebar "My Contacts") back to "All Contacts" (/leads).
+        const stateDiffers =
+            connectionDegree !== metaFilters.connectionDegree ||
+            quality !== metaFilters.quality ||
+            industry !== metaFilters.industry;
+
+        if (stateDiffers) {
+            const newFilters = {
+                ...metaFilters,
+                connectionDegree: connectionDegree,
+                quality: quality,
+                industry: industry
+            };
+
+            setMetaFilters(newFilters);
 
             if (quality) {
                 setActiveQuickFilters([quality]);
             }
+
+            // Trigger fetch with new filters immediately
+            fetchLeads(false, newFilters);
+            fetchStats({ metaFilters: newFilters });
+        } else {
+            // Initial fetch or no-op if params match state
+            // If it's pure mount (no diff), we still might want to fetch if data is empty?
+            // Usually useEffect runs on mount. If state matches (empty), we fetch.
+            // But since 'stateDiffers' compares with initial state (mostly empty), logic holds.
+            // However, on strict mount, both might be empty.
+            // We should ensure initial fetch happens.
+            // But we don't want double fetch if stateDiffers triggers one.
+        }
+    }, [searchParams]); // Run whenever URL parameters change
+
+    // Initial load handling (Campaigns, Preferences, Branding)
+    // We separate this to avoid re-fetching static data on URL changes
+    useEffect(() => {
+        // Fallback initial fetch if URL didn't trigger a change (e.g. /leads plain)
+        // Check if we already fetched in the param effect? 
+        // Simpler: Just fetch campaigns/branding here. 
+        // Let the param effect handle leads/stats fetch logic if params exist?
+        // Actually, if params are empty strings (default state), param effect condition 'stateDiffers' might be false.
+        // So we need an initial fetch trigger.
+
+        const connectionDegree = searchParams.get('connection_degree') || '';
+        const quality = searchParams.get('quality') || '';
+        const industry = searchParams.get('industry') || '';
+
+        // If NO params are set (default view), the above effect won't trigger if default state is also empty.
+        // So we must ensure fetch happens.
+        if (!connectionDegree && !quality && !industry) {
+            fetchLeads();
+            fetchStats();
         }
 
-        // We explicitly DO NOT set showMetaFilters to true here.
-        // It stays collapsed by default.
-
-        fetchLeads();
-        fetchStats();
         fetchCampaigns();
 
         // Load preference context (settings + branding)
@@ -403,7 +442,11 @@ export default function LeadsTable() {
                 params.set('industry', filtersToUse.industry.trim());
             }
             if (filtersToUse.connectionDegree?.trim()) {
-                params.set('connection_degree', filtersToUse.connectionDegree.trim());
+                if (!filtersToUse.connectionDegree.includes(',')) {
+                    // Single degree, pass as standard param
+                    params.set('connection_degree', filtersToUse.connectionDegree.trim());
+                }
+                // If multiple (e.g. "2nd,3rd"), we handle it via advanced logic below
             }
             if (filtersToUse.quality?.trim()) {
                 params.set('quality', filtersToUse.quality.trim());
@@ -431,7 +474,7 @@ export default function LeadsTable() {
             if (reviewStatusTab && reviewStatusTab !== 'imported') {
                 params.set('review_status', reviewStatusTab);
             }
-            
+
             // Filter by imported sources when imported tab is active
             if (reviewStatusTab === 'imported') {
                 params.set('source', 'csv_import,excel_import');
@@ -441,27 +484,76 @@ export default function LeadsTable() {
             let advancedPayload = null;
 
             // 1. Convert Quick Filters to Groups (OR logic between presets)
+            // Use JSON.parse(JSON.stringify(...)) to deep copy to avoid mutation issues when appending conditions
             const quickGroups = activeQuickFilters.map(id => {
                 const q = QUICK_FILTERS.find(x => x.id === id);
                 if (!q) return null;
-                return {
+                return JSON.parse(JSON.stringify({
                     operator: 'AND',
                     conditions: Object.entries(q.preset).map(([field, value]) => ({
                         field,
                         operator: 'contains',
                         value
                     }))
-                };
+                }));
             }).filter(Boolean);
 
             // 2. Combine with Manual Advanced Logic
             let manualGroups = [];
             if (filterMode === 'advanced' && !overrideFilters) {
                 // extract groups from manual advanced filters
-                manualGroups = advancedFilters.groups;
+                // Deep copy
+                manualGroups = advancedFilters.groups.map(g => JSON.parse(JSON.stringify(g)));
             }
 
-            // If we have either quick filters OR manual advanced filters, send 'filters' param
+            // Distribute Connection Degree logic (handle "2nd,3rd" etc)
+            // If connectionDegree has comma (or we force it to be advanced for Prospects)
+            // (A OR B) AND (2nd OR 3rd) => (A AND 2nd) OR (A AND 3rd) OR (B AND 2nd) OR (B AND 3rd)
+            const connDegrees = filtersToUse.connectionDegree ? filtersToUse.connectionDegree.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+            // Only handle here if it wasn't handled as a single param above
+            if (connDegrees.length > 1 || filtersToUse.connectionDegree === 'non_1st') {
+                // Note: keeping check for 'non_1st' legacy just in case, but we intend to use '2nd,3rd'
+
+                let targetDegrees = connDegrees;
+                if (filtersToUse.connectionDegree === 'non_1st') {
+                    // Fallback/Legacy: if non_1st is still passed, treat it as 2nd,3rd
+                    targetDegrees = ['2nd', '3rd'];
+                }
+
+                const allGroups = [...quickGroups, ...manualGroups];
+                const newCombinedGroups = [];
+
+                if (allGroups.length === 0) {
+                    // No existing groups, just create groups for each degree
+                    targetDegrees.forEach(degree => {
+                        newCombinedGroups.push({
+                            operator: 'AND',
+                            conditions: [{ field: 'connection_degree', operator: 'contains', value: degree }]
+                        });
+                    });
+                } else {
+                    // Expand existing groups
+                    allGroups.forEach(group => {
+                        targetDegrees.forEach(degree => {
+                            // Deep copy group
+                            const newGroup = JSON.parse(JSON.stringify(group));
+                            // Add degree condition
+                            newGroup.conditions.push({ field: 'connection_degree', operator: 'contains', value: degree });
+                            newCombinedGroups.push(newGroup);
+                        });
+                    });
+                }
+
+                // Replace manualGroups/quickGroups usage for the final payload
+                // We clear quickGroups because we merged them into newCombinedGroups
+                quickGroups.length = 0;
+                manualGroups.length = 0;
+                // Add all back to manualGroups (it's just a bucket name at this point)
+                manualGroups.push(...newCombinedGroups);
+            }
+
+            // If we have either quick filters OR manual advanced filters (or the injected exclusion), send 'filters' param
             if (quickGroups.length > 0 || manualGroups.length > 0) {
                 params.set('filters', JSON.stringify({
                     operator: 'OR', // Top level OR between Quick Presets and Manual Groups
@@ -898,13 +990,13 @@ export default function LeadsTable() {
 
     const handleQualifyByNiche = async () => {
         try {
-            const res = await axios.post('/api/leads/qualify-by-niche', { 
-                reviewStatus: reviewStatusTab === 'to_be_reviewed' ? 'to_be_reviewed' : undefined 
+            const res = await axios.post('/api/leads/qualify-by-niche', {
+                reviewStatus: reviewStatusTab === 'to_be_reviewed' ? 'to_be_reviewed' : undefined
             });
             const { qualified, total, message } = res.data;
             addToast(
-                qualified > 0 
-                    ? `🎯 ${message}` 
+                qualified > 0
+                    ? `🎯 ${message}`
                     : `No leads match your profile niche (checked ${total} leads)`,
                 qualified > 0 ? 'success' : 'info'
             );
@@ -972,24 +1064,15 @@ export default function LeadsTable() {
 
     const toggleConnectionDegree = (degree) => {
         const newValue = metaFilters.connectionDegree === degree ? '' : degree;
-        const newFilters = { ...metaFilters, connectionDegree: newValue };
-        setMetaFilters(newFilters);
-        // fetchLeads will be triggered by state change if we depend on it, 
-        // but here we call it manually to be safe/explicit or if we want to await?
-        // Actually, we are modifying state, so we should rely on useEffect or call fetchLeads with new state
-        // In previous implementation we called fetchLeads(false, newFilters) which is good.
-        // We ALSO need to fetchStats with the new filter.
-        fetchLeads(false, newFilters);
 
-        // We need to fetchStats with the new filter. 
-        // Since setMetaFilters is async, we use the value we just calculated.
-        // But fetchStats reads from state 'metaFilters'. We need to pass override or wait.
-        // Let's modify fetchStats to accept overrides or simply wait for re-render if we useEffect on metaFilters?
-        // Simplest: just pass the override to fetchLeads, and for fetchStats we might need a similar mechanism 
-        // OR we can make a small useEffect for connectionDegree specifically to trigger fetchStats.
-        // Let's update toggleConnectionDegree to handle this temporarily or update fetchStats signature.
-        // Updating fetchStats signature is cleanest.
-        updateStatsWithFilter(newValue);
+        const newParams = new URLSearchParams(searchParams);
+        if (newValue) {
+            newParams.set('connection_degree', newValue);
+        } else {
+            newParams.delete('connection_degree');
+        }
+        // This updates the URL, which triggers the useEffect below to update state and fetch
+        setSearchParams(newParams);
     };
 
     const updateStatsWithFilter = async (degree) => {
@@ -1013,6 +1096,77 @@ export default function LeadsTable() {
                 <StatCard label="Review" value={reviewStats.to_be_reviewed} className="text-yellow-600" />
                 <StatCard label="Rejected" value={reviewStats.rejected} className="text-red-600" />
                 <StatCard label="Imported" value={reviewStats.imported || 0} className="text-blue-600" />
+            </div>
+
+            {/* Network Proximity Filter Section */}
+            <div className="flex items-center py-3 px-1 gap-4 flex-wrap">
+                <div className="flex items-center">
+                    <span className="text-sm font-medium mr-2 text-muted-foreground">Network Proximity:</span>
+                    <div className="flex items-center bg-muted/40 rounded-lg p-1 border border-border/50 gap-1">
+                        {['1st', '2nd', '3rd'].map((degree) => (
+                            <button
+                                key={degree}
+                                onClick={() => toggleConnectionDegree(degree)}
+                                className={cn(
+                                    "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200",
+                                    metaFilters.connectionDegree && metaFilters.connectionDegree.split(',').includes(degree)
+                                        ? "bg-primary text-primary-foreground shadow-sm scale-105"
+                                        : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                )}
+                            >
+                                {degree} Degree
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Quick Filter Buttons */}
+                {/* Quick Filter Buttons (Hidden as per request) */}
+                <div className="flex items-center gap-2" style={{ display: 'none' }}>
+                    {/*
+                    <Button
+                        variant={metaFilters.connectionDegree === '1st' ? 'default' : 'outline'}
+                        size="sm"
+                        className="gap-2 h-8 text-xs"
+                        onClick={() => {
+                            // Always set to 1st degree (don't toggle off)
+                            if (metaFilters.connectionDegree !== '1st') {
+                                toggleConnectionDegree('1st');
+                            }
+                        }}
+                    >
+                        <Users className="h-3.5 w-3.5" />
+                        My Contact
+                    </Button>
+                    <Button
+                        variant={metaFilters.connectionDegree === '2nd' ? 'default' : 'outline'}
+                        size="sm"
+                        className="gap-2 h-8 text-xs"
+                        onClick={() => {
+                            if (metaFilters.connectionDegree !== '2nd') {
+                                toggleConnectionDegree('2nd');
+                            }
+                        }}
+                    >
+                        <UserPlus className="h-3.5 w-3.5" />
+                        Prospects
+                    </Button>
+                    <Button
+                        variant={!metaFilters.connectionDegree ? 'default' : 'outline'}
+                        size="sm"
+                        className="gap-2 h-8 text-xs"
+                        onClick={() => {
+                            // Clear connection degree filter to show all via URL update
+                            const newParams = new URLSearchParams(searchParams);
+                            newParams.delete('connection_degree');
+                            setSearchParams(newParams);
+                        }}
+                    >
+                        <Network className="h-3.5 w-3.5" />
+                        All Connections
+                    </Button>
+                    */}
+                </div>
             </div>
 
             {/* Main Content Card */}
@@ -1060,26 +1214,6 @@ export default function LeadsTable() {
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center py-2">
-                            <span className="text-sm font-medium mr-2 text-muted-foreground">Network Proximity:</span>
-                            <div className="flex items-center bg-muted/40 rounded-lg p-1 border border-border/50 gap-1">
-                                {['1st', '2nd', '3rd'].map((degree) => (
-                                    <button
-                                        key={degree}
-                                        onClick={() => toggleConnectionDegree(degree)}
-                                        className={cn(
-                                            "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200",
-                                            metaFilters.connectionDegree === degree
-                                                ? "bg-primary text-primary-foreground shadow-sm scale-105"
-                                                : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                                        )}
-                                    >
-                                        {degree} Degree
-                                    </button>
-                                ))}
                             </div>
                         </div>
 
@@ -1463,7 +1597,8 @@ export default function LeadsTable() {
                             >
                                 🔴 Rejected ({reviewStats.rejected})
                             </button>
-                            <button
+                            {/* Hidden as per user request */}
+                            {/* <button
                                 onClick={() => setReviewStatusTab('imported')}
                                 className={cn(
                                     "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
@@ -1473,7 +1608,7 @@ export default function LeadsTable() {
                                 )}
                             >
                                 📥 Imported Leads ({reviewStats.imported || 0})
-                            </button>
+                            </button> */}
                         </div>
                         {/* Qualify by Niche Button */}
                         {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && (

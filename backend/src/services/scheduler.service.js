@@ -5,6 +5,7 @@ import * as phantomService from './phantombuster.service.js';
 import { ApprovalService } from './approval.service.js';
 import SafetyService from './safety.service.js';
 import replyDetectionService from './reply-detection.service.js';
+import { NotificationService } from './notification.service.js';
 
 // ==========================================
 // SCHEDULER ORCHESTRATOR (SEQUENTIAL)
@@ -208,6 +209,13 @@ async function executeStepForLead(lead) {
                     );
 
                     console.log(`✅ Connection request sent AND finished successfully.`);
+                    const leadName = profile?.first_name || profile?.full_name || 'Lead';
+                    await NotificationService.create({
+                        type: 'connection_sent',
+                        title: 'Connection request sent',
+                        message: `Connection request sent to ${leadName}`,
+                        data: { campaignId: lead.campaign_id, leadId: lead.lead_id, link: `/campaigns/${lead.campaign_id}` },
+                    });
                 } else {
                     throw new Error('PhantomBuster returned success=false');
                 }
@@ -249,6 +257,13 @@ async function executeStepForLead(lead) {
                         [lead.campaign_id, lead.lead_id, 'send_message', 'sent', JSON.stringify({ container_id: result.containerId, step_type: lead.step_type, sent_at: new Date().toISOString() })]
                     );
                     console.log(`✅ Message sent AND finished successfully.`);
+                    const leadName = profile?.first_name || profile?.full_name || 'Lead';
+                    await NotificationService.create({
+                        type: 'message_sent',
+                        title: 'Message sent',
+                        message: `LinkedIn message sent to ${leadName}`,
+                        data: { campaignId: lead.campaign_id, leadId: lead.lead_id, link: `/campaigns/${lead.campaign_id}` },
+                    });
                 }
             } catch (messageError) {
                 console.error(`❌ Failed to send LinkedIn message:`, messageError.message);
@@ -291,6 +306,12 @@ async function executeStepForLead(lead) {
     } catch (error) {
         console.error(`❌ Failed to process lead ${lead.lead_id}:`, error.message);
         await pool.query("UPDATE campaign_leads SET status = 'failed' WHERE campaign_id = $1 AND lead_id = $2", [lead.campaign_id, lead.lead_id]);
+        await NotificationService.create({
+            type: 'automation_failed',
+            title: 'Automation failed',
+            message: `Failed to process lead: ${error.message}`,
+            data: { campaignId: lead.campaign_id, leadId: lead.lead_id, error: error.message, link: `/campaigns/${lead.campaign_id}` },
+        });
     }
 }
 
@@ -301,6 +322,34 @@ export async function advanceStep(lead) {
     if (nextStepRes.rows.length === 0) {
         await pool.query("UPDATE campaign_leads SET status = 'completed', next_action_due = NULL, last_activity_at = NOW() WHERE campaign_id = $1 AND lead_id = $2", [lead.campaign_id, lead.lead_id]);
         console.log(`✅ Lead ${lead.lead_id} completed all steps.`);
+        await NotificationService.create({
+            type: 'automation_completed',
+            title: 'Sequence completed',
+            message: `Lead completed all steps in campaign`,
+            data: { campaignId: lead.campaign_id, leadId: lead.lead_id, link: `/campaigns/${lead.campaign_id}` },
+        });
+
+        // Check if all leads in the campaign are completed
+        const pendingCountRes = await pool.query(
+            "SELECT COUNT(*) as count FROM campaign_leads WHERE campaign_id = $1 AND status NOT IN ('completed', 'failed', 'rejected')",
+            [lead.campaign_id]
+        );
+        const pendingCount = parseInt(pendingCountRes.rows[0].count, 10);
+
+        if (pendingCount === 0) {
+            await pool.query("UPDATE campaigns SET status = 'completed' WHERE id = $1 AND status = 'active'", [lead.campaign_id]);
+
+            const campaignRes = await pool.query("SELECT name FROM campaigns WHERE id = $1", [lead.campaign_id]);
+            const campaignName = campaignRes.rows[0]?.name || 'Campaign';
+
+            await NotificationService.create({
+                type: 'campaign_completed',
+                title: 'Campaign Completed',
+                message: `All leads in "${campaignName}" have been processed.`,
+                data: { campaignId: lead.campaign_id, link: `/campaigns/${lead.campaign_id}` }
+            });
+            console.log(`🎉 Campaign ${lead.campaign_id} completed!`);
+        }
     } else {
         const nextStep = nextStepRes.rows[0];
         const delayDays = nextStep.delay_days || 1;
