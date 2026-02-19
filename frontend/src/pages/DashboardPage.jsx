@@ -69,6 +69,7 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import PageGuide from "../components/PageGuide";
+import { useTimeFilter } from "../context/TimeFilterContext";
 
 const PERIODS = [
   { value: "daily", label: "Daily" },

@@ -1422,6 +1422,9 @@ export default function CampaignDetailPage() {
                                 return (
                                     <CampaignLeadsTable
                                         leads={leadsForTable}
+                                        selectedLeads={selectedLeads}
+                                        onToggleLead={toggleSelectLead}
+                                        onToggleAll={toggleSelectAllLeads}
                                         onContactLead={handleContactLead}
                                         onAutoConnectSelected={handleAutoConnectSelected}
                                     />
@@ -1448,671 +1451,671 @@ export default function CampaignDetailPage() {
                         }
                     };
                     return (
-                    <div className="space-y-6">
-                        {/* Info Banner */}
-                        <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
-                            <div className="flex items-start gap-3">
-                                <MessageSquare className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
-                                <div className="flex-1">
-                                    <p className="text-sm font-medium text-white mb-1">📍 Where AI Messages Are:</p>
-                                    <p className="text-xs text-muted-foreground">
-                                        These messages were generated using enriched LinkedIn profile data.
-                                        After you approve them, they'll be sent automatically by the scheduler.
-                                        <strong className="text-primary block mt-2">💡 Click any message to edit it before approving!</strong>
-                                    </p>
+                        <div className="space-y-6">
+                            {/* Info Banner */}
+                            <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+                                <div className="flex items-start gap-3">
+                                    <MessageSquare className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
+                                    <div className="flex-1">
+                                        <p className="text-sm font-medium text-white mb-1">📍 Where AI Messages Are:</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            These messages were generated using enriched LinkedIn profile data.
+                                            After you approve them, they'll be sent automatically by the scheduler.
+                                            <strong className="text-primary block mt-2">💡 Click any message to edit it before approving!</strong>
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        {/* Recent Activity Section - Always visible */}
-                        <Card className="bg-card/40 border-white/5">
-                            <CardHeader>
-                                <CardTitle className="text-white flex items-center gap-2">
-                                    <Zap className="w-5 h-5 text-yellow-500" />
-                                    Recent Sending Activity
-                                    {recentActivity.length > 0 && (
-                                        <Badge variant="outline" className="ml-2">
-                                            {recentActivity.filter(a => a.status === 'sent').length} Sent
-                                        </Badge>
-                                    )}
-                                </CardTitle>
-                                <CardDescription>Track messages and connection requests that were sent</CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                {recentActivity.length === 0 ? (
-                                    <div className="text-center py-8 text-muted-foreground">
-                                        <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                                        <p className="text-sm">No sending activity yet.</p>
-                                        <p className="text-xs mt-1">Approved messages will appear here once sent.</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-3 max-h-64 overflow-y-auto">
-                                        {recentActivity.map((activity, idx) => (
-                                            <div key={idx} className="flex items-start gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
-                                                <div className={cn(
-                                                    "w-2 h-2 rounded-full mt-2 flex-shrink-0",
-                                                    activity.status === 'sent' && "bg-green-500",
-                                                    activity.status === 'failed' && "bg-red-500",
-                                                    activity.status === 'approved' && "bg-yellow-500"
-                                                )} />
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <span className="text-sm font-medium text-white">
-                                                            {activity.lead_name || 'Unknown Lead'}
-                                                        </span>
-                                                        <Badge variant="outline" className={cn(
-                                                            "text-[10px]",
-                                                            activity.action === 'send_message' && "border-green-500/50 text-green-500",
-                                                            activity.action === 'send_connection_request' && "border-blue-500/50 text-blue-500"
-                                                        )}>
-                                                            {activity.action === 'send_message' ? 'Message' :
-                                                                activity.action === 'send_connection_request' ? 'Connection' :
-                                                                    activity.action}
-                                                        </Badge>
-                                                        <Badge variant="outline" className={cn(
-                                                            "text-[10px]",
-                                                            activity.status === 'sent' && "border-green-500/50 text-green-500",
-                                                            activity.status === 'failed' && "border-red-500/50 text-red-500"
-                                                        )}>
-                                                            {activity.status === 'sent' ? '✓ Sent' : activity.status}
-                                                        </Badge>
-                                                    </div>
-                                                    {activity.message_preview && (
-                                                        <p className="text-xs text-muted-foreground mb-1 line-clamp-1">
-                                                            {activity.message_preview}...
-                                                        </p>
-                                                    )}
-                                                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                                        <span>{new Date(activity.timestamp).toLocaleString()}</span>
-                                                        {activity.container_id && (
-                                                            <span className="font-mono">Sync Session: {activity.container_id.substring(0, 12)}...</span>
+                            {/* Recent Activity Section - Always visible */}
+                            <Card className="bg-card/40 border-white/5">
+                                <CardHeader>
+                                    <CardTitle className="text-white flex items-center gap-2">
+                                        <Zap className="w-5 h-5 text-yellow-500" />
+                                        Recent Sending Activity
+                                        {recentActivity.length > 0 && (
+                                            <Badge variant="outline" className="ml-2">
+                                                {recentActivity.filter(a => a.status === 'sent').length} Sent
+                                            </Badge>
+                                        )}
+                                    </CardTitle>
+                                    <CardDescription>Track messages and connection requests that were sent</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    {recentActivity.length === 0 ? (
+                                        <div className="text-center py-8 text-muted-foreground">
+                                            <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                            <p className="text-sm">No sending activity yet.</p>
+                                            <p className="text-xs mt-1">Approved messages will appear here once sent.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3 max-h-64 overflow-y-auto">
+                                            {recentActivity.map((activity, idx) => (
+                                                <div key={idx} className="flex items-start gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                                                    <div className={cn(
+                                                        "w-2 h-2 rounded-full mt-2 flex-shrink-0",
+                                                        activity.status === 'sent' && "bg-green-500",
+                                                        activity.status === 'failed' && "bg-red-500",
+                                                        activity.status === 'approved' && "bg-yellow-500"
+                                                    )} />
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <span className="text-sm font-medium text-white">
+                                                                {activity.lead_name || 'Unknown Lead'}
+                                                            </span>
+                                                            <Badge variant="outline" className={cn(
+                                                                "text-[10px]",
+                                                                activity.action === 'send_message' && "border-green-500/50 text-green-500",
+                                                                activity.action === 'send_connection_request' && "border-blue-500/50 text-blue-500"
+                                                            )}>
+                                                                {activity.action === 'send_message' ? 'Message' :
+                                                                    activity.action === 'send_connection_request' ? 'Connection' :
+                                                                        activity.action}
+                                                            </Badge>
+                                                            <Badge variant="outline" className={cn(
+                                                                "text-[10px]",
+                                                                activity.status === 'sent' && "border-green-500/50 text-green-500",
+                                                                activity.status === 'failed' && "border-red-500/50 text-red-500"
+                                                            )}>
+                                                                {activity.status === 'sent' ? '✓ Sent' : activity.status}
+                                                            </Badge>
+                                                        </div>
+                                                        {activity.message_preview && (
+                                                            <p className="text-xs text-muted-foreground mb-1 line-clamp-1">
+                                                                {activity.message_preview}...
+                                                            </p>
                                                         )}
+                                                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                                            <span>{new Date(activity.timestamp).toLocaleString()}</span>
+                                                            {activity.container_id && (
+                                                                <span className="font-mono">Sync Session: {activity.container_id.substring(0, 12)}...</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            {/* LinkedIn vs Gmail sub-tabs */}
+                            <div className="flex border-b border-white/10 gap-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setApprovalSubTab('linkedin')}
+                                    className={cn(
+                                        "pb-3 text-sm font-medium transition-all border-b-2 -mb-px",
+                                        approvalSubTab === 'linkedin' ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-white"
+                                    )}
+                                >
+                                    <MessageSquare className="w-4 h-4 inline-block mr-2" />
+                                    LinkedIn ({linkedinApprovals.length})
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setApprovalSubTab('gmail')}
+                                    className={cn(
+                                        "pb-3 text-sm font-medium transition-all border-b-2 -mb-px",
+                                        approvalSubTab === 'gmail' ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-white"
+                                    )}
+                                >
+                                    <Mail className="w-4 h-4 inline-block mr-2" />
+                                    Gmail ({gmailApprovals.length})
+                                </button>
+                            </div>
+
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h2 className="text-xl font-bold text-white">
+                                        {approvalSubTab === 'gmail' ? 'Gmail drafts' : 'AI-Generated Messages'} ({currentApprovals.length})
+                                    </h2>
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                        {approvalSubTab === 'gmail'
+                                            ? 'Review and approve email drafts. Edit subject and body as needed.'
+                                            : 'Choose tone, length & focus → Regenerate → edit for a human touch → Approve & Send'}
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    {currentApprovals.length > 0 && (
+                                        <Button
+                                            onClick={() => {
+                                                const ids = currentApprovals.map(a => a.id);
+                                                setSelectedApprovals(prev =>
+                                                    prev.length === ids.length && ids.every(id => prev.includes(id)) ? [] : ids
+                                                );
+                                            }}
+                                            variant="outline"
+                                            size="sm"
+                                            className="gap-2"
+                                        >
+                                            <CheckCheck className="w-4 h-4" />
+                                            {currentApprovals.every(a => selectedApprovals.includes(a.id)) ? 'Deselect All' : `Select All (${currentApprovals.length})`}
+                                        </Button>
+                                    )}
+                                    {selectedApprovals.length > 0 && (() => {
+                                        const selectedInTab = selectedApprovals.filter(sid => currentApprovals.some(a => a.id === sid));
+                                        return selectedInTab.length > 0 ? (
+                                            <>
+                                                {approvalSubTab === 'linkedin' && (
+                                                    <Button
+                                                        onClick={() => setShowBulkPersonalizeModal(true)}
+                                                        variant="outline"
+                                                        className="gap-2 border-purple-500/30 text-purple-500 hover:bg-purple-500/10"
+                                                    >
+                                                        <RefreshCw className="w-4 h-4" />
+                                                        Bulk Personalize ({selectedInTab.length})
+                                                    </Button>
+                                                )}
+                                                <Button
+                                                    variant="outline"
+                                                    onClick={handleRejectSelected}
+                                                    disabled={bulkActioning}
+                                                    className="gap-2 border-red-500/50 text-red-500 hover:bg-red-500/10 disabled:opacity-50"
+                                                >
+                                                    {bulkActioning ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                    ) : (
+                                                        <XCircle className="w-4 h-4" />
+                                                    )}
+                                                    Reject ({selectedInTab.length})
+                                                </Button>
+                                                <Button
+                                                    onClick={handleApproveSelected}
+                                                    disabled={bulkActioning}
+                                                    className={cn(
+                                                        "gap-2 bg-green-600 hover:bg-green-500 transition-all duration-200",
+                                                        bulkActioning && "bg-green-600/80 cursor-wait opacity-80"
+                                                    )}
+                                                >
+                                                    {bulkActioning ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                    ) : (
+                                                        <CheckCheck className="w-4 h-4" />
+                                                    )}
+                                                    {bulkActioning ? 'Processing...' : approvalSubTab === 'gmail' ? `Approve (${selectedInTab.length})` : `Approve & Send (${selectedInTab.length})`}
+                                                </Button>
+                                            </>
+                                        ) : null;
+                                    })()}
+                                </div>
+                            </div>
+
+                            {currentApprovals.length === 0 ? (
+                                <div className="text-center py-20 bg-white/5 rounded-2xl border border-dashed border-white/10">
+                                    <div className="bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <Eye className="w-8 h-8 text-primary" />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-white mb-2">
+                                        {approvalSubTab === 'gmail' ? 'No Gmail drafts for leads with email' : 'No AI messages yet'}
+                                    </h3>
+                                    <p className="text-muted-foreground max-w-md mx-auto mb-6">
+                                        {approvalSubTab === 'gmail' ? (
+                                            <>Use <strong className="text-primary">Contact Actions → Contact Emails</strong> to generate Gmail drafts for leads who have an email address. Only those leads appear here.</>
+                                        ) : (
+                                            <>Go to <strong className="text-primary">Leads Tab</strong> and click <strong className="text-primary">"Bulk Enrich & Generate AI Messages"</strong></>
+                                        )}
+                                    </p>
+                                    {approvalSubTab === 'linkedin' && (
+                                        <div className="bg-white/5 rounded-lg p-4 max-w-md mx-auto mb-6 text-left">
+                                            <p className="text-xs text-muted-foreground mb-2"><strong className="text-white">What happens:</strong></p>
+                                            <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+                                                <li>System enriches all leads (scrapes LinkedIn profiles)</li>
+                                                <li>AI generates personalized messages using that data</li>
+                                                <li>Messages appear here in Approvals Tab</li>
+                                                <li>You review, edit, and approve them</li>
+                                                <li>Scheduler sends approved messages automatically</li>
+                                            </ol>
+                                        </div>
+                                    )}
+                                    <Button onClick={() => setActiveTab('leads')} className="bg-primary hover:bg-primary/90 gap-2">
+                                        <Sparkles className="w-4 h-4" />
+                                        Go to Leads Tab
+                                    </Button>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {currentApprovals.map((approval) => (
+                                        <Card key={approval.id} className={cn(
+                                            "bg-card/40 border transition-all duration-300",
+                                            selectedApprovals.includes(approval.id) ? "border-primary/50 bg-primary/5" : "border-white/5"
+                                        )}>
+                                            <CardContent className="p-6">
+                                                <div className="flex gap-4">
+                                                    {/* Checkbox */}
+                                                    <div className="pt-1">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedApprovals.includes(approval.id)}
+                                                            onChange={() => toggleSelectApproval(approval.id)}
+                                                            className="w-5 h-5 rounded border-white/20 bg-white/5 checked:bg-primary checked:border-primary cursor-pointer"
+                                                        />
+                                                    </div>
+
+                                                    {/* Content */}
+                                                    <div className="flex-1 space-y-4">
+                                                        {/* Lead Info */}
+                                                        <div className="flex items-start justify-between">
+                                                            <div>
+                                                                <div className="flex items-center gap-3">
+                                                                    <h3 className="text-lg font-bold text-white">
+                                                                        {approval.first_name} {approval.last_name}
+                                                                    </h3>
+                                                                    <Badge variant="outline" className={cn(
+                                                                        "text-[10px] font-bold uppercase",
+                                                                        approval.step_type === 'connection_request' && "border-blue-500/50 text-blue-500 bg-blue-500/5",
+                                                                        approval.step_type === 'message' && "border-green-500/50 text-green-500 bg-green-500/5",
+                                                                        (approval.step_type === 'gmail_outreach' || approval.step_type === 'email') && "border-rose-500/50 text-rose-500 bg-rose-500/5"
+                                                                    )}>
+                                                                        {approval.step_type === 'connection_request' ? 'Connection' : approval.step_type === 'message' ? 'Message' : approval.step_type === 'gmail_outreach' ? 'Gmail' : 'Email'}
+                                                                    </Badge>
+                                                                </div>
+                                                                <p className="text-sm text-muted-foreground mt-1">
+                                                                    {approval.title} at {approval.company}
+                                                                </p>
+
+                                                                {/* Personalization Controls */}
+                                                                {approval.status === 'pending' && (
+                                                                    <div className="flex flex-wrap items-center gap-2 text-xs mt-3">
+                                                                        <span className="font-medium text-muted-foreground">Personalize:</span>
+                                                                        <select
+                                                                            className="border border-input bg-background rounded px-2 py-1.5 text-xs"
+                                                                            value={getOptionsForApproval(approval.id).tone}
+                                                                            onChange={(e) => setOptionsForApproval(approval.id, { tone: e.target.value })}
+                                                                        >
+                                                                            <option value="professional">Professional</option>
+                                                                            <option value="friendly">Friendly</option>
+                                                                            <option value="casual">Casual</option>
+                                                                            <option value="formal">Formal</option>
+                                                                            <option value="warm">Warm</option>
+                                                                        </select>
+                                                                        <select
+                                                                            className="border border-input bg-background rounded px-2 py-1.5 text-xs"
+                                                                            value={getOptionsForApproval(approval.id).length}
+                                                                            onChange={(e) => setOptionsForApproval(approval.id, { length: e.target.value })}
+                                                                        >
+                                                                            <option value="short">Short (2–3 sentences)</option>
+                                                                            <option value="medium">Medium (3–5 sentences)</option>
+                                                                            <option value="long">Long (4–6 sentences)</option>
+                                                                        </select>
+                                                                        <select
+                                                                            className="border border-input bg-background rounded px-2 py-1.5 text-xs"
+                                                                            value={getOptionsForApproval(approval.id).focus}
+                                                                            onChange={(e) => setOptionsForApproval(approval.id, { focus: e.target.value })}
+                                                                        >
+                                                                            <option value="general">General (balanced)</option>
+                                                                            <option value="recent_post">Recent post / activity</option>
+                                                                            <option value="company">Company & role</option>
+                                                                            <option value="role">Job title & expertise</option>
+                                                                            <option value="mutual_connection">Mutual connection</option>
+                                                                        </select>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant="outline"
+                                                                            className="gap-1.5"
+                                                                            onClick={() => handleRegenerateApproval(approval.id)}
+                                                                            disabled={regeneratingId === approval.id}
+                                                                        >
+                                                                            {regeneratingId === approval.id ? (
+                                                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                                            ) : (
+                                                                                <RefreshCw className="w-3.5 h-3.5" />
+                                                                            )}
+                                                                            Regenerate
+                                                                        </Button>
+                                                                    </div>
+                                                                )}
+
+                                                                {approval.status === 'approved' && (
+                                                                    <div className="mt-3 p-3 rounded-lg border" style={{
+                                                                        backgroundColor: approvalStatuses[approval.id]?.sending_status === 'sent' ? 'rgba(34, 197, 94, 0.1)' :
+                                                                            approvalStatuses[approval.id]?.sending_status === 'queued' ? 'rgba(234, 179, 8, 0.1)' :
+                                                                                'rgba(107, 114, 128, 0.1)',
+                                                                        borderColor: approvalStatuses[approval.id]?.sending_status === 'sent' ? 'rgba(34, 197, 94, 0.3)' :
+                                                                            approvalStatuses[approval.id]?.sending_status === 'queued' ? 'rgba(234, 179, 8, 0.3)' :
+                                                                                'rgba(107, 114, 128, 0.3)'
+                                                                    }}>
+                                                                        {approvalStatuses[approval.id] ? (
+                                                                            <>
+                                                                                {approvalStatuses[approval.id].sending_status === 'sent' && approvalStatuses[approval.id].sent_at && (
+                                                                                    <div className="space-y-1">
+                                                                                        <p className="text-sm font-bold text-green-500 flex items-center gap-2">
+                                                                                            <CheckCircle2 className="w-4 h-4" />
+                                                                                            ✅ MESSAGE SENT SUCCESSFULLY!
+                                                                                        </p>
+                                                                                        <p className="text-xs text-green-400">
+                                                                                            Sent at {new Date(approvalStatuses[approval.id].sent_at).toLocaleString()}
+                                                                                        </p>
+                                                                                        {approvalStatuses[approval.id].container_id && (
+                                                                                            <p className="text-xs text-muted-foreground font-mono mt-1">
+                                                                                                Sync Session: {approvalStatuses[approval.id].container_id}
+                                                                                            </p>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+                                                                                {approvalStatuses[approval.id].sending_status === 'queued' && (
+                                                                                    <p className="text-sm text-yellow-500 flex items-center gap-2">
+                                                                                        <Clock className="w-4 h-4 animate-spin" />
+                                                                                        ⏳ Message queued - scheduler will send within 1 minute...
+                                                                                    </p>
+                                                                                )}
+                                                                                {approvalStatuses[approval.id].sending_status === 'pending' && (
+                                                                                    <p className="text-xs text-gray-400">
+                                                                                        Waiting for scheduler to pick up...
+                                                                                    </p>
+                                                                                )}
+                                                                            </>
+                                                                        ) : (
+                                                                            <p className="text-xs text-yellow-500 flex items-center gap-2">
+                                                                                <Clock className="w-3 h-3 animate-spin" />
+                                                                                Checking sending status...
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Message Content */}
+                                                        {isGmailApproval(approval) ? (
+                                                            <>
+                                                                {editingApproval === approval.id ? (
+                                                                    <div className="space-y-3">
+                                                                        <div>
+                                                                            <label className="text-xs font-medium text-muted-foreground">Subject</label>
+                                                                            <input
+                                                                                id={`edit-subject-${approval.id}`}
+                                                                                defaultValue={parseGmailContent(approval.generated_content).subject}
+                                                                                className="w-full mt-1 px-3 py-2 bg-white/5 border border-primary/30 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-xs font-medium text-muted-foreground">Body</label>
+                                                                            <textarea
+                                                                                id={`edit-body-${approval.id}`}
+                                                                                defaultValue={parseGmailContent(approval.generated_content).body}
+                                                                                className="w-full mt-1 min-h-[140px] px-3 py-2 bg-white/5 border border-primary/30 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
+                                                                            />
+                                                                        </div>
+                                                                        <div className="flex gap-2">
+                                                                            <Button
+                                                                                size="sm"
+                                                                                onClick={() => {
+                                                                                    const subject = document.getElementById(`edit-subject-${approval.id}`).value;
+                                                                                    const body = document.getElementById(`edit-body-${approval.id}`).value;
+                                                                                    handleEditApproval(approval.id, JSON.stringify({ subject, body }));
+                                                                                    setEditingApproval(null);
+                                                                                }}
+                                                                                className="bg-primary hover:bg-primary/90"
+                                                                            >
+                                                                                <Save className="w-4 h-4 mr-2" /> Save Changes
+                                                                            </Button>
+                                                                            <Button size="sm" variant="ghost" onClick={() => setEditingApproval(null)}>Cancel</Button>
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div
+                                                                        className="relative bg-white/5 rounded-lg p-4 border border-white/10 group cursor-pointer hover:border-primary/30 transition-all"
+                                                                        onClick={() => setEditingApproval(approval.id)}
+                                                                    >
+                                                                        {(() => {
+                                                                            const { subject, body } = parseGmailContent(approval.generated_content);
+                                                                            return (
+                                                                                <>
+                                                                                    {subject && <p className="text-sm font-medium text-slate-200 mb-2">Re: {subject}</p>}
+                                                                                    <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">{body}</p>
+                                                                                </>
+                                                                            );
+                                                                        })()}
+                                                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                            <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs">
+                                                                                <Edit2 className="w-3 h-3" /> Edit
+                                                                            </Button>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        ) : editingApproval === approval.id ? (
+                                                            <div className="space-y-2">
+                                                                <textarea
+                                                                    defaultValue={approval.generated_content}
+                                                                    id={`edit-${approval.id}`}
+                                                                    className="w-full min-h-[120px] bg-white/5 border border-primary/30 rounded-lg p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all font-sans"
+                                                                />
+                                                                <div className="flex gap-2">
+                                                                    <Button
+                                                                        size="sm"
+                                                                        onClick={() => {
+                                                                            const newContent = document.getElementById(`edit-${approval.id}`).value;
+                                                                            handleEditApproval(approval.id, newContent);
+                                                                        }}
+                                                                        className="bg-primary hover:bg-primary/90"
+                                                                    >
+                                                                        <Save className="w-4 h-4 mr-2" /> Save Changes
+                                                                    </Button>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="ghost"
+                                                                        onClick={() => setEditingApproval(null)}
+                                                                    >
+                                                                        Cancel
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div
+                                                                className="relative bg-white/5 rounded-lg p-4 border border-white/10 group cursor-pointer hover:border-primary/30 transition-all"
+                                                                onClick={() => setEditingApproval(approval.id)}
+                                                            >
+                                                                <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">
+                                                                    {approval.generated_content}
+                                                                </p>
+                                                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs">
+                                                                        <Edit2 className="w-3 h-3" /> Edit
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Action Buttons */}
+                                                        <div className="flex gap-2 pt-2">
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                disabled={actioningId === approval.id}
+                                                                onClick={async () => {
+                                                                    try {
+                                                                        setActioningId(approval.id);
+                                                                        await axios.post(`/api/sow/approvals/${approval.id}/review`, { action: 'reject' });
+                                                                        addToast('Message rejected', 'info');
+                                                                        fetchApprovals();
+                                                                    } catch (error) {
+                                                                        console.error('Failed to reject approval:', error);
+                                                                        const errorMsg = error.response?.data?.error || error.message || 'Failed to reject message';
+                                                                        addToast(`Error: ${errorMsg}`, 'error');
+                                                                    } finally {
+                                                                        setActioningId(null);
+                                                                    }
+                                                                }}
+                                                                className="border-red-500/30 text-red-500 hover:bg-red-500/10 disabled:opacity-50 transition-all duration-200"
+                                                            >
+                                                                {actioningId === approval.id ? (
+                                                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                                ) : (
+                                                                    <XCircle className="w-4 h-4 mr-2" />
+                                                                )}
+                                                                Reject
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                disabled={actioningId === approval.id}
+                                                                onClick={async () => {
+                                                                    try {
+                                                                        setActioningId(approval.id);
+                                                                        await axios.post(`/api/sow/approvals/${approval.id}/review`, { action: 'approve' });
+                                                                        addToast('✅ Message approved! Scheduler will send within 1 minute.', 'success');
+                                                                        fetchApprovals();
+                                                                        fetchCampaignDetails();
+                                                                        fetchRecentActivity(); // Refresh activity
+
+                                                                        // Immediately check status
+                                                                        checkApprovalStatus(approval.id);
+
+                                                                        // Start aggressive polling for status (every 3 seconds for first minute, then every 10 seconds)
+                                                                        let pollCount = 0;
+                                                                        const statusInterval = setInterval(() => {
+                                                                            pollCount++;
+                                                                            checkApprovalStatus(approval.id);
+                                                                            fetchRecentActivity(); // Also refresh activity
+
+                                                                            // After 20 polls (60 seconds), slow down to every 10 seconds
+                                                                            if (pollCount > 20) {
+                                                                                clearInterval(statusInterval);
+                                                                                const slowInterval = setInterval(() => {
+                                                                                    checkApprovalStatus(approval.id);
+                                                                                    fetchRecentActivity();
+                                                                                }, 10000);
+                                                                                // Stop after 5 more minutes
+                                                                                setTimeout(() => clearInterval(slowInterval), 300000);
+                                                                            }
+                                                                        }, 3000); // Check every 3 seconds initially
+
+                                                                        // Stop polling after 6 minutes total
+                                                                        setTimeout(() => clearInterval(statusInterval), 360000);
+                                                                    } catch (error) {
+                                                                        console.error('Failed to approve:', error);
+                                                                        const errorMsg = error.response?.data?.error || error.message || 'Failed to approve message';
+                                                                        addToast(`Error: ${errorMsg}`, 'error');
+                                                                    } finally {
+                                                                        setActioningId(null);
+                                                                    }
+                                                                }}
+                                                                className={cn(
+                                                                    "bg-green-600 hover:bg-green-500 transition-all duration-200",
+                                                                    actioningId === approval.id && "bg-green-600/80 cursor-wait opacity-80"
+                                                                )}
+                                                            >
+                                                                {actioningId === approval.id ? (
+                                                                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                                ) : (
+                                                                    <Send className="w-4 h-4 mr-2" />
+                                                                )}
+                                                                {actioningId === approval.id ? 'Approving...' : 'Approve & Send'}
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Bulk Personalize Modal */}
+                            {showBulkPersonalizeModal && (
+                                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                                    <Card className="w-full max-w-2xl bg-card/95 border-white/10 shadow-2xl">
+                                        <CardContent className="p-6 space-y-6">
+                                            <div>
+                                                <h2 className="text-2xl font-bold mb-2">🎨 Bulk Personalize Messages</h2>
+                                                <p className="text-sm text-muted-foreground">
+                                                    Apply personalization settings to all {selectedApprovals.length} selected messages at once.
+                                                    Each message will be regenerated with AI using these parameters.
+                                                </p>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                <div>
+                                                    <label className="block text-sm font-medium mb-2">Tone</label>
+                                                    <select
+                                                        className="w-full border border-input bg-background rounded-lg px-4 py-2.5"
+                                                        value={bulkPersonalizeOptions.tone}
+                                                        onChange={(e) => setBulkPersonalizeOptions(prev => ({ ...prev, tone: e.target.value }))}
+                                                    >
+                                                        <option value="professional">Professional</option>
+                                                        <option value="friendly">Friendly</option>
+                                                        <option value="casual">Casual</option>
+                                                        <option value="formal">Formal</option>
+                                                        <option value="warm">Warm</option>
+                                                    </select>
+                                                </div>
+
+                                                <div>
+                                                    <label className="block text-sm font-medium mb-2">Length</label>
+                                                    <select
+                                                        className="w-full border border-input bg-background rounded-lg px-4 py-2.5"
+                                                        value={bulkPersonalizeOptions.length}
+                                                        onChange={(e) => setBulkPersonalizeOptions(prev => ({ ...prev, length: e.target.value }))}
+                                                    >
+                                                        <option value="short">Short (2–3 sentences)</option>
+                                                        <option value="medium">Medium (3–5 sentences)</option>
+                                                        <option value="long">Long (4–6 sentences)</option>
+                                                    </select>
+                                                </div>
+
+                                                <div>
+                                                    <label className="block text-sm font-medium mb-2">Focus</label>
+                                                    <select
+                                                        className="w-full border border-input bg-background rounded-lg px-4 py-2.5"
+                                                        value={bulkPersonalizeOptions.focus}
+                                                        onChange={(e) => setBulkPersonalizeOptions(prev => ({ ...prev, focus: e.target.value }))}
+                                                    >
+                                                        <option value="general">General (balanced)</option>
+                                                        <option value="recent_post">Recent post / activity</option>
+                                                        <option value="company">Company & role</option>
+                                                        <option value="role">Job title & expertise</option>
+                                                        <option value="mutual_connection">Mutual connection</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+                                                <div className="flex items-start gap-3">
+                                                    <AlertCircle className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+                                                    <div className="text-sm">
+                                                        <p className="font-medium mb-1">What happens next:</p>
+                                                        <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                                                            <li>All {selectedApprovals.length} selected messages will be regenerated</li>
+                                                            <li>Each will use the same tone, length, and focus settings</li>
+                                                            <li>Content remains personalized per lead using their profile data</li>
+                                                            <li>You can still edit individual messages after regeneration</li>
+                                                        </ul>
                                                     </div>
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
 
-                        {/* LinkedIn vs Gmail sub-tabs */}
-                        <div className="flex border-b border-white/10 gap-4">
-                            <button
-                                type="button"
-                                onClick={() => setApprovalSubTab('linkedin')}
-                                className={cn(
-                                    "pb-3 text-sm font-medium transition-all border-b-2 -mb-px",
-                                    approvalSubTab === 'linkedin' ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-white"
-                                )}
-                            >
-                                <MessageSquare className="w-4 h-4 inline-block mr-2" />
-                                LinkedIn ({linkedinApprovals.length})
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setApprovalSubTab('gmail')}
-                                className={cn(
-                                    "pb-3 text-sm font-medium transition-all border-b-2 -mb-px",
-                                    approvalSubTab === 'gmail' ? "text-primary border-primary" : "text-muted-foreground border-transparent hover:text-white"
-                                )}
-                            >
-                                <Mail className="w-4 h-4 inline-block mr-2" />
-                                Gmail ({gmailApprovals.length})
-                            </button>
-                        </div>
-
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <h2 className="text-xl font-bold text-white">
-                                    {approvalSubTab === 'gmail' ? 'Gmail drafts' : 'AI-Generated Messages'} ({currentApprovals.length})
-                                </h2>
-                                <p className="text-sm text-muted-foreground mt-1">
-                                    {approvalSubTab === 'gmail'
-                                        ? 'Review and approve email drafts. Edit subject and body as needed.'
-                                        : 'Choose tone, length & focus → Regenerate → edit for a human touch → Approve & Send'}
-                                </p>
-                            </div>
-                            <div className="flex gap-2">
-                                {currentApprovals.length > 0 && (
-                                    <Button
-                                        onClick={() => {
-                                            const ids = currentApprovals.map(a => a.id);
-                                            setSelectedApprovals(prev =>
-                                                prev.length === ids.length && ids.every(id => prev.includes(id)) ? [] : ids
-                                            );
-                                        }}
-                                        variant="outline"
-                                        size="sm"
-                                        className="gap-2"
-                                    >
-                                        <CheckCheck className="w-4 h-4" />
-                                        {currentApprovals.every(a => selectedApprovals.includes(a.id)) ? 'Deselect All' : `Select All (${currentApprovals.length})`}
-                                    </Button>
-                                )}
-                                {selectedApprovals.length > 0 && (() => {
-                                    const selectedInTab = selectedApprovals.filter(sid => currentApprovals.some(a => a.id === sid));
-                                    return selectedInTab.length > 0 ? (
-                                    <>
-                                        {approvalSubTab === 'linkedin' && (
-                                            <Button
-                                                onClick={() => setShowBulkPersonalizeModal(true)}
-                                                variant="outline"
-                                                className="gap-2 border-purple-500/30 text-purple-500 hover:bg-purple-500/10"
-                                            >
-                                                <RefreshCw className="w-4 h-4" />
-                                                Bulk Personalize ({selectedInTab.length})
-                                            </Button>
-                                        )}
-                                        <Button
-                                            variant="outline"
-                                            onClick={handleRejectSelected}
-                                            disabled={bulkActioning}
-                                            className="gap-2 border-red-500/50 text-red-500 hover:bg-red-500/10 disabled:opacity-50"
-                                        >
-                                            {bulkActioning ? (
-                                                <Loader2 className="w-4 h-4 animate-spin" />
-                                            ) : (
-                                                <XCircle className="w-4 h-4" />
-                                            )}
-                                            Reject ({selectedInTab.length})
-                                        </Button>
-                                        <Button
-                                            onClick={handleApproveSelected}
-                                            disabled={bulkActioning}
-                                            className={cn(
-                                                "gap-2 bg-green-600 hover:bg-green-500 transition-all duration-200",
-                                                bulkActioning && "bg-green-600/80 cursor-wait opacity-80"
-                                            )}
-                                        >
-                                            {bulkActioning ? (
-                                                <Loader2 className="w-4 h-4 animate-spin" />
-                                            ) : (
-                                                <CheckCheck className="w-4 h-4" />
-                                            )}
-                                            {bulkActioning ? 'Processing...' : approvalSubTab === 'gmail' ? `Approve (${selectedInTab.length})` : `Approve & Send (${selectedInTab.length})`}
-                                        </Button>
-                                    </>
-                                    ) : null;
-                                })()}
-                            </div>
-                        </div>
-
-                        {currentApprovals.length === 0 ? (
-                            <div className="text-center py-20 bg-white/5 rounded-2xl border border-dashed border-white/10">
-                                <div className="bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <Eye className="w-8 h-8 text-primary" />
-                                </div>
-                                <h3 className="text-lg font-bold text-white mb-2">
-                                    {approvalSubTab === 'gmail' ? 'No Gmail drafts for leads with email' : 'No AI messages yet'}
-                                </h3>
-                                <p className="text-muted-foreground max-w-md mx-auto mb-6">
-                                    {approvalSubTab === 'gmail' ? (
-                                        <>Use <strong className="text-primary">Contact Actions → Contact Emails</strong> to generate Gmail drafts for leads who have an email address. Only those leads appear here.</>
-                                    ) : (
-                                        <>Go to <strong className="text-primary">Leads Tab</strong> and click <strong className="text-primary">"Bulk Enrich & Generate AI Messages"</strong></>
-                                    )}
-                                </p>
-                                {approvalSubTab === 'linkedin' && (
-                                    <div className="bg-white/5 rounded-lg p-4 max-w-md mx-auto mb-6 text-left">
-                                        <p className="text-xs text-muted-foreground mb-2"><strong className="text-white">What happens:</strong></p>
-                                        <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-                                            <li>System enriches all leads (scrapes LinkedIn profiles)</li>
-                                            <li>AI generates personalized messages using that data</li>
-                                            <li>Messages appear here in Approvals Tab</li>
-                                            <li>You review, edit, and approve them</li>
-                                            <li>Scheduler sends approved messages automatically</li>
-                                        </ol>
-                                    </div>
-                                )}
-                                <Button onClick={() => setActiveTab('leads')} className="bg-primary hover:bg-primary/90 gap-2">
-                                    <Sparkles className="w-4 h-4" />
-                                    Go to Leads Tab
-                                </Button>
-                            </div>
-                        ) : (
-                            <div className="space-y-4">
-                                {currentApprovals.map((approval) => (
-                                    <Card key={approval.id} className={cn(
-                                        "bg-card/40 border transition-all duration-300",
-                                        selectedApprovals.includes(approval.id) ? "border-primary/50 bg-primary/5" : "border-white/5"
-                                    )}>
-                                        <CardContent className="p-6">
-                                            <div className="flex gap-4">
-                                                {/* Checkbox */}
-                                                <div className="pt-1">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selectedApprovals.includes(approval.id)}
-                                                        onChange={() => toggleSelectApproval(approval.id)}
-                                                        className="w-5 h-5 rounded border-white/20 bg-white/5 checked:bg-primary checked:border-primary cursor-pointer"
-                                                    />
-                                                </div>
-
-                                                {/* Content */}
-                                                <div className="flex-1 space-y-4">
-                                                    {/* Lead Info */}
-                                                    <div className="flex items-start justify-between">
-                                                        <div>
-                                                            <div className="flex items-center gap-3">
-                                                                <h3 className="text-lg font-bold text-white">
-                                                                    {approval.first_name} {approval.last_name}
-                                                                </h3>
-                                                                <Badge variant="outline" className={cn(
-                                                                    "text-[10px] font-bold uppercase",
-                                                                    approval.step_type === 'connection_request' && "border-blue-500/50 text-blue-500 bg-blue-500/5",
-                                                                    approval.step_type === 'message' && "border-green-500/50 text-green-500 bg-green-500/5",
-                                                                    (approval.step_type === 'gmail_outreach' || approval.step_type === 'email') && "border-rose-500/50 text-rose-500 bg-rose-500/5"
-                                                                )}>
-                                                                    {approval.step_type === 'connection_request' ? 'Connection' : approval.step_type === 'message' ? 'Message' : approval.step_type === 'gmail_outreach' ? 'Gmail' : 'Email'}
-                                                                </Badge>
-                                                            </div>
-                                                            <p className="text-sm text-muted-foreground mt-1">
-                                                                {approval.title} at {approval.company}
-                                                            </p>
-
-                                                            {/* Personalization Controls */}
-                                                            {approval.status === 'pending' && (
-                                                                <div className="flex flex-wrap items-center gap-2 text-xs mt-3">
-                                                                    <span className="font-medium text-muted-foreground">Personalize:</span>
-                                                                    <select
-                                                                        className="border border-input bg-background rounded px-2 py-1.5 text-xs"
-                                                                        value={getOptionsForApproval(approval.id).tone}
-                                                                        onChange={(e) => setOptionsForApproval(approval.id, { tone: e.target.value })}
-                                                                    >
-                                                                        <option value="professional">Professional</option>
-                                                                        <option value="friendly">Friendly</option>
-                                                                        <option value="casual">Casual</option>
-                                                                        <option value="formal">Formal</option>
-                                                                        <option value="warm">Warm</option>
-                                                                    </select>
-                                                                    <select
-                                                                        className="border border-input bg-background rounded px-2 py-1.5 text-xs"
-                                                                        value={getOptionsForApproval(approval.id).length}
-                                                                        onChange={(e) => setOptionsForApproval(approval.id, { length: e.target.value })}
-                                                                    >
-                                                                        <option value="short">Short (2–3 sentences)</option>
-                                                                        <option value="medium">Medium (3–5 sentences)</option>
-                                                                        <option value="long">Long (4–6 sentences)</option>
-                                                                    </select>
-                                                                    <select
-                                                                        className="border border-input bg-background rounded px-2 py-1.5 text-xs"
-                                                                        value={getOptionsForApproval(approval.id).focus}
-                                                                        onChange={(e) => setOptionsForApproval(approval.id, { focus: e.target.value })}
-                                                                    >
-                                                                        <option value="general">General (balanced)</option>
-                                                                        <option value="recent_post">Recent post / activity</option>
-                                                                        <option value="company">Company & role</option>
-                                                                        <option value="role">Job title & expertise</option>
-                                                                        <option value="mutual_connection">Mutual connection</option>
-                                                                    </select>
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="outline"
-                                                                        className="gap-1.5"
-                                                                        onClick={() => handleRegenerateApproval(approval.id)}
-                                                                        disabled={regeneratingId === approval.id}
-                                                                    >
-                                                                        {regeneratingId === approval.id ? (
-                                                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                                        ) : (
-                                                                            <RefreshCw className="w-3.5 h-3.5" />
-                                                                        )}
-                                                                        Regenerate
-                                                                    </Button>
-                                                                </div>
-                                                            )}
-
-                                                            {approval.status === 'approved' && (
-                                                                <div className="mt-3 p-3 rounded-lg border" style={{
-                                                                    backgroundColor: approvalStatuses[approval.id]?.sending_status === 'sent' ? 'rgba(34, 197, 94, 0.1)' :
-                                                                        approvalStatuses[approval.id]?.sending_status === 'queued' ? 'rgba(234, 179, 8, 0.1)' :
-                                                                            'rgba(107, 114, 128, 0.1)',
-                                                                    borderColor: approvalStatuses[approval.id]?.sending_status === 'sent' ? 'rgba(34, 197, 94, 0.3)' :
-                                                                        approvalStatuses[approval.id]?.sending_status === 'queued' ? 'rgba(234, 179, 8, 0.3)' :
-                                                                            'rgba(107, 114, 128, 0.3)'
-                                                                }}>
-                                                                    {approvalStatuses[approval.id] ? (
-                                                                        <>
-                                                                            {approvalStatuses[approval.id].sending_status === 'sent' && approvalStatuses[approval.id].sent_at && (
-                                                                                <div className="space-y-1">
-                                                                                    <p className="text-sm font-bold text-green-500 flex items-center gap-2">
-                                                                                        <CheckCircle2 className="w-4 h-4" />
-                                                                                        ✅ MESSAGE SENT SUCCESSFULLY!
-                                                                                    </p>
-                                                                                    <p className="text-xs text-green-400">
-                                                                                        Sent at {new Date(approvalStatuses[approval.id].sent_at).toLocaleString()}
-                                                                                    </p>
-                                                                                    {approvalStatuses[approval.id].container_id && (
-                                                                                        <p className="text-xs text-muted-foreground font-mono mt-1">
-                                                                                            Sync Session: {approvalStatuses[approval.id].container_id}
-                                                                                        </p>
-                                                                                    )}
-                                                                                </div>
-                                                                            )}
-                                                                            {approvalStatuses[approval.id].sending_status === 'queued' && (
-                                                                                <p className="text-sm text-yellow-500 flex items-center gap-2">
-                                                                                    <Clock className="w-4 h-4 animate-spin" />
-                                                                                    ⏳ Message queued - scheduler will send within 1 minute...
-                                                                                </p>
-                                                                            )}
-                                                                            {approvalStatuses[approval.id].sending_status === 'pending' && (
-                                                                                <p className="text-xs text-gray-400">
-                                                                                    Waiting for scheduler to pick up...
-                                                                                </p>
-                                                                            )}
-                                                                        </>
-                                                                    ) : (
-                                                                        <p className="text-xs text-yellow-500 flex items-center gap-2">
-                                                                            <Clock className="w-3 h-3 animate-spin" />
-                                                                            Checking sending status...
-                                                                        </p>
-                                                                    )}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Message Content */}
-                                                    {isGmailApproval(approval) ? (
+                                            <div className="flex gap-3 justify-end">
+                                                <Button
+                                                    variant="ghost"
+                                                    onClick={() => setShowBulkPersonalizeModal(false)}
+                                                    disabled={bulkPersonalizing}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                                <Button
+                                                    onClick={handleBulkPersonalize}
+                                                    disabled={bulkPersonalizing}
+                                                    className="gap-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
+                                                >
+                                                    {bulkPersonalizing ? (
                                                         <>
-                                                            {editingApproval === approval.id ? (
-                                                                <div className="space-y-3">
-                                                                    <div>
-                                                                        <label className="text-xs font-medium text-muted-foreground">Subject</label>
-                                                                        <input
-                                                                            id={`edit-subject-${approval.id}`}
-                                                                            defaultValue={parseGmailContent(approval.generated_content).subject}
-                                                                            className="w-full mt-1 px-3 py-2 bg-white/5 border border-primary/30 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                                                        />
-                                                                    </div>
-                                                                    <div>
-                                                                        <label className="text-xs font-medium text-muted-foreground">Body</label>
-                                                                        <textarea
-                                                                            id={`edit-body-${approval.id}`}
-                                                                            defaultValue={parseGmailContent(approval.generated_content).body}
-                                                                            className="w-full mt-1 min-h-[140px] px-3 py-2 bg-white/5 border border-primary/30 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
-                                                                        />
-                                                                    </div>
-                                                                    <div className="flex gap-2">
-                                                                        <Button
-                                                                            size="sm"
-                                                                            onClick={() => {
-                                                                                const subject = document.getElementById(`edit-subject-${approval.id}`).value;
-                                                                                const body = document.getElementById(`edit-body-${approval.id}`).value;
-                                                                                handleEditApproval(approval.id, JSON.stringify({ subject, body }));
-                                                                                setEditingApproval(null);
-                                                                            }}
-                                                                            className="bg-primary hover:bg-primary/90"
-                                                                        >
-                                                                            <Save className="w-4 h-4 mr-2" /> Save Changes
-                                                                        </Button>
-                                                                        <Button size="sm" variant="ghost" onClick={() => setEditingApproval(null)}>Cancel</Button>
-                                                                    </div>
-                                                                </div>
-                                                            ) : (
-                                                                <div
-                                                                    className="relative bg-white/5 rounded-lg p-4 border border-white/10 group cursor-pointer hover:border-primary/30 transition-all"
-                                                                    onClick={() => setEditingApproval(approval.id)}
-                                                                >
-                                                                    {(() => {
-                                                                        const { subject, body } = parseGmailContent(approval.generated_content);
-                                                                        return (
-                                                                            <>
-                                                                                {subject && <p className="text-sm font-medium text-slate-200 mb-2">Re: {subject}</p>}
-                                                                                <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">{body}</p>
-                                                                            </>
-                                                                        );
-                                                                    })()}
-                                                                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                        <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs">
-                                                                            <Edit2 className="w-3 h-3" /> Edit
-                                                                        </Button>
-                                                                    </div>
-                                                                </div>
-                                                            )}
+                                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                                            Personalizing {selectedApprovals.length} messages...
                                                         </>
-                                                    ) : editingApproval === approval.id ? (
-                                                        <div className="space-y-2">
-                                                            <textarea
-                                                                defaultValue={approval.generated_content}
-                                                                id={`edit-${approval.id}`}
-                                                                className="w-full min-h-[120px] bg-white/5 border border-primary/30 rounded-lg p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all font-sans"
-                                                            />
-                                                            <div className="flex gap-2">
-                                                                <Button
-                                                                    size="sm"
-                                                                    onClick={() => {
-                                                                        const newContent = document.getElementById(`edit-${approval.id}`).value;
-                                                                        handleEditApproval(approval.id, newContent);
-                                                                    }}
-                                                                    className="bg-primary hover:bg-primary/90"
-                                                                >
-                                                                    <Save className="w-4 h-4 mr-2" /> Save Changes
-                                                                </Button>
-                                                                <Button
-                                                                    size="sm"
-                                                                    variant="ghost"
-                                                                    onClick={() => setEditingApproval(null)}
-                                                                >
-                                                                    Cancel
-                                                                </Button>
-                                                            </div>
-                                                        </div>
                                                     ) : (
-                                                        <div
-                                                            className="relative bg-white/5 rounded-lg p-4 border border-white/10 group cursor-pointer hover:border-primary/30 transition-all"
-                                                            onClick={() => setEditingApproval(approval.id)}
-                                                        >
-                                                            <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">
-                                                                {approval.generated_content}
-                                                            </p>
-                                                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs">
-                                                                    <Edit2 className="w-3 h-3" /> Edit
-                                                                </Button>
-                                                            </div>
-                                                        </div>
+                                                        <>
+                                                            <RefreshCw className="w-4 h-4" />
+                                                            Personalize {selectedApprovals.length} Messages
+                                                        </>
                                                     )}
-
-                                                    {/* Action Buttons */}
-                                                    <div className="flex gap-2 pt-2">
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            disabled={actioningId === approval.id}
-                                                            onClick={async () => {
-                                                                try {
-                                                                    setActioningId(approval.id);
-                                                                    await axios.post(`/api/sow/approvals/${approval.id}/review`, { action: 'reject' });
-                                                                    addToast('Message rejected', 'info');
-                                                                    fetchApprovals();
-                                                                } catch (error) {
-                                                                    console.error('Failed to reject approval:', error);
-                                                                    const errorMsg = error.response?.data?.error || error.message || 'Failed to reject message';
-                                                                    addToast(`Error: ${errorMsg}`, 'error');
-                                                                } finally {
-                                                                    setActioningId(null);
-                                                                }
-                                                            }}
-                                                            className="border-red-500/30 text-red-500 hover:bg-red-500/10 disabled:opacity-50 transition-all duration-200"
-                                                        >
-                                                            {actioningId === approval.id ? (
-                                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                                            ) : (
-                                                                <XCircle className="w-4 h-4 mr-2" />
-                                                            )}
-                                                            Reject
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            disabled={actioningId === approval.id}
-                                                            onClick={async () => {
-                                                                try {
-                                                                    setActioningId(approval.id);
-                                                                    await axios.post(`/api/sow/approvals/${approval.id}/review`, { action: 'approve' });
-                                                                    addToast('✅ Message approved! Scheduler will send within 1 minute.', 'success');
-                                                                    fetchApprovals();
-                                                                    fetchCampaignDetails();
-                                                                    fetchRecentActivity(); // Refresh activity
-
-                                                                    // Immediately check status
-                                                                    checkApprovalStatus(approval.id);
-
-                                                                    // Start aggressive polling for status (every 3 seconds for first minute, then every 10 seconds)
-                                                                    let pollCount = 0;
-                                                                    const statusInterval = setInterval(() => {
-                                                                        pollCount++;
-                                                                        checkApprovalStatus(approval.id);
-                                                                        fetchRecentActivity(); // Also refresh activity
-
-                                                                        // After 20 polls (60 seconds), slow down to every 10 seconds
-                                                                        if (pollCount > 20) {
-                                                                            clearInterval(statusInterval);
-                                                                            const slowInterval = setInterval(() => {
-                                                                                checkApprovalStatus(approval.id);
-                                                                                fetchRecentActivity();
-                                                                            }, 10000);
-                                                                            // Stop after 5 more minutes
-                                                                            setTimeout(() => clearInterval(slowInterval), 300000);
-                                                                        }
-                                                                    }, 3000); // Check every 3 seconds initially
-
-                                                                    // Stop polling after 6 minutes total
-                                                                    setTimeout(() => clearInterval(statusInterval), 360000);
-                                                                } catch (error) {
-                                                                    console.error('Failed to approve:', error);
-                                                                    const errorMsg = error.response?.data?.error || error.message || 'Failed to approve message';
-                                                                    addToast(`Error: ${errorMsg}`, 'error');
-                                                                } finally {
-                                                                    setActioningId(null);
-                                                                }
-                                                            }}
-                                                            className={cn(
-                                                                "bg-green-600 hover:bg-green-500 transition-all duration-200",
-                                                                actioningId === approval.id && "bg-green-600/80 cursor-wait opacity-80"
-                                                            )}
-                                                        >
-                                                            {actioningId === approval.id ? (
-                                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                                            ) : (
-                                                                <Send className="w-4 h-4 mr-2" />
-                                                            )}
-                                                            {actioningId === approval.id ? 'Approving...' : 'Approve & Send'}
-                                                        </Button>
-                                                    </div>
-                                                </div>
+                                                </Button>
                                             </div>
                                         </CardContent>
                                     </Card>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Bulk Personalize Modal */}
-                        {showBulkPersonalizeModal && (
-                            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                                <Card className="w-full max-w-2xl bg-card/95 border-white/10 shadow-2xl">
-                                    <CardContent className="p-6 space-y-6">
-                                        <div>
-                                            <h2 className="text-2xl font-bold mb-2">🎨 Bulk Personalize Messages</h2>
-                                            <p className="text-sm text-muted-foreground">
-                                                Apply personalization settings to all {selectedApprovals.length} selected messages at once.
-                                                Each message will be regenerated with AI using these parameters.
-                                            </p>
-                                        </div>
-
-                                        <div className="space-y-4">
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">Tone</label>
-                                                <select
-                                                    className="w-full border border-input bg-background rounded-lg px-4 py-2.5"
-                                                    value={bulkPersonalizeOptions.tone}
-                                                    onChange={(e) => setBulkPersonalizeOptions(prev => ({ ...prev, tone: e.target.value }))}
-                                                >
-                                                    <option value="professional">Professional</option>
-                                                    <option value="friendly">Friendly</option>
-                                                    <option value="casual">Casual</option>
-                                                    <option value="formal">Formal</option>
-                                                    <option value="warm">Warm</option>
-                                                </select>
-                                            </div>
-
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">Length</label>
-                                                <select
-                                                    className="w-full border border-input bg-background rounded-lg px-4 py-2.5"
-                                                    value={bulkPersonalizeOptions.length}
-                                                    onChange={(e) => setBulkPersonalizeOptions(prev => ({ ...prev, length: e.target.value }))}
-                                                >
-                                                    <option value="short">Short (2–3 sentences)</option>
-                                                    <option value="medium">Medium (3–5 sentences)</option>
-                                                    <option value="long">Long (4–6 sentences)</option>
-                                                </select>
-                                            </div>
-
-                                            <div>
-                                                <label className="block text-sm font-medium mb-2">Focus</label>
-                                                <select
-                                                    className="w-full border border-input bg-background rounded-lg px-4 py-2.5"
-                                                    value={bulkPersonalizeOptions.focus}
-                                                    onChange={(e) => setBulkPersonalizeOptions(prev => ({ ...prev, focus: e.target.value }))}
-                                                >
-                                                    <option value="general">General (balanced)</option>
-                                                    <option value="recent_post">Recent post / activity</option>
-                                                    <option value="company">Company & role</option>
-                                                    <option value="role">Job title & expertise</option>
-                                                    <option value="mutual_connection">Mutual connection</option>
-                                                </select>
-                                            </div>
-                                        </div>
-
-                                        <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
-                                            <div className="flex items-start gap-3">
-                                                <AlertCircle className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
-                                                <div className="text-sm">
-                                                    <p className="font-medium mb-1">What happens next:</p>
-                                                    <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                                                        <li>All {selectedApprovals.length} selected messages will be regenerated</li>
-                                                        <li>Each will use the same tone, length, and focus settings</li>
-                                                        <li>Content remains personalized per lead using their profile data</li>
-                                                        <li>You can still edit individual messages after regeneration</li>
-                                                    </ul>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex gap-3 justify-end">
-                                            <Button
-                                                variant="ghost"
-                                                onClick={() => setShowBulkPersonalizeModal(false)}
-                                                disabled={bulkPersonalizing}
-                                            >
-                                                Cancel
-                                            </Button>
-                                            <Button
-                                                onClick={handleBulkPersonalize}
-                                                disabled={bulkPersonalizing}
-                                                className="gap-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
-                                            >
-                                                {bulkPersonalizing ? (
-                                                    <>
-                                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                                        Personalizing {selectedApprovals.length} messages...
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <RefreshCw className="w-4 h-4" />
-                                                        Personalize {selectedApprovals.length} Messages
-                                                    </>
-                                                )}
-                                            </Button>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            </div>
-                        )}
-                    </div>
+                                </div>
+                            )}
+                        </div>
                     );
                 })()}
 

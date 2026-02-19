@@ -821,7 +821,7 @@ export async function scrapeContacts(req, res) {
             await contactScraperService.initialize(sessionCookie);
         } catch (initError) {
             console.error('❌ Failed to initialize contact scraper:', initError.message);
-            
+
             // Provide helpful error message for LinkedIn bot detection
             if (initError.message.includes('ERR_TOO_MANY_REDIRECTS') || initError.message.includes('navigation failed')) {
                 return res.status(500).json({
@@ -835,7 +835,7 @@ export async function scrapeContacts(req, res) {
                     ]
                 });
             }
-            
+
             return res.status(500).json({
                 error: 'Failed to initialize LinkedIn session',
                 details: initError.message
