@@ -399,8 +399,8 @@ export default function DashboardPage() {
       fill: getIndustryColor(d.industry),
       percentage:
         totalLeadsCount > 0
-          ? (((d.count || 0) / totalLeadsCount) * 100).toFixed(2)
-          : "0.00",
+          ? Math.round(((d.count || 0) / totalLeadsCount) * 100)
+          : 0,
       contextLabel: "total leads",
       subCategories: Array.isArray(d.subCategories) ? d.subCategories : [],
     }))
@@ -429,8 +429,8 @@ export default function DashboardPage() {
         fill: CHART_COLORS[idx % CHART_COLORS.length],
         percentage:
           totalForParent > 0
-            ? (((sub.count || 0) / totalForParent) * 100).toFixed(2)
-            : "0.00",
+            ? Math.round(((sub.count || 0) / totalForParent) * 100)
+            : 0,
         contextLabel: parent.name,
       }))
       .filter((s) => s.value > 0)
@@ -532,16 +532,16 @@ export default function DashboardPage() {
   const connectionPercentages = {
     firstDegree:
       totalConnections > 0
-        ? ((connectionData.firstDegree / totalConnections) * 100).toFixed(1)
-        : "0.0",
+        ? Math.round((connectionData.firstDegree / totalConnections) * 100)
+        : 0,
     secondDegree:
       totalConnections > 0
-        ? ((connectionData.secondDegree / totalConnections) * 100).toFixed(1)
-        : "0.0",
+        ? Math.round((connectionData.secondDegree / totalConnections) * 100)
+        : 0,
     thirdDegree:
       totalConnections > 0
-        ? ((connectionData.thirdDegree / totalConnections) * 100).toFixed(1)
-        : "0.0",
+        ? Math.round((connectionData.thirdDegree / totalConnections) * 100)
+        : 0,
   };
 
   // Campaign type breakdown with green-gray range colors
@@ -598,13 +598,15 @@ export default function DashboardPage() {
         {/* Header: Title + Time/Import Actions */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           {/* Left: Title & Subtitle */}
-          <div>
-            {selectedConnectionDegree ? (
-              <Badge variant="secondary" className="text-xs font-medium">
+          <div className="flex flex-col gap-1.5">
+            <p className="text-base font-semibold text-blue-600 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-blue-500 fill-blue-500/20" />
+              LinkedIn lead discovery, quality scoring, and campaign analytics in one place.
+            </p>
+            {selectedConnectionDegree && (
+              <Badge variant="secondary" className="text-xs font-medium w-fit">
                 Filtered by {selectedConnectionDegree} degree (past year)
               </Badge>
-            ) : (
-              <div className="h-6" /> /* Spacer to prevent layout jump */
             )}
           </div>
 
@@ -632,7 +634,7 @@ export default function DashboardPage() {
             <div className="h-8 w-px bg-border hidden sm:block"></div>
 
             {/* Import Action Group */}
-            <div>
+            <div className="flex items-center">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -669,6 +671,7 @@ export default function DashboardPage() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              <InfoTooltip content="Import external leads (CSV/Excel) to track and analyze them in your dashboard." />
             </div>
           </div>
         </div>
@@ -787,7 +790,7 @@ export default function DashboardPage() {
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
               <Rocket className="h-5 w-5 text-primary" />
-              Lead Discovery & Insights
+              Lead quality & distribution
             </CardTitle>
             <CardDescription>
               Extraction and lead quality metrics
@@ -805,7 +808,7 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                     <Sparkles className="h-3.5 w-3.5 text-yellow-500" />
-                    Lead Quality Score
+                    Lead quality tiers
                     <InfoTooltip
                       content={
                         <div className="space-y-2">
@@ -940,9 +943,9 @@ export default function DashboardPage() {
             {/* Connection Type - Moved Up */}
             <div className="rounded-lg border bg-muted/20 p-4 transition-all hover:bg-muted/30">
               <div className="flex items-center justify-between mb-4">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                  <UserCheck className="h-3.5 w-3.5 text-primary" />
-                  Connection Type
+                <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <UserCheck className="h-4 w-4 text-primary" />
+                  Connection types
                   <InfoTooltip
                     content={
                       selectedConnectionDegree
@@ -1053,7 +1056,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between mb-4">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                   <TrendingUp className="h-3.5 w-3.5 text-primary" />
-                  Lead Metrics
+                  Quality distribution
                   <InfoTooltip content="Overview of total leads quality distribution and contact information availability." />
                 </p>
               </div>
@@ -1068,7 +1071,7 @@ export default function DashboardPage() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="font-medium text-foreground">
-                        Lead Quality Breakdown
+                        Total count breakdown
                       </span>
                       <span className="font-bold text-foreground">
                         {ls.totalLeads || 0} total
@@ -1189,7 +1192,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
                   <BarChart3 className="h-4 w-4" />
-                  Industry Distribution
+                  Industry distribution
                   <InfoTooltip content="Breakdown of leads by their identified industry." />
                 </p>
                 {industryPieData.length > 0 && (
@@ -1692,14 +1695,21 @@ export default function DashboardPage() {
                   <InfoTooltip content="Breakdown of extracted leads by their origin source." />
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {Object.entries(ls.sourceCount).map(([source, count]) => (
-                    <span
-                      key={source}
-                      className="inline-flex items-center rounded-md bg-secondary px-2.5 py-0.5 text-xs font-medium"
-                    >
-                      {source.replace(/_/g, " ")}: {count}
-                    </span>
-                  ))}
+                  {Object.entries(ls.sourceCount).map(([source, count]) => {
+                    const displayNames = {
+                      connections_export: "my connections",
+                      search_export: "prospects",
+                    };
+                    const label = displayNames[source] || source.replace(/_/g, " ");
+                    return (
+                      <span
+                        key={source}
+                        className="inline-flex items-center rounded-md bg-secondary px-2.5 py-0.5 text-xs font-medium"
+                      >
+                        {label}: {count}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1717,140 +1727,156 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Campaign types pie + messaging stats */}
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="rounded-lg border bg-muted/30 p-6">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <BarChart3 className="h-3.5 w-3.5" />
-                  Campaign Types
-                  <InfoTooltip content="Diversity of your outreach strategy by campaign type." />
-                </p>
+            <div className="grid md:grid-cols-2 gap-6 items-stretch">
+              <div className="rounded-lg border bg-muted/30 p-6 flex flex-col">
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Campaign Types
+                    <InfoTooltip content="Diversity of your outreach strategy by campaign type." />
+                  </p>
+                </div>
+
                 {loading ? (
                   <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
                     Loading…
                   </div>
                 ) : campaignPieData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie
-                        data={campaignPieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={45}
-                        outerRadius={75}
-                        paddingAngle={3}
-                        dataKey="value"
-                        nameKey="name"
-                        label={false}
-                        activeIndex={activeCampaignIndex}
-                        activeShape={(props) => {
-                          const {
-                            cx,
-                            cy,
-                            innerRadius,
-                            outerRadius,
-                            startAngle,
-                            endAngle,
-                            fill,
-                          } = props;
-                          return (
-                            <Sector
-                              cx={cx}
-                              cy={cy}
-                              innerRadius={innerRadius}
-                              outerRadius={outerRadius + 10}
-                              startAngle={startAngle}
-                              endAngle={endAngle}
-                              fill={fill}
-                              stroke="#ffffff"
-                              strokeWidth={4}
-                              opacity={1}
-                            />
-                          );
-                        }}
-                        onMouseEnter={(_, index) =>
-                          setActiveCampaignIndex(index)
-                        }
-                        onMouseLeave={() => setActiveCampaignIndex(null)}
-                      >
+                  <div className="flex flex-col flex-1 justify-between">
+                    <div>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <PieChart>
+                          <Pie
+                            data={campaignPieData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={50}
+                            outerRadius={70}
+                            paddingAngle={4}
+                            dataKey="value"
+                            nameKey="name"
+                            label={false}
+                            activeIndex={activeCampaignIndex}
+                            onMouseEnter={(_, index) =>
+                              setActiveCampaignIndex(index)
+                            }
+                            onMouseLeave={() => setActiveCampaignIndex(null)}
+                          >
+                            {campaignPieData.map((entry, i) => (
+                              <Cell
+                                key={i}
+                                fill={entry.fill}
+                                strokeWidth={0}
+                                style={{ cursor: "pointer" }}
+                              />
+                            ))}
+                          </Pie>
+                          <RechartsTooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+
+                      {/* Legend Below Chart */}
+                      <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
                         {campaignPieData.map((entry, i) => (
-                          <Cell
-                            key={i}
-                            fill={entry.fill}
-                            stroke="#1e293b"
-                            strokeWidth={2}
-                            style={{ cursor: "pointer" }}
-                          />
+                          <div key={i} className="flex items-center gap-2">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: entry.fill }}
+                            />
+                            <span className="text-sm font-medium text-foreground truncate">
+                              {entry.name}
+                            </span>
+                          </div>
                         ))}
-                      </Pie>
-                      <RechartsTooltip
-                        formatter={(value, name, props) => [
-                          `${value} campaigns`,
-                          props.payload.name,
-                        ]}
-                        contentStyle={{
-                          backgroundColor: "#1e293b",
-                          border: "2px solid #10b981",
-                          borderRadius: "8px",
-                          padding: "12px 16px",
-                          color: "#ffffff",
-                          fontSize: "13px",
-                          boxShadow: "0 4px 12px rgba(16, 185, 129, 0.4)",
-                          fontWeight: 500,
-                        }}
-                        labelStyle={{
-                          color: "#10b981",
-                          fontWeight: 700,
-                          marginBottom: "8px",
-                          fontSize: "15px",
-                          textShadow: "0 1px 2px rgba(0, 0, 0, 0.5)",
-                        }}
-                        itemStyle={{
-                          color: "#f1f5f9",
-                          fontWeight: 600,
-                          fontSize: "13px",
-                        }}
-                      />
-                      <Legend
-                        wrapperStyle={{ fontSize: "11px", color: "#cbd5e1" }}
-                        iconType="circle"
-                        formatter={(value) => value}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Active/Paused Indicators */}
+                    <div className="grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-border/50">
+                      <div className="text-center">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                          Active
+                        </p>
+                        <p className="text-xl font-bold text-foreground">
+                          {ca.statusOverview?.active ?? 0}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
+                          Paused/Scheduled
+                        </p>
+                        <p className="text-xl font-bold text-foreground">
+                          {(ca.statusOverview?.draft ?? 0) +
+                            (ca.statusOverview?.scheduled ?? 0)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <div className="h-48 flex items-center justify-center text-sm text-muted-foreground">
                     No campaign types available
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="rounded-lg border bg-muted/30 p-4 text-center hover:bg-muted/40 transition-colors flex flex-col items-center">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
-                    Messages sent
-                    <InfoTooltip content="Total messages sent across all campaigns." />
-                  </p>
-                  <p className="text-3xl font-bold text-foreground">
-                    {loading ? "—" : (ca.messaging?.messagesSent ?? 0)}
-                  </p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-4 text-center hover:bg-muted/40 transition-colors flex flex-col items-center">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
-                    Replies
-                    <InfoTooltip content="Total replies received from leads." />
-                  </p>
-                  <p className="text-3xl font-bold text-foreground">
-                    {loading ? "—" : (ca.messaging?.repliesReceived ?? 0)}
-                  </p>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-4 text-center hover:bg-muted/40 transition-colors flex flex-col items-center">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
-                    Engagement
-                    <InfoTooltip content="Percentage of leads who replied to messages." />
-                  </p>
-                  <p className="text-3xl font-bold text-foreground">
-                    {loading ? "—" : (ca.messaging?.engagementPercent ?? 0)}%
-                  </p>
-                </div>
+
+              {/* Right Side: Message Metrics or Zero State */}
+              <div className="flex flex-col h-full">
+                {(ca.messaging?.messagesSent ?? 0) === 0 && !loading ? (
+                  <div className="h-full rounded-lg border border-dashed border-border bg-muted/20 p-8 flex flex-col items-center justify-center text-center min-h-[300px]">
+                    <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                      <MessageSquare className="h-6 w-6 text-primary" />
+                    </div>
+                    <h3 className="font-semibold text-lg text-foreground mb-2">
+                      No messages sent yet
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-6 max-w-xs mx-auto">
+                      You haven't sent any messages this period. Start reaching
+                      out to your leads!
+                    </p>
+                    <Button
+                      onClick={() => navigate("/campaigns/new")}
+                      className="gap-2"
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      Create Your First Campaign
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4 h-full">
+                    <div className="rounded-lg border bg-muted/30 p-6 text-center hover:bg-muted/40 transition-colors flex flex-col items-center justify-center flex-1">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                        Messages sent
+                        <InfoTooltip content="Total messages sent during selected period." />
+                      </p>
+                      <p className="text-4xl font-bold text-foreground">
+                        {loading ? "—" : (ca.messaging?.messagesSent ?? 0)}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 flex-1">
+                      <div className="rounded-lg border bg-muted/30 p-4 text-center hover:bg-muted/40 transition-colors flex flex-col items-center justify-center">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                          Replies
+                          <InfoTooltip content="Replies received from sent messages." />
+                        </p>
+                        <p className="text-3xl font-bold text-foreground">
+                          {loading ? "—" : (ca.messaging?.repliesReceived ?? 0)}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border bg-muted/30 p-4 text-center hover:bg-muted/40 transition-colors flex flex-col items-center justify-center">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                          Engagement
+                          <InfoTooltip content="Reply rate based on messages sent." />
+                        </p>
+                        <p className="text-3xl font-bold text-foreground">
+                          {loading
+                            ? "—"
+                            : Math.round(ca.messaging?.engagementPercent ?? 0)}
+                          %
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1870,7 +1896,7 @@ export default function DashboardPage() {
                   <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center">
                     Campaigns{" "}
                     <InfoTooltip
-                      content={`Active campaigns running during the ${period} period.`}
+                      content={`Campaigns created during selected period.`}
                     />
                   </p>
                 </div>
@@ -1879,9 +1905,9 @@ export default function DashboardPage() {
                     {loading ? "—" : (ca.totalsByPeriod?.leadsAdded ?? 0)}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center">
-                    Leads added{" "}
+                    Leads added to campaigns
                     <InfoTooltip
-                      content={`New leads added to campaigns during the ${period} period.`}
+                      content={`Leads added to active campaigns during the selected ${period} period.`}
                     />
                   </p>
                 </div>
@@ -1898,7 +1924,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="text-center p-3 rounded-md bg-background/50 hover:bg-background/70 transition-colors">
                   <p className="text-2xl font-bold text-foreground">
-                    {loading ? "—" : (ca.totalsByPeriod?.engagement ?? 0)}%
+                    {loading ? "—" : Math.round(ca.totalsByPeriod?.engagement ?? 0)}%
                   </p>
                   <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center">
                     Engagement{" "}
@@ -1909,6 +1935,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             </div>
+
           </CardContent>
         </Card>
 
@@ -1931,7 +1958,7 @@ export default function DashboardPage() {
                       className="flex justify-between text-sm border-b border-border pb-2 last:border-0"
                     >
                       <span className="font-medium capitalize">
-                        {imp.source?.replace(/_/g, " ") ?? "Import"}
+                        {imp.source === 'connections_export' ? 'My connections' : imp.source === 'search_export' ? 'Prospects' : (imp.source?.replace(/_/g, " ") ?? "Import")}
                       </span>
                       <span className="text-muted-foreground">
                         {imp.total_leads ?? imp.totalLeads ?? 0} leads ·{" "}

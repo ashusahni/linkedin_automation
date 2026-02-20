@@ -91,6 +91,9 @@ export default function CampaignDetailPage() {
     const [optionsByApproval, setOptionsByApproval] = useState({}); // { approvalId: { tone, length, focus } }
     const [approvalSubTab, setApprovalSubTab] = useState('linkedin'); // 'linkedin' | 'gmail'
 
+    // Approval Gate Modal State
+    const [showApprovalGateModal, setShowApprovalGateModal] = useState(false);
+
     // Contact Scraper State
     const [scraping, setScraping] = useState(false);
     const [scrapeProgress, setScrapeProgress] = useState(null);
@@ -513,34 +516,9 @@ export default function CampaignDetailPage() {
         }
     };
 
-    const handleContactLead = async (lead) => {
-        const leadId = lead.id ?? lead.lead_id;
-        if (!leadId) return;
-        try {
-            const res = await axios.post(`/api/campaigns/${id}/auto-connect`, { leadIds: [leadId] });
-            if (res.data?.success) {
-                addToast(`Auto Connect started for 1 lead.`, 'success');
-                fetchCampaignDetails();
-            }
-        } catch (error) {
-            const errorMsg = error.response?.data?.error || error.message || 'Auto Connect failed';
-            addToast(`Error: ${errorMsg}`, 'error');
-        }
-    };
-
-    const handleAutoConnectSelected = async (leadIds) => {
-        if (!leadIds?.length) return;
-        try {
-            const res = await axios.post(`/api/campaigns/${id}/auto-connect`, { leadIds });
-            if (res.data?.success) {
-                addToast(`Auto Connect started for ${leadIds.length} lead(s).`, 'success');
-                fetchCampaignDetails();
-            }
-        } catch (error) {
-            const errorMsg = error.response?.data?.error || error.message || 'Auto Connect failed';
-            addToast(`Error: ${errorMsg}`, 'error');
-        }
-    };
+    // NOTE: Per-lead Auto Connect has been removed.
+    // Connection requests are handled automatically by the scheduler
+    // when campaign goal requires connection AND lead is not 1st degree.
 
     const handleEditApproval = async (approvalId, newContent) => {
         try {
@@ -770,9 +748,15 @@ export default function CampaignDetailPage() {
     };
 
     const handleLaunch = async () => {
+        // APPROVAL GATE: Check for pending approvals before activating
+        const pendingApprovals = approvals.filter(a => a.status === 'pending');
+        if (pendingApprovals.length > 0) {
+            setShowApprovalGateModal(true);
+            return;
+        }
         try {
             await axios.post(`/api/campaigns/${id}/launch`);
-            addToast('Campaign launched successfully!', 'success');
+            addToast('Campaign activated. Scheduler will begin processing leads.', 'success');
             fetchCampaignDetails();
         } catch (error) {
             console.error('Launch failed:', error);
@@ -852,6 +836,8 @@ export default function CampaignDetailPage() {
     }
 
     const stats = campaign.stats || { pending: 0, sent: 0, replied: 0, failed: 0 };
+    const pendingApprovalCount = approvals.filter(a => a.status === 'pending').length;
+    const hasMessageSteps = (campaign.sequences || []).some(s => ['message', 'connection_request', 'gmail_outreach'].includes(s.type));
     const totalLeads = leads.length;
 
     return (
@@ -1109,12 +1095,36 @@ export default function CampaignDetailPage() {
                 ))}
             </div>
 
+            {/* Automation Rules Banner */}
+            <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border border-white/5 bg-card/30 backdrop-blur-sm">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mr-1">Automation Rules:</span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-blue-500/10 border border-blue-500/20 text-blue-300">
+                    <LinkIcon className="w-3 h-3" /> Connection limit: 20/day
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                    <CheckCircle2 className="w-3 h-3" /> Approval required: Yes
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+                    <AlertCircle className="w-3 h-3" /> Stop on reply: Yes
+                </span>
+                {campaign.status === 'active' && (
+                    <span className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 border border-green-500/20 text-green-400 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Scheduler Active
+                    </span>
+                )}
+                {campaign.status === 'paused' && (
+                    <span className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-500/10 border border-orange-500/20 text-orange-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-orange-400 inline-block" /> Paused
+                    </span>
+                )}
+            </div>
+
             {/* Tabs Navigation */}
             <div className="flex border-b border-white/5 gap-8">
                 {[
                     { id: 'sequence', label: 'Sequence', badge: campaign.sequences?.length ?? 0 },
                     { id: 'leads', label: 'Leads', badge: leads.length },
-                    { id: 'approvals', label: 'Approvals', badge: approvals.length },
+                    { id: 'approvals', label: 'Approvals', badge: pendingApprovalCount > 0 ? pendingApprovalCount : approvals.length },
                     { id: 'analytics', label: 'Analytics', badge: null }
                 ].map((tab) => (
                     <button
@@ -1364,44 +1374,32 @@ export default function CampaignDetailPage() {
                         )}
 
                         <CardContent>
-                            {/* Info Banner */}
-                            <div className="mb-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                            {/* Scheduler Flow Banner */}
+                            <div className="mb-4 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
                                 <div className="flex items-start gap-3">
-                                    <AlertCircle className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+                                    <Zap className="w-5 h-5 text-indigo-400 mt-0.5 flex-shrink-0" />
                                     <div className="flex-1">
-                                        <p className="text-sm font-medium text-white mb-2">🎯 Multi-Channel Outreach System:</p>
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-muted-foreground">
-                                            <div className="space-y-1">
-                                                <p className="text-green-400 font-medium flex items-center gap-1"><Search className="w-3 h-3" /> 1. Enrich Contacts</p>
-                                                <ul className="list-disc list-inside space-y-0.5 pl-2">
-                                                    <li>Gets <strong className="text-white">email & phone</strong></li>
-                                                    <li>From LinkedIn profiles</li>
-                                                    <li>Advanced Data Source</li>
-                                                </ul>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <p className="text-orange-400 font-medium flex items-center gap-1"><AtSign className="w-3 h-3" /> 2. Email Outreach</p>
-                                                <ul className="list-disc list-inside space-y-0.5 pl-2">
-                                                    <li>Direct <strong className="text-white">email</strong> to inbox</li>
-                                                    <li>AI-personalized content</li>
-                                                    <li>Beautiful HTML templates</li>
-                                                </ul>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <p className="text-violet-400 font-medium flex items-center gap-1"><Smartphone className="w-3 h-3" /> 3. SMS Outreach</p>
-                                                <ul className="list-disc list-inside space-y-0.5 pl-2">
-                                                    <li>Text <strong className="text-white">SMS</strong> messages</li>
-                                                    <li>Short, personalized</li>
-                                                    <li>Requires Twilio setup</li>
-                                                </ul>
-                                            </div>
+                                        <p className="text-sm font-medium text-white mb-2">⚡ Automated Scheduler Flow:</p>
+                                        <div className="flex flex-wrap gap-2 text-xs">
+                                            <span className="px-2 py-1 rounded-md bg-white/5 text-muted-foreground border border-white/5">
+                                                1️⃣ <strong className="text-white">Add Leads</strong>
+                                            </span>
+                                            <ChevronRight className="w-3 h-3 text-muted-foreground self-center" />
+                                            <span className="px-2 py-1 rounded-md bg-white/5 text-muted-foreground border border-white/5">
+                                                2️⃣ <strong className="text-white">Generate & Approve Messages</strong>
+                                            </span>
+                                            <ChevronRight className="w-3 h-3 text-muted-foreground self-center" />
+                                            <span className="px-2 py-1 rounded-md bg-white/5 text-muted-foreground border border-white/5">
+                                                3️⃣ <strong className="text-white">Press Play</strong>
+                                            </span>
+                                            <ChevronRight className="w-3 h-3 text-muted-foreground self-center" />
+                                            <span className="px-2 py-1 rounded-md bg-green-500/10 text-green-400 border border-green-500/20">
+                                                ✅ Scheduler runs → Connections → Messages → Stops on Reply
+                                            </span>
                                         </div>
-                                        <div className="mt-3 pt-3 border-t border-white/10">
-                                            <p className="text-xs">
-                                                <strong className="text-primary">LinkedIn AI Messages</strong> still go through Approvals Tab.
-                                                Email/SMS are sent directly after confirmation.
-                                            </p>
-                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-2">
+                                            Connection requests are sent automatically by the scheduler. No manual triggering needed.
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -1417,7 +1415,11 @@ export default function CampaignDetailPage() {
                                     company: l.company,
                                     email: l.email,
                                     phone: l.phone,
-                                    status: l.status || 'pending'
+                                    linkedin_url: l.linkedin_url,
+                                    status: l.status || 'pending',
+                                    current_step: l.current_step,
+                                    step_type: l.step_type,
+                                    next_action_due: l.next_action_due,
                                 }));
                                 return (
                                     <CampaignLeadsTable
@@ -1425,8 +1427,6 @@ export default function CampaignDetailPage() {
                                         selectedLeads={selectedLeads}
                                         onToggleLead={toggleSelectLead}
                                         onToggleAll={toggleSelectAllLeads}
-                                        onContactLead={handleContactLead}
-                                        onAutoConnectSelected={handleAutoConnectSelected}
                                     />
                                 );
                             })()}
@@ -1457,10 +1457,11 @@ export default function CampaignDetailPage() {
                                 <div className="flex items-start gap-3">
                                     <MessageSquare className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
                                     <div className="flex-1">
-                                        <p className="text-sm font-medium text-white mb-1">📍 Where AI Messages Are:</p>
+                                        <p className="text-sm font-medium text-white mb-1">📋 Approval Queue:</p>
                                         <p className="text-xs text-muted-foreground">
-                                            These messages were generated using enriched LinkedIn profile data.
-                                            After you approve them, they'll be sent automatically by the scheduler.
+                                            Messages are generated by the scheduler when a lead reaches a message step.
+                                            Review, edit and <strong className="text-primary">Approve</strong> them here.
+                                            The scheduler will send approved messages automatically.
                                             <strong className="text-primary block mt-2">💡 Click any message to edit it before approving!</strong>
                                         </p>
                                     </div>
@@ -1633,7 +1634,7 @@ export default function CampaignDetailPage() {
                                                     ) : (
                                                         <CheckCheck className="w-4 h-4" />
                                                     )}
-                                                    {bulkActioning ? 'Processing...' : approvalSubTab === 'gmail' ? `Approve (${selectedInTab.length})` : `Approve & Send (${selectedInTab.length})`}
+                                                    {bulkActioning ? 'Processing...' : `Approve (${selectedInTab.length})`}
                                                 </Button>
                                             </>
                                         ) : null;
@@ -2001,7 +2002,7 @@ export default function CampaignDetailPage() {
                                                                 ) : (
                                                                     <Send className="w-4 h-4 mr-2" />
                                                                 )}
-                                                                {actioningId === approval.id ? 'Approving...' : 'Approve & Send'}
+                                                                {actioningId === approval.id ? 'Approving...' : 'Approve'}
                                                             </Button>
                                                         </div>
                                                     </div>
@@ -2270,6 +2271,74 @@ export default function CampaignDetailPage() {
                     </motion.div>
                 )}
             </div>
+
+            {/* Approval Gate Modal */}
+            {showApprovalGateModal && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="w-full max-w-md bg-card border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="px-6 pt-6 pb-4 border-b border-white/5">
+                            <div className="flex items-center gap-3 mb-1">
+                                <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                                    <AlertTriangle className="w-6 h-6 text-amber-400" />
+                                </div>
+                                <h2 className="text-lg font-bold text-white">Approval Required</h2>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                Please approve messages before starting the campaign.
+                            </p>
+                        </div>
+
+                        {/* Body */}
+                        <div className="px-6 py-4 space-y-3">
+                            <div className="p-4 bg-amber-500/5 border border-amber-500/15 rounded-xl">
+                                <p className="text-sm text-amber-200 font-medium mb-1">
+                                    {pendingApprovalCount} message{pendingApprovalCount !== 1 ? 's' : ''} awaiting approval
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    The scheduler requires at least one approved message before it can begin sending outreach on your behalf.
+                                    Approving messages does not send them immediately — the scheduler handles timing.
+                                </p>
+                            </div>
+                            <div className="space-y-2 text-xs text-muted-foreground">
+                                <div className="flex items-start gap-2">
+                                    <span className="text-green-400 mt-0.5">✓</span>
+                                    <span>Go to <strong className="text-white">Approvals Tab</strong> → review AI-generated messages</span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                    <span className="text-green-400 mt-0.5">✓</span>
+                                    <span>Edit messages if needed, then click <strong className="text-white">Approve</strong></span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                    <span className="text-green-400 mt-0.5">✓</span>
+                                    <span>Come back and press <strong className="text-white">Play</strong> to start the campaign</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="px-6 pb-6 flex gap-3 justify-end">
+                            <Button
+                                variant="ghost"
+                                onClick={() => setShowApprovalGateModal(false)}
+                                className="text-muted-foreground"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    setShowApprovalGateModal(false);
+                                    setActiveTab('approvals');
+                                }}
+                                className="bg-amber-500 hover:bg-amber-400 text-black font-semibold gap-2"
+                            >
+                                <CheckCheck className="w-4 h-4" />
+                                Go to Approvals
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
     );
