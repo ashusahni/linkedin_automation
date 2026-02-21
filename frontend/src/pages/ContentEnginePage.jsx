@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { CardSpotlight } from '@/components/ui/card-spotlight';
 import { useToast } from '@/components/ui/toast';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -382,21 +383,15 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
     );
 }
 
-// ── Kanban Card ───────────────────────────────────────────────────────────────
+// ── Kanban Card (Aceternity-style Spotlight) ──────────────────────────────────
 
 function KanbanCard({ item, onClick }) {
     const stage = stageFor(item.status);
     const preview = (item.edited_content || item.generated_content || '').slice(0, 160);
     return (
-        <motion.div
-            layout
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            onClick={onClick}
-            className="group cursor-pointer rounded-xl border border-border/50 bg-card/80 backdrop-blur-sm p-3.5 overflow-hidden hover:border-primary/40 hover:shadow-md hover:shadow-primary/5 transition-all duration-200 relative"
-            style={{ borderLeftWidth: '3px', borderLeftColor: stage.color }}
-        >
+        <motion.div layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full mb-3 shrink-0">
+            <CardSpotlight color={`${stage.color}30`} radius={280} className="cursor-pointer group shadow-sm hover:shadow-md border-border/30" onClick={onClick}>
+                <div className="p-4 flex flex-col gap-3 relative z-10" style={{ borderLeft: `3px solid ${stage.color}` }}>
             {/* Title */}
             <p className="text-sm font-semibold leading-snug line-clamp-2 group-hover:text-primary transition-colors mb-2 pr-1">
                 {item.title || 'Untitled'}
@@ -404,13 +399,13 @@ function KanbanCard({ item, onClick }) {
 
             {/* Content preview */}
             {preview && (
-                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 mb-3">
+                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 mb-2 font-medium opacity-80">
                     {preview}{preview.length === 160 ? '…' : ''}
                 </p>
             )}
 
             {/* Tags */}
-            <div className="flex flex-wrap gap-1.5 mb-2">
+            <div className="flex flex-wrap gap-1.5 mb-3 mt-auto pt-2">
                 {item.persona && (
                     <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
                         <Users className="w-2.5 h-2.5 shrink-0" />{item.persona}
@@ -429,11 +424,11 @@ function KanbanCard({ item, onClick }) {
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/30">
-                <span>{timeAgo(item.created_at)}</span>
-                <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-3 mt-auto border-t border-border/30">
+                <span className="font-medium">{timeAgo(item.created_at)}</span>
+                <div className="flex items-center gap-2">
                     {item.scheduled_at && (
-                        <span className="flex items-center gap-1 text-blue-500">
+                        <span className="flex items-center gap-1 text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded text-[9px] font-semibold">
                             <Calendar className="w-2.5 h-2.5" />
                             {new Date(item.scheduled_at).toLocaleDateString()}
                         </span>
@@ -442,6 +437,8 @@ function KanbanCard({ item, onClick }) {
                     {item.post_url && <ExternalLink className="w-3 h-3 text-emerald-500" />}
                 </div>
             </div>
+            </div>
+            </CardSpotlight>
         </motion.div>
     );
 }
@@ -566,34 +563,38 @@ export default function ContentEnginePage() {
     const hasFilters = filterPersona || filterIndustry || filterObjective || filterSource || filterStatus;
 
     return (
-        <div className="flex flex-col h-full space-y-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* ── Header ── */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-6 border-b border-border/60">
-                <div>
-                    <div className="flex items-center gap-3 mb-1">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-400">
-                            <Newspaper className="w-5 h-5" />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-                                Content Engine
-                            </h1>
-                            <p className="text-muted-foreground text-sm mt-0.5">AI-powered pipeline: Ideas → Draft → Review → Approved → Scheduled → Posted</p>
-                        </div>
+        <div className="relative flex flex-col h-full min-h-0 overflow-hidden">
+            {/* Aceternity-style Aurora background */}
+            <div className="aurora-bg fixed inset-0 -z-10" />
+            <div className="absolute inset-0 -z-10 bg-gradient-to-b from-background/95 via-background/90 to-background" />
+
+            <div className="flex flex-col h-full min-h-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* ── Header: Lamp-style gradient, refined typography ── */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-6 border-b border-border/30">
+                <div className="flex items-center gap-4">
+                    <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/20 via-purple-500/15 to-violet-500/20 border border-indigo-500/25 shadow-lg shadow-indigo-500/10 overflow-hidden">
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
+                        <Newspaper className="relative w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                    <div>
+                        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+                            Content Engine
+                        </h1>
+                        <p className="text-muted-foreground text-sm mt-0.5">AI pipeline · Ideas → Draft → Review → Approved → Posted</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                     <Button
                         variant="outline"
                         size="sm"
-                        className="gap-1.5 border-border/60 hover:border-primary/30 hover:bg-primary/5"
+                        className="gap-1.5 rounded-xl border-border/50 hover:border-primary/30 hover:bg-primary/5"
                         onClick={() => setActiveTab(t => t === 'board' ? 'analytics' : 'board')}
                     >
                         {activeTab === 'board' ? <><BarChart2 className="w-4 h-4" /> Analytics</> : <><Rss className="w-4 h-4" /> Board</>}
                     </Button>
                     <Button
                         size="sm"
-                        className="gap-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md shadow-indigo-500/25 hover:shadow-indigo-500/30 transition-shadow"
+                        className="gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:via-purple-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-300 border-0"
                         onClick={() => setShowGenerateModal(true)}
                     >
                         <Sparkles className="w-4 h-4" /> Generate Idea
@@ -601,36 +602,40 @@ export default function ContentEnginePage() {
                 </div>
             </div>
 
-            {/* ── Stage pills (quick filter) ── */}
-            <div className="flex gap-2 mb-5 flex-wrap">
+            {/* ── Pipeline filter: horizontal stepper style ── */}
+            <div className="flex items-center gap-0 mb-6 overflow-x-auto pb-1">
                 <button
                     onClick={() => setFilterStatus('')}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${!filterStatus ? 'bg-primary text-primary-foreground shadow-sm ring-1 ring-primary/20' : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                    className={`shrink-0 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 ${!filterStatus ? 'bg-foreground text-background shadow-md' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
                 >
                     All ({items.length})
                 </button>
-                {PIPELINE_STAGES.map(s => {
+                <div className="w-px h-5 bg-border/60 shrink-0 mx-1" />
+                {PIPELINE_STAGES.map((s, idx) => {
                     const count = items.filter(i => i.status === s.key).length;
                     const isActive = filterStatus === s.key;
                     return (
-                        <button
-                            key={s.key}
-                            onClick={() => setFilterStatus(isActive ? '' : s.key)}
-                            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${isActive ? 'text-white shadow-md ring-1 ring-black/10' : 'bg-muted/40 text-muted-foreground border border-border/50 hover:bg-muted hover:border-border'}`}
-                            style={isActive ? { backgroundColor: s.color, borderColor: s.color } : {}}
-                        >
-                            {s.label} {count > 0 && <span className="opacity-90">({count})</span>}
-                        </button>
+                        <React.Fragment key={s.key}>
+                            {idx > 0 && <div className="w-3 h-px bg-border/50 shrink-0" aria-hidden />}
+                            <button
+                                onClick={() => setFilterStatus(isActive ? '' : s.key)}
+                                className={`shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 ${isActive ? 'text-white shadow-md' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
+                                style={isActive ? { backgroundColor: s.color } : {}}
+                            >
+                                <span>{s.label}</span>
+                                {count > 0 && <span className={`tabular-nums ${isActive ? 'opacity-90' : 'text-muted-foreground'}`}>{count}</span>}
+                            </button>
+                        </React.Fragment>
                     );
                 })}
             </div>
 
-            {/* ── Main layout: Left+Board+Right ── */}
-            <div className="flex gap-5 min-h-0 flex-1">
+            {/* ── Main layout: 3-column responsive grid ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_200px] xl:grid-cols-[240px_1fr_220px] gap-4 min-h-0 flex-1 overflow-hidden">
 
-                {/* ── Left panel: Sources ── */}
-                <div className="w-56 shrink-0">
-                    <Card className="border-border/50 bg-card/50 backdrop-blur-sm h-full overflow-hidden">
+                {/* ── Left: Sources ── */}
+                <div className="shrink-0 min-w-0 flex flex-col max-lg:max-h-[200px]">
+                    <Card className="border border-border/40 bg-card/70 backdrop-blur-xl rounded-2xl shadow-sm shadow-black/5 dark:shadow-black/20 h-full overflow-hidden">
                         <CardHeader className="py-4 px-4 border-b border-border/50">
                             <div className="flex items-center justify-between">
                                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -691,53 +696,72 @@ export default function ContentEnginePage() {
                 </div>
 
                 {/* ── Main: Board or Analytics ── */}
-                <div className="flex-1 min-w-0 overflow-x-auto">
-                    <Card className="border-border/50 bg-card/40 backdrop-blur-sm h-full min-h-[280px] overflow-hidden">
-                        <CardContent className="p-4 h-full overflow-x-auto">
+                <div className="min-w-0 flex-1 flex flex-col overflow-hidden h-full">
+                    <div className="h-full overflow-hidden flex flex-col">
+                        <div className="flex-1 overflow-hidden h-full">
                     {loading ? (
-                        <div className="flex gap-4 pr-2">
+                        <div className="flex gap-6 overflow-x-hidden h-full">
                             {PIPELINE_STAGES.map(s => (
-                                <div key={s.key} className="w-[232px] shrink-0 space-y-3">
-                                    <div className="h-10 w-20 bg-muted/50 rounded-lg animate-pulse" />
-                                    <div className="space-y-2.5 min-h-[220px]">
-                                        {[1, 2, 3].map(i => <div key={i} className="h-28 rounded-xl bg-muted/30 animate-pulse" />)}
-                                    </div>
+                                <div key={s.key} className="w-[320px] shrink-0 space-y-4 h-full flex flex-col">
+                                    <div className="h-10 w-32 bg-muted/50 rounded-xl animate-pulse" />
+                                    <div className="flex-1 rounded-2xl bg-muted/20 animate-pulse" />
                                 </div>
                             ))}
                         </div>
                     ) : activeTab === 'analytics' ? (
                         <AnalyticsView analytics={analytics} items={items} />
                     ) : (
-                        /* Kanban Board */
-                        <div className="flex gap-4 pb-6 pr-2" style={{ minWidth: `${PIPELINE_STAGES.length * 240}px` }}>
+                        /* Kanban: Horizontal scrolling board */
+                        <div className="flex h-full gap-6 overflow-x-auto pb-4 px-1 snap-x snap-mandatory">
                             {PIPELINE_STAGES.map(stage => {
                                 const stageItems = itemsByStage(stage.key);
                                 const Icon = stage.icon;
+                                const isIdeaStage = stage.key === 'IDEA';
+                                
                                 return (
-                                    <div key={stage.key} className="w-[232px] shrink-0 flex flex-col">
-                                        {/* Column header */}
-                                        <div className="flex items-center gap-2 mb-3 px-1">
-                                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: stage.bg }}>
+                                    <div 
+                                        key={stage.key} 
+                                        className={`shrink-0 flex flex-col h-full snap-center ${isIdeaStage ? 'w-[360px] sm:w-[400px]' : 'w-[300px]'}`}
+                                    >
+                                        {/* Stage header */}
+                                        <div className="flex items-center gap-3 mb-4 px-2 shrink-0">
+                                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg shadow-sm ring-1 ring-inset ring-white/10" style={{ backgroundColor: stage.bg }}>
                                                 <Icon className="w-4 h-4" style={{ color: stage.color }} />
                                             </div>
-                                            <div>
-                                                <span className="text-xs font-bold uppercase tracking-wide block" style={{ color: stage.color }}>{stage.label}</span>
-                                                <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">{stageItems.length}</span>
+                                            <div className="flex items-baseline gap-2">
+                                                <span className="text-sm font-bold tracking-tight" style={{ color: stage.color }}>{stage.label}</span>
+                                                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-muted/50 text-muted-foreground">{stageItems.length}</span>
                                             </div>
                                         </div>
 
                                         {/* Column content */}
-                                        <div className="flex-1 rounded-xl p-3 space-y-2.5 min-h-[220px] border border-border/40 bg-muted/5" style={{ borderTop: `3px solid ${stage.color}40` }}>
-                                            <AnimatePresence mode="popLayout">
-                                                {stageItems.map(item => (
-                                                    <KanbanCard key={item.id} item={item} onClick={() => setSelectedItem(item)} />
-                                                ))}
-                                            </AnimatePresence>
-                                            {stageItems.length === 0 && (
-                                                <div className="flex flex-col items-center justify-center py-10 text-center rounded-lg border-2 border-dashed border-border/40">
-                                                    <Icon className="w-7 h-7 mb-2 opacity-40" style={{ color: stage.color }} />
-                                                    <p className="text-[11px] text-muted-foreground font-medium">No items</p>
-                                                    <p className="text-[10px] text-muted-foreground/70 mt-0.5">Drag or add here</p>
+                                        <div className="flex-1 rounded-2xl border border-border/40 bg-card/40 backdrop-blur-md overflow-hidden flex flex-col shadow-inner">
+                                            <div className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin hover:scrollbar-thumb-muted-foreground/20">
+                                                <AnimatePresence mode="popLayout">
+                                                    {stageItems.map(item => (
+                                                        <KanbanCard key={item.id} item={item} onClick={() => setSelectedItem(item)} />
+                                                    ))}
+                                                </AnimatePresence>
+                                                
+                                                {stageItems.length === 0 && (
+                                                    <div className="flex flex-col items-center justify-center h-40 text-center opacity-60">
+                                                        <Icon className="w-10 h-10 mb-3 opacity-20" style={{ color: stage.color }} />
+                                                        <p className="text-xs text-muted-foreground font-medium">No {stage.label.toLowerCase()} yet</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            
+                                            {/* Quick action footer per column */}
+                                            {isIdeaStage && (
+                                                <div className="p-3 border-t border-border/30 bg-muted/20 backdrop-blur-sm shrink-0">
+                                                    <Button 
+                                                        variant="ghost" 
+                                                        size="sm" 
+                                                        className="w-full justify-start text-muted-foreground hover:text-primary hover:bg-primary/10 gap-2 h-9"
+                                                        onClick={() => setShowGenerateModal(true)}
+                                                    >
+                                                        <Plus className="w-4 h-4" /> Add Idea
+                                                    </Button>
                                                 </div>
                                             )}
                                         </div>
@@ -746,13 +770,13 @@ export default function ContentEnginePage() {
                             })}
                         </div>
                     )}
-                        </CardContent>
-                    </Card>
+                        </div>
+                    </div>
                 </div>
 
-                {/* ── Right panel: Filters ── */}
-                <div className="w-48 shrink-0">
-                    <Card className="border-border/50 bg-card/50 backdrop-blur-sm h-full overflow-hidden">
+                {/* ── Right: Filters ── */}
+                <div className="shrink-0 min-w-0 flex flex-col max-lg:max-h-[240px]">
+                    <Card className="border border-border/40 bg-card/70 backdrop-blur-xl rounded-2xl shadow-sm shadow-black/5 dark:shadow-black/20 h-full overflow-hidden">
                         <CardHeader className="py-4 px-4 border-b border-border/50">
                             <div className="flex items-center justify-between">
                                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -828,6 +852,7 @@ export default function ContentEnginePage() {
                     />
                 )}
             </AnimatePresence>
+            </div>
         </div>
     );
 }

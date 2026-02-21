@@ -4,6 +4,7 @@ import DashboardPage from './pages/DashboardPage';
 import LeadsTable from './components/LeadsTable';
 import LeadDetailPage from './pages/LeadDetailPage';
 import LeadSearchPage from './pages/LeadSearchPage';
+import LeadImportPage from './pages/LeadImportPage';
 import NetworkPage from './pages/NetworkPage';
 import CampaignsPage from './pages/CampaignsPage';
 import CampaignDetailPage from './pages/CampaignDetailPage';
@@ -16,6 +17,7 @@ function App() {
         <Routes>
             <Route path="/" element={<DashboardLayout />}>
                 <Route index element={<DashboardPage />} />
+                <Route path="lead-import" element={<LeadImportPage />} />
                 <Route path="search" element={<LeadSearchPage />} />
                 <Route path="leads" element={<LeadsTable />} />
                 <Route path="leads/:id" element={<LeadDetailPage />} />

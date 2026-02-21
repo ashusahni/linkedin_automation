@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import axios from 'axios';
-import { LayoutDashboard, Users, Megaphone, Settings, Menu, FileText, Newspaper, Search, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Users, Megaphone, Settings, Menu, FileText, Newspaper, Search, ChevronDown, UserPlus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { ScottishChemicalIcon } from '../ui/ScottishChemicalLogo';
@@ -16,6 +16,7 @@ import { TimeFilterProvider } from '../../context/TimeFilterContext';
 
 const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
+    { id: 'lead-import', label: 'Lead Search', icon: UserPlus, path: '/lead-import' },
     // Temporarily hidden: Contact Search tab (not deleted, just hidden)
     // { id: 'search', label: 'Contact Search', icon: Search, path: '/search' },
     {

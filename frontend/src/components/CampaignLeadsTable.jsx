@@ -7,17 +7,8 @@ import {
     TableHeader,
     TableRow,
 } from "./ui/table";
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
-import { MoreVertical, Mail, Phone, Linkedin, Eye, Clock, CheckCircle2, AlertCircle, XCircle, Loader2 } from 'lucide-react';
+import { Mail, Phone, Clock, CheckCircle2, AlertCircle, XCircle, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { useNavigate } from 'react-router-dom';
 
 // Map campaign_leads.status → user-friendly label + color
 const STATUS_MAP = {
@@ -84,27 +75,12 @@ function ApprovalBadge({ status }) {
     );
 }
 
-function formatNextAction(nextActionDue) {
-    if (!nextActionDue) return '—';
-    const date = new Date(nextActionDue);
-    const now = new Date();
-    const diffMs = date - now;
-    if (diffMs < 0) return 'Due now';
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    if (diffDays > 0) return `In ${diffDays}d`;
-    if (diffHours > 0) return `In ${diffHours}h`;
-    return 'Soon';
-}
-
 export default function CampaignLeadsTable({
     leads = [],
     selectedLeads = [],
     onToggleLead,
     onToggleAll,
 }) {
-    const navigate = useNavigate();
-
     const isSelected = (id) => selectedLeads.includes(id);
     const allSelected = leads.length > 0 && leads.every(l => isSelected(l.id));
     const isIndeterminate = leads.some(l => isSelected(l.id)) && !allSelected;
@@ -128,15 +104,14 @@ export default function CampaignLeadsTable({
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Lead</TableHead>
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sequence Stage</TableHead>
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Current Step</TableHead>
-                        <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Next Action</TableHead>
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approval Status</TableHead>
-                        <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right">Actions</TableHead>
+                        <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Email</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     {leads.length === 0 ? (
                         <TableRow>
-                            <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                            <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                                 <div className="flex flex-col items-center gap-2">
                                     <Clock className="w-8 h-8 opacity-30" />
                                     <p className="text-sm">No leads in this campaign yet.</p>
@@ -177,20 +152,12 @@ export default function CampaignLeadsTable({
                                                     {lead.title ? `${lead.title}` : ''}
                                                     {lead.company ? ` · ${lead.company}` : ''}
                                                 </span>
-                                                {/* Contact info pills */}
-                                                <div className="flex items-center gap-2 mt-0.5">
-                                                    {lead.email && (
-                                                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
-                                                            <Mail className="w-2.5 h-2.5" />
-                                                            <span className="truncate max-w-[90px]">{lead.email}</span>
-                                                        </span>
-                                                    )}
-                                                    {lead.phone && (
-                                                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground/60">
-                                                            <Phone className="w-2.5 h-2.5" />
-                                                        </span>
-                                                    )}
-                                                </div>
+                                                {lead.phone && (
+                                                    <div className="flex items-center gap-1 mt-0.5 text-[10px] text-muted-foreground/60">
+                                                        <Phone className="w-2.5 h-2.5" />
+                                                        <span className="truncate max-w-[90px]">{lead.phone}</span>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </TableCell>
@@ -219,26 +186,6 @@ export default function CampaignLeadsTable({
                                         </div>
                                     </TableCell>
 
-                                    {/* Next Action — derived from next_action_due */}
-                                    <TableCell>
-                                        <div className="flex items-center gap-1.5">
-                                            <Clock className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />
-                                            <span className={cn(
-                                                "text-xs font-medium",
-                                                lead.next_action_due && new Date(lead.next_action_due) <= new Date()
-                                                    ? "text-yellow-400"
-                                                    : "text-muted-foreground"
-                                            )}>
-                                                {formatNextAction(lead.next_action_due)}
-                                            </span>
-                                        </div>
-                                        {lead.next_action_due && (
-                                            <p className="text-[10px] text-muted-foreground/40 mt-0.5">
-                                                {new Date(lead.next_action_due).toLocaleDateString()}
-                                            </p>
-                                        )}
-                                    </TableCell>
-
                                     {/* Approval Status */}
                                     <TableCell>
                                         <ApprovalBadge status={lead.status} />
@@ -247,30 +194,20 @@ export default function CampaignLeadsTable({
                                         )}
                                     </TableCell>
 
-                                    {/* Actions — no manual Auto Connect */}
-                                    <TableCell className="text-right">
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-white/5">
-                                                    <MoreVertical className="h-4 w-4" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="bg-card border-white/10 w-44">
-                                                <DropdownMenuItem
-                                                    onClick={() => navigate(`/leads/${lead.lead_id}`)}
-                                                    className="cursor-pointer"
-                                                >
-                                                    <Eye className="mr-2 h-4 w-4" /> View Lead Profile
-                                                </DropdownMenuItem>
-                                                {lead.linkedin_url && (
-                                                    <DropdownMenuItem asChild>
-                                                        <a href={lead.linkedin_url} target="_blank" rel="noopener noreferrer" className="cursor-pointer">
-                                                            <Linkedin className="mr-2 h-4 w-4 text-[#0077b5]" /> View on LinkedIn
-                                                        </a>
-                                                    </DropdownMenuItem>
-                                                )}
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
+                                    {/* Email */}
+                                    <TableCell>
+                                        {lead.email ? (
+                                            <a
+                                                href={`mailto:${lead.email}`}
+                                                className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline truncate max-w-[160px]"
+                                                title={lead.email}
+                                            >
+                                                <Mail className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
+                                                <span className="truncate">{lead.email}</span>
+                                            </a>
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground/50">—</span>
+                                        )}
                                     </TableCell>
                                 </TableRow>
                             );

@@ -6,7 +6,7 @@ import {
     XCircle, Clock, Edit2, Save, Plus, Trash2, Download,
     MessageSquare, Mail, Link as LinkIcon, ChevronRight, BarChart3, Settings as SettingsIcon,
     AlertCircle, AlertTriangle, Zap, Sparkles, Send, Eye, CheckCheck, Copy, Target, Tag, Flag,
-    Phone, Search, Smartphone, AtSign, RefreshCw, Loader2, Info
+    Phone, Search, Smartphone, RefreshCw, Loader2, Info
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -100,7 +100,6 @@ export default function CampaignDetailPage() {
     const [scrapeJobId, setScrapeJobId] = useState(null);
 
     // Multi-channel Outreach State
-    const [sendingEmail, setSendingEmail] = useState(false);
     const [sendingSMS, setSendingSMS] = useState(false);
     const [showOutreachModal, setShowOutreachModal] = useState(false);
     const [outreachChannel, setOutreachChannel] = useState(null); // 'email' or 'sms'
@@ -434,53 +433,6 @@ export default function CampaignDetailPage() {
     };
 
     // Multi-channel Outreach Handlers
-    const handleEmailOutreach = async () => {
-        // Use selected leads when available, otherwise all leads (same as LinkedIn AI)
-        const candidateLeads = selectedLeads.length > 0
-            ? leads.filter(l => selectedLeads.includes(l.lead_id || l.id))
-            : leads;
-        const leadsWithEmail = candidateLeads.filter(l => l.email);
-        if (leadsWithEmail.length === 0) {
-            addToast('No leads have email addresses. Use "Get Contact Info" to enrich contacts first.', 'error');
-            return;
-        }
-
-        // Confirmation for many leads (same as LinkedIn AI - OpenAI cost)
-        if (leadsWithEmail.length > 10) {
-            const confirmed = confirm(
-                `⚠️ Generate AI messages (Gmail drafts + LinkedIn) for ${leadsWithEmail.length} leads?\n\n` +
-                `This will use OpenAI API credits (approximately $0.001-0.002 per message).\n\n` +
-                `Estimated cost: ~$${(leadsWithEmail.length * 0.003).toFixed(2)}\n\n` +
-                `Continue?`
-            );
-            if (!confirmed) return;
-        }
-
-        const leadIds = leadsWithEmail.map(l => l.lead_id || l.id);
-        try {
-            setSendingEmail(true);
-            addToast(`Generating Gmail drafts + LinkedIn messages for ${leadsWithEmail.length} lead(s)...`, 'info');
-            const res = await axios.post(`/api/campaigns/${id}/generate-gmail-drafts`, { leadIds });
-            setSendingEmail(false);
-            if (res.data.success || res.data.generated > 0 || res.data.linkedinGenerated > 0) {
-                addToast(res.data.message || 'Gmail drafts and LinkedIn messages generated. Review in Approvals tab.', 'success');
-                setActiveTab('approvals');
-                setApprovalSubTab('gmail');
-                await fetchApprovals();
-                fetchCampaignDetails();
-            } else {
-                addToast(res.data.message || 'No new drafts. All leads with email may already have pending drafts.', 'info');
-                setActiveTab('approvals');
-                setApprovalSubTab('gmail');
-                await fetchApprovals();
-            }
-        } catch (err) {
-            setSendingEmail(false);
-            const msg = err.response?.data?.error || err.message || 'Failed to generate Gmail drafts';
-            addToast(msg, 'error');
-        }
-    };
-
     const handleSMSOutreach = async () => {
         const leadsToContact = selectedLeads.length > 0 ? selectedLeads : leads.map(l => l.lead_id || l.id);
 
@@ -1288,19 +1240,6 @@ export default function CampaignDetailPage() {
                                         <DropdownMenuLabel>Contact Actions</DropdownMenuLabel>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem
-                                            onClick={handleEmailOutreach}
-                                            disabled={sendingEmail || leads.length === 0}
-                                            className="gap-2 cursor-pointer"
-                                        >
-                                            <AtSign className={cn("w-4 h-4", sendingEmail && "animate-bounce")} />
-                                            {sendingEmail ? 'Generating...' : (() => {
-                                                const withEmail = selectedLeads.length > 0
-                                                    ? leads.filter(l => selectedLeads.includes(l.lead_id || l.id) && l.email)
-                                                    : leads.filter(l => l.email);
-                                                return withEmail.length > 0 ? `Contact Emails (${withEmail.length})` : 'Contact Emails';
-                                            })()}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem
                                             onClick={handleSMSOutreach}
                                             disabled={sendingSMS || leads.length === 0}
                                             className="gap-2 cursor-pointer"
@@ -1313,22 +1252,6 @@ export default function CampaignDetailPage() {
                                 <div className="h-6 w-px bg-white/10" />
                                 <Button
                                     size="sm"
-                                    onClick={handleEmailOutreach}
-                                    disabled={sendingEmail || leads.filter(l => l.email).length === 0}
-                                    className="gap-2 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 shadow-lg shadow-rose-500/20"
-                                >
-                                    <AtSign className={cn("w-4 h-4", sendingEmail && "animate-spin")} />
-                                    {sendingEmail
-                                        ? 'Processing...'
-                                        : (() => {
-                                            const withEmail = selectedLeads.length > 0
-                                                ? leads.filter(l => selectedLeads.includes(l.lead_id || l.id) && l.email)
-                                                : leads.filter(l => l.email);
-                                            return withEmail.length > 0 ? `Contact Emails (${withEmail.length})` : 'Contact Emails';
-                                        })()}
-                                </Button>
-                                <Button
-                                    size="sm"
                                     onClick={handleBulkEnrichAndGenerate}
                                     disabled={enriching || leads.length === 0}
                                     className="gap-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 shadow-lg shadow-primary/20"
@@ -1338,7 +1261,7 @@ export default function CampaignDetailPage() {
                                         ? 'Processing...'
                                         : selectedLeads.length > 0
                                             ? `LinkedIn AI (${selectedLeads.length})`
-                                            : 'LinkedIn AI Messages'}
+                                            : 'LinkedIn AI (Messages + Emails)'}
                                 </Button>
                                 <Button size="sm" variant="outline" className="gap-2">
                                     <Download className="w-4 h-4" /> Export Report
@@ -1690,7 +1613,7 @@ export default function CampaignDetailPage() {
                                     </h3>
                                     <p className="text-muted-foreground max-w-md mx-auto mb-6">
                                         {approvalSubTab === 'gmail' ? (
-                                            <>Use <strong className="text-primary">Contact Emails</strong> (Leads tab) to generate Gmail drafts + LinkedIn AI messages for leads with email. Both appear in Approvals.</>
+                                            <>Use <strong className="text-primary">LinkedIn AI (Messages + Emails)</strong> on the Leads tab to generate personalized LinkedIn messages and Gmail drafts for leads with email.</>
                                         ) : (
                                             <>Go to <strong className="text-primary">Leads Tab</strong> and click <strong className="text-primary">"Bulk Enrich & Generate AI Messages"</strong></>
                                         )}

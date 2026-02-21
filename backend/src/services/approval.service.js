@@ -4,10 +4,10 @@ import { NotificationService } from './notification.service.js';
 export const ApprovalService = {
     // Add item to review queue
     async addToQueue(campaignId, leadId, stepType, content) {
-        // Check if already exists to prevent duplicates
+        // Check if already exists for this step type (same lead can have LinkedIn + Gmail pending)
         const check = await pool.query(
-            "SELECT * FROM approval_queue WHERE campaign_id = $1 AND lead_id = $2 AND status = 'pending'",
-            [campaignId, leadId]
+            "SELECT * FROM approval_queue WHERE campaign_id = $1 AND lead_id = $2 AND step_type = $3 AND status = 'pending'",
+            [campaignId, leadId, stepType]
         );
 
         if (check.rows.length > 0) return check.rows[0];

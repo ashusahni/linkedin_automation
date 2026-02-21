@@ -1024,7 +1024,7 @@ export async function bulkEnrichAndGenerate(req, res) {
             // Process only selected leads
             console.log(`📋 User selected ${leadIds.length} leads to process`);
             leadsResult = await pool.query(`
-                SELECT l.id, l.first_name, l.last_name, l.linkedin_url, l.title, l.company
+                SELECT l.id, l.first_name, l.last_name, l.full_name, l.linkedin_url, l.title, l.company, l.email
                 FROM campaign_leads cl
                 JOIN leads l ON cl.lead_id = l.id
                 WHERE cl.campaign_id = $1 AND l.id = ANY($2::int[])
@@ -1033,7 +1033,7 @@ export async function bulkEnrichAndGenerate(req, res) {
             // Process all leads in campaign
             console.log(`📋 User selected ALL leads in campaign to process`);
             leadsResult = await pool.query(`
-                SELECT l.id, l.first_name, l.last_name, l.linkedin_url, l.title, l.company
+                SELECT l.id, l.first_name, l.last_name, l.full_name, l.linkedin_url, l.title, l.company, l.email
                 FROM campaign_leads cl
                 JOIN leads l ON cl.lead_id = l.id
                 WHERE cl.campaign_id = $1
@@ -1090,9 +1090,17 @@ export async function bulkEnrichAndGenerate(req, res) {
         const results = {
             enriched: 0,
             generated: 0,
+            emailsGenerated: 0,
             failed: [],
             skipped: [],
             total: leads.length
+        };
+
+        const campaignContext = {
+            goal: campaign.goal,
+            type: campaign.type,
+            description: campaign.description,
+            target_audience: campaign.target_audience
         };
 
         // 3. Process each lead (with delay to avoid rate limiting)
@@ -1110,18 +1118,13 @@ export async function bulkEnrichAndGenerate(req, res) {
                     continue;
                 }
 
-                // Check if already has pending approval
-                const existingApproval = await pool.query(
+                // Check if already has pending LinkedIn approval
+                const existingLinkedIn = await pool.query(
                     `SELECT id FROM approval_queue 
-                     WHERE campaign_id = $1 AND lead_id = $2 AND status = 'pending'`,
+                     WHERE campaign_id = $1 AND lead_id = $2 AND step_type IN ('connection_request', 'message') AND status = 'pending'`,
                     [id, lead.id]
                 );
-
-                if (existingApproval.rows.length > 0) {
-                    console.log(`⏭️  Lead ${lead.id} already has pending approval, skipping`);
-                    results.generated++; // Count as already generated
-                    continue;
-                }
+                const skipLinkedIn = existingLinkedIn.rows.length > 0;
 
                 // Enrich the lead FIRST
                 console.log(`🔍 Enriching lead: ${lead.first_name} ${lead.last_name} (ID: ${lead.id})`);
@@ -1163,20 +1166,17 @@ export async function bulkEnrichAndGenerate(req, res) {
                     }
                 }
 
-                // Generate AI message WITH enrichment data AND campaign context
+                // Generate LinkedIn AI message (if not already pending)
+                if (skipLinkedIn) {
+                    console.log(`⏭️  Lead ${lead.id} already has pending LinkedIn approval, skipping`);
+                }
+                const doGenerateLinkedIn = !skipLinkedIn;
+                if (doGenerateLinkedIn) {
                 console.log(`🤖 Generating AI message for lead ${lead.id} (stepType: ${stepType})`);
                 console.log(`   Using enrichment: ${enrichmentData ? 'Yes' : 'No'}`);
                 console.log(`   Using campaign context: Yes (${campaign.goal || 'N/A'} - ${campaign.type || 'N/A'})`);
                 let personalizedMessage;
                 try {
-                    // Prepare campaign context for AI
-                    const campaignContext = {
-                        goal: campaign.goal,
-                        type: campaign.type,
-                        description: campaign.description,
-                        target_audience: campaign.target_audience
-                    };
-
                     // Pass enrichment data and campaign context directly if available
                     if (enrichmentData) {
                         if (stepType === 'connection_request') {
@@ -1189,7 +1189,8 @@ export async function bulkEnrichAndGenerate(req, res) {
                         personalizedMessage = await AIService.generatePersonalizedMessage(
                             lead.id,
                             '', // No template, let AI generate from scratch
-                            stepType
+                            stepType,
+                            campaignContext
                         );
                     }
                 } catch (aiError) {
@@ -1226,7 +1227,38 @@ export async function bulkEnrichAndGenerate(req, res) {
                 }
 
                 results.generated++;
-                console.log(`   ✅ Complete! Approval Queue ID: ${queueResult.id}`);
+                console.log(`   ✅ LinkedIn message added. Approval Queue ID: ${queueResult.id}`);
+                }
+
+                // Generate Gmail draft for leads with email (if not already pending)
+                const hasEmail = lead.email && String(lead.email).trim().length > 0;
+                if (!hasEmail) {
+                    console.log(`   ⏭️  Lead ${lead.id} has no email, skipping Gmail draft`);
+                } else {
+                    const existingGmail = await pool.query(
+                        `SELECT id FROM approval_queue 
+                         WHERE campaign_id = $1 AND lead_id = $2 AND step_type = 'gmail_outreach' AND status = 'pending'`,
+                        [id, lead.id]
+                    );
+                    if (existingGmail.rows.length > 0) {
+                        console.log(`   ⏭️  Lead ${lead.id} already has pending Gmail draft, skipping`);
+                    } else {
+                        try {
+                            const leadForGmail = {
+                                ...lead,
+                                full_name: lead.full_name || [lead.first_name, lead.last_name].filter(Boolean).join(' ').trim() || 'Unknown',
+                            };
+                            console.log(`   📧 Generating Gmail draft for lead ${lead.id} (${lead.email})...`);
+                            const draft = await AIService.generateGmailDraft(leadForGmail, enrichmentData, { campaign: campaignContext });
+                            const content = JSON.stringify({ subject: draft.subject, body: draft.body });
+                            await ApprovalService.addToQueue(parseInt(id), lead.id, 'gmail_outreach', content);
+                            results.emailsGenerated++;
+                            console.log(`   ✅ Gmail draft added for lead ${lead.id}`);
+                        } catch (gmailErr) {
+                            console.error(`   ❌ Gmail draft failed for lead ${lead.id}:`, gmailErr.message);
+                        }
+                    }
+                }
 
                 // Delay to avoid rate limiting and quota issues (2 seconds between leads)
                 // Don't delay after the last lead
@@ -1287,14 +1319,18 @@ export async function bulkEnrichAndGenerate(req, res) {
         console.log(`✨ ============================================\n`);
 
         // Build summary message
-        let message = `Processed ${results.generated} leads successfully.`;
+        let message = `Generated ${results.generated} LinkedIn message(s)`;
+        if (results.emailsGenerated > 0) {
+            message += ` and ${results.emailsGenerated} email draft(s)`;
+        }
+        message += ' successfully.';
         if (results.failed.length > 0) {
             message += ` ${results.failed.length} failed.`;
         }
         if (results.skipped.length > 0) {
             message += ` ${results.skipped.length} skipped (no LinkedIn URL).`;
         }
-        if (results.generated === 0 && results.failed.length === 0) {
+        if (results.generated === 0 && results.emailsGenerated === 0 && results.failed.length === 0) {
             message = 'No messages were generated. Check if leads have LinkedIn URLs and if OpenAI API key is configured.';
         }
 
