@@ -23,7 +23,7 @@ const navItems = [
         icon: Users,
         path: '/leads',
         children: [
-            { id: 'my-contacts', label: 'My Leads', path: '/leads?connection_degree=1st' },
+            { id: 'my-contacts', label: 'My Contacts', path: '/leads?connection_degree=1st' },
             { id: 'prospects', label: 'Prospects', path: '/leads?connection_degree=2nd' },
         ]
     },
