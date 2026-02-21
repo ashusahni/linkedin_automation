@@ -1312,12 +1312,15 @@ export async function bulkEnrichAndGenerate(req, res) {
 
 /**
  * POST /api/campaigns/:id/generate-gmail-drafts
- * Generate Gmail drafts for all campaign leads that have an email address.
- * Only leads with email are processed; skips leads that already have a pending gmail_outreach approval.
+ * Generate Gmail drafts AND LinkedIn AI messages for campaign leads that have an email address.
+ * Works like bulk-enrich-generate: generates both email drafts and LinkedIn messages for leads with email.
+ * Optional leadIds in body: if provided, only process those leads (that have email).
  */
 export async function generateGmailDrafts(req, res) {
     try {
         const campaignId = parseInt(req.params.id, 10);
+        const { leadIds } = req.body || {};
+
         const campaignRes = await pool.query(
             'SELECT id, goal, type, description, target_audience FROM campaigns WHERE id = $1',
             [campaignId]
@@ -1333,71 +1336,139 @@ export async function generateGmailDrafts(req, res) {
             target_audience: campaign.target_audience
         };
 
-        const leadsWithEmailRes = await pool.query(
-            `SELECT l.id, l.first_name, l.last_name, l.full_name, l.title, l.company, l.email
-             FROM campaign_leads cl
-             JOIN leads l ON cl.lead_id = l.id
-             WHERE cl.campaign_id = $1 AND l.email IS NOT NULL AND TRIM(l.email) != ''`,
-            [campaignId]
-        );
+        let leadsWithEmailRes;
+        if (leadIds && Array.isArray(leadIds) && leadIds.length > 0) {
+            leadsWithEmailRes = await pool.query(
+                `SELECT l.id, l.first_name, l.last_name, l.full_name, l.title, l.company, l.email, l.linkedin_url
+                 FROM campaign_leads cl
+                 JOIN leads l ON cl.lead_id = l.id
+                 WHERE cl.campaign_id = $1 AND l.id = ANY($2::int[]) AND l.email IS NOT NULL AND TRIM(l.email) != ''`,
+                [campaignId, leadIds]
+            );
+        } else {
+            leadsWithEmailRes = await pool.query(
+                `SELECT l.id, l.first_name, l.last_name, l.full_name, l.title, l.company, l.email, l.linkedin_url
+                 FROM campaign_leads cl
+                 JOIN leads l ON cl.lead_id = l.id
+                 WHERE cl.campaign_id = $1 AND l.email IS NOT NULL AND TRIM(l.email) != ''`,
+                [campaignId]
+            );
+        }
         const leadsWithEmail = leadsWithEmailRes.rows;
         if (leadsWithEmail.length === 0) {
             return res.json({
                 success: false,
-                message: 'No leads in this campaign have an email address. Enrich contact info first.',
+                message: 'No leads in this campaign have an email address. Use "Get Contact Info" to enrich contacts first.',
                 generated: 0,
                 skipped: 0,
+                linkedinGenerated: 0,
                 totalWithEmail: 0
             });
         }
 
+        // Get campaign's first sequence step for LinkedIn message type
+        const sequenceResult = await pool.query(
+            `SELECT type FROM sequences WHERE campaign_id = $1 ORDER BY step_order ASC LIMIT 1`,
+            [campaignId]
+        );
+        const linkedinStepType = (sequenceResult.rows[0]?.type === 'connection_request') ? 'connection_request' : 'message';
+
         const { default: AIService } = await import('../services/ai.service.js');
         const { ApprovalService } = await import('../services/approval.service.js');
 
-        let generated = 0;
-        let skipped = 0;
+        let gmailGenerated = 0;
+        let gmailSkipped = 0;
+        let linkedinGenerated = 0;
 
         for (const lead of leadsWithEmail) {
-            const existing = await pool.query(
+            const enrichmentRes = await pool.query('SELECT * FROM lead_enrichment WHERE lead_id = $1', [lead.id]);
+            let enrichment = enrichmentRes.rows[0] || null;
+            const enrichmentData = enrichment ? {
+                bio: enrichment.bio,
+                interests: enrichment.interests,
+                recent_posts: enrichment.recent_posts
+            } : null;
+
+            // 1. Generate Gmail draft (if not already pending)
+            const existingGmail = await pool.query(
                 `SELECT id FROM approval_queue 
                  WHERE campaign_id = $1 AND lead_id = $2 AND step_type = 'gmail_outreach' AND status = 'pending'`,
                 [campaignId, lead.id]
             );
-            if (existing.rows.length > 0) {
-                skipped++;
-                continue;
+            if (existingGmail.rows.length === 0) {
+                let draft;
+                try {
+                    draft = await AIService.generateGmailDraft(lead, enrichment, { campaign: campaignContext });
+                } catch (err) {
+                    console.error(`Gmail draft failed for lead ${lead.id}:`, err.message);
+                    draft = {
+                        subject: `Quick thought for ${lead.first_name}`,
+                        body: `Hi ${lead.first_name},\n\nI came across your profile and would like to connect.\n\nBest regards`
+                    };
+                }
+                const content = JSON.stringify({ subject: draft.subject, body: draft.body });
+                await ApprovalService.addToQueue(campaignId, lead.id, 'gmail_outreach', content);
+                gmailGenerated++;
+                await new Promise(r => setTimeout(r, 800));
+            } else {
+                gmailSkipped++;
             }
 
-            const enrichmentRes = await pool.query('SELECT * FROM lead_enrichment WHERE lead_id = $1', [lead.id]);
-            const enrichment = enrichmentRes.rows[0] || null;
-
-            let draft;
-            try {
-                draft = await AIService.generateGmailDraft(lead, enrichment, { campaign: campaignContext });
-            } catch (err) {
-                console.error(`Gmail draft failed for lead ${lead.id}:`, err.message);
-                draft = {
-                    subject: `Quick thought for ${lead.first_name}`,
-                    body: `Hi ${lead.first_name},\n\nI came across your profile and would like to connect.\n\nBest regards`
-                };
-            }
-            const content = JSON.stringify({ subject: draft.subject, body: draft.body });
-            await ApprovalService.addToQueue(campaignId, lead.id, 'gmail_outreach', content);
-            generated++;
-            if (generated < leadsWithEmail.length) {
-                await new Promise(r => setTimeout(r, 1500));
+            // 2. Generate LinkedIn AI message (if not already pending) - same as bulk-enrich-generate
+            const existingLinkedIn = await pool.query(
+                `SELECT id FROM approval_queue 
+                 WHERE campaign_id = $1 AND lead_id = $2 AND step_type IN ('connection_request', 'message') AND status = 'pending'`,
+                [campaignId, lead.id]
+            );
+            if (existingLinkedIn.rows.length === 0 && lead.linkedin_url) {
+                try {
+                    let personalizedMessage;
+                    if (enrichmentData) {
+                        if (linkedinStepType === 'connection_request') {
+                            personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, { campaign: campaignContext });
+                        } else {
+                            personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], { campaign: campaignContext });
+                        }
+                    } else {
+                        personalizedMessage = await AIService.generatePersonalizedMessage(
+                            lead.id,
+                            '',
+                            linkedinStepType,
+                            campaignContext
+                        );
+                    }
+                    if (!personalizedMessage || personalizedMessage.trim().length === 0) {
+                        personalizedMessage = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+                    }
+                    await ApprovalService.addToQueue(campaignId, lead.id, linkedinStepType, personalizedMessage);
+                    linkedinGenerated++;
+                    await new Promise(r => setTimeout(r, 800));
+                } catch (err) {
+                    console.error(`LinkedIn message generation failed for lead ${lead.id}:`, err.message);
+                }
             }
         }
 
+        const totalNew = gmailGenerated + linkedinGenerated;
+        let message = '';
+        if (gmailGenerated > 0 || linkedinGenerated > 0) {
+            const parts = [];
+            if (gmailGenerated > 0) parts.push(`${gmailGenerated} Gmail draft(s)`);
+            if (linkedinGenerated > 0) parts.push(`${linkedinGenerated} LinkedIn message(s)`);
+            message = `Generated ${parts.join(' and ')} for leads with email.`;
+            if (gmailSkipped > 0) message += ` ${gmailSkipped} already had pending draft(s).`;
+        } else {
+            message = gmailSkipped === leadsWithEmail.length
+                ? 'All leads with email already have pending drafts and LinkedIn messages.'
+                : 'No new drafts or messages generated.';
+        }
+
         return res.json({
-            success: generated > 0,
-            message: generated > 0
-                ? `Generated ${generated} Gmail draft(s) for leads with email.${skipped > 0 ? ` ${skipped} already had a pending draft.` : ''}`
-                : skipped === leadsWithEmail.length
-                    ? 'All leads with email already have a pending Gmail draft.'
-                    : 'No new drafts generated.',
-            generated,
-            skipped,
+            success: totalNew > 0,
+            message,
+            generated: gmailGenerated,
+            skipped: gmailSkipped,
+            linkedinGenerated,
             totalWithEmail: leadsWithEmail.length
         });
     } catch (err) {
