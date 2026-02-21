@@ -29,6 +29,7 @@ const navItems = [
         ]
     },
     { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns' },
+    { id: 'content', label: 'Content Engine', icon: Newspaper, path: '/content' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
 ];
 

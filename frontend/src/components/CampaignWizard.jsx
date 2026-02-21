@@ -393,12 +393,7 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                             <span className="text-muted-foreground">Goal:</span>
                                             <span className="font-medium">{CAMPAIGN_GOALS.find(g => g.value === campaignData.goal)?.label}</span>
                                         </div>
-                                        {campaignData.daily_cap && (
-                                            <div className="flex justify-between text-sm">
-                                                <span className="text-muted-foreground">Daily Cap:</span>
-                                                <span className="font-medium">{campaignData.daily_cap}</span>
-                                            </div>
-                                        )}
+
                                     </CardContent>
                                 </Card>
                             </div>
@@ -425,24 +420,27 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    <div className="grid md:grid-cols-2 gap-4">
-                                        <div className="space-y-2">
-                                            <label className="text-xs font-medium text-muted-foreground">Daily Cap</label>
-                                            <Input
-                                                type="number"
-                                                min="0"
-                                                placeholder="0 = unlimited"
-                                                value={campaignData.daily_cap}
-                                                onChange={(e) => updateField('daily_cap', e.target.value)}
-                                            />
-                                        </div>
+                                    <div className="grid md:grid-cols-1 gap-4">
                                         <div className="space-y-2">
                                             <label className="text-xs font-medium text-muted-foreground">Timezone</label>
-                                            <Input
-                                                placeholder="UTC"
+                                            <select
+                                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                                 value={campaignData.timezone}
                                                 onChange={(e) => updateField('timezone', e.target.value)}
-                                            />
+                                            >
+                                                <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                                                <option value="America/Denver">Mountain Time (MT)</option>
+                                                <option value="America/Chicago">Central Time (CT)</option>
+                                                <option value="America/New_York">Eastern Time (ET)</option>
+                                                <option value="UTC">Coordinated Universal Time (UTC)</option>
+                                                <option value="Europe/London">Greenwich Mean Time (GMT)</option>
+                                                <option value="Europe/Paris">Central European Time (CET)</option>
+                                                <option value="Asia/Dubai">Gulf Standard Time (GST)</option>
+                                                <option value="Asia/Kolkata">India Standard Time (IST)</option>
+                                                <option value="Asia/Singapore">Singapore Standard Time (SGT)</option>
+                                                <option value="Asia/Tokyo">Japan Standard Time (JST)</option>
+                                                <option value="Australia/Sydney">Australian Eastern Time (AET)</option>
+                                            </select>
                                         </div>
                                     </div>
                                 </CardContent>

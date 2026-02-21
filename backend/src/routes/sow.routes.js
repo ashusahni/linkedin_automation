@@ -2,10 +2,201 @@ import express from 'express';
 import { ContentService } from '../services/content.service.js';
 import { ConnectionService } from '../services/connection.service.js';
 import { ApprovalService } from '../services/approval.service.js';
+import {
+    ContentSourceService,
+    CtaTemplateService,
+    ContentItemService,
+    ContentPhantomService,
+    ContentAnalyticsService
+} from '../services/content-engine.service.js';
 
 const router = express.Router();
 
-// --- CONTENT ENGINE ---
+// ════════════════════════════════════════════════════════
+// CONTENT ENGINE V2 — Campaign Publishing Flow
+// ════════════════════════════════════════════════════════
+
+// ── Content Sources ────────────────────────────────────
+router.get('/engine/sources', async (req, res) => {
+    try {
+        res.json(await ContentSourceService.getAll());
+    } catch (e) {
+        console.error('ContentEngine error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.post('/engine/sources', async (req, res) => {
+    try {
+        res.json(await ContentSourceService.create(req.body));
+    } catch (e) {
+        console.error('ContentEngine error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.put('/engine/sources/:id', async (req, res) => {
+    try {
+        res.json(await ContentSourceService.update(req.params.id, req.body));
+    } catch (e) {
+        console.error('ContentEngine error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.delete('/engine/sources/:id', async (req, res) => {
+    try {
+        res.json(await ContentSourceService.delete(req.params.id));
+    } catch (e) {
+        console.error('ContentEngine error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── CTA Templates ──────────────────────────────────────
+router.get('/engine/cta-templates', async (req, res) => {
+    try {
+        res.json(await CtaTemplateService.getAll());
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.post('/engine/cta-templates', async (req, res) => {
+    try {
+        res.json(await CtaTemplateService.create(req.body));
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Content Items ──────────────────────────────────────
+router.get('/engine/items', async (req, res) => {
+    try {
+        const filters = {
+            status: req.query.status,
+            persona: req.query.persona,
+            industry: req.query.industry,
+            objective: req.query.objective,
+            source_id: req.query.source_id,
+        };
+        res.json(await ContentItemService.getAll(filters));
+    } catch (e) {
+        console.error('ContentEngine error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.get('/engine/items/:id', async (req, res) => {
+    try {
+        const item = await ContentItemService.getById(req.params.id);
+        if (!item) return res.status(404).json({ error: 'Not found' });
+        res.json(item);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// AI Generate: create a new IDEA with AI content
+router.post('/engine/items/generate', async (req, res) => {
+    try {
+        const idea = await ContentItemService.generateIdea(req.body);
+        res.json(idea);
+    } catch (e) {
+        console.error('ContentEngine generate error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Manual create: skip AI, create IDEA directly
+router.post('/engine/items', async (req, res) => {
+    try {
+        const item = await ContentItemService.createManual(req.body);
+        res.json(item);
+    } catch (e) {
+        console.error('ContentEngine create error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Update content (edit text only, no status change)
+router.put('/engine/items/:id/content', async (req, res) => {
+    try {
+        const item = await ContentItemService.updateContent(req.params.id, req.body.edited_content);
+        res.json(item);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// State transition (strict validation)
+router.put('/engine/items/:id/transition', async (req, res) => {
+    try {
+        const { to_status, scheduled_at, note } = req.body;
+        if (!to_status) return res.status(400).json({ error: 'to_status is required' });
+        const item = await ContentItemService.transition(req.params.id, to_status.toUpperCase(), { scheduled_at, note });
+        res.json(item);
+    } catch (e) {
+        console.error('ContentEngine transition error:', e);
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// History log for an item
+router.get('/engine/items/:id/history', async (req, res) => {
+    try {
+        res.json(await ContentItemService.getHistory(req.params.id));
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.delete('/engine/items/:id', async (req, res) => {
+    try {
+        await ContentItemService.delete(req.params.id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Phantom / Publishing ───────────────────────────────
+// Send a single item NOW (must be APPROVED or SCHEDULED)
+router.post('/engine/items/:id/send', async (req, res) => {
+    try {
+        const result = await ContentPhantomService.sendNow(req.params.id);
+        res.json(result);
+    } catch (e) {
+        console.error('ContentEngine send error:', e);
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// Process all due SCHEDULED items (called by cron / manually)
+router.post('/engine/process-scheduled', async (req, res) => {
+    try {
+        const result = await ContentPhantomService.processScheduledItems();
+        res.json(result);
+    } catch (e) {
+        console.error('ContentEngine scheduler error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Analytics ─────────────────────────────────────────
+router.get('/engine/analytics', async (req, res) => {
+    try {
+        res.json(await ContentAnalyticsService.getDashboard());
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ════════════════════════════════════════════════════════
+// LEGACY CONTENT ENGINE (Keep for backward compatibility)
+// ════════════════════════════════════════════════════════
+
+// --- LEGACY CONTENT ENGINE ---
 router.get('/content/feeds', async (req, res) => {
     try {
         const feeds = await ContentService.getFeeds();
@@ -326,19 +517,19 @@ router.get('/approvals/:id/status', async (req, res) => {
     try {
         const pool = (await import('../db.js')).default;
         const approvalId = parseInt(req.params.id);
-        
+
         // Get approval details
         const approvalResult = await pool.query(
             'SELECT * FROM approval_queue WHERE id = $1',
             [approvalId]
         );
-        
+
         if (approvalResult.rows.length === 0) {
             return res.status(404).json({ error: 'Approval not found' });
         }
-        
+
         const approval = approvalResult.rows[0];
-        
+
         // Get campaign_lead status and container ID
         const leadResult = await pool.query(
             `SELECT status, last_container_id, last_message_sent_at 
@@ -346,15 +537,15 @@ router.get('/approvals/:id/status', async (req, res) => {
              WHERE campaign_id = $1 AND lead_id = $2`,
             [approval.campaign_id, approval.lead_id]
         );
-        
+
         // Get lead name for better status display
         const leadNameResult = await pool.query(
             'SELECT first_name, last_name FROM leads WHERE id = $1',
             [approval.lead_id]
         );
-        const leadName = leadNameResult.rows[0] ? 
+        const leadName = leadNameResult.rows[0] ?
             `${leadNameResult.rows[0].first_name} ${leadNameResult.rows[0].last_name}`.trim() : null;
-        
+
         // Get automation logs for this lead
         const logsResult = await pool.query(
             `SELECT action, status, details, created_at 
@@ -365,34 +556,34 @@ router.get('/approvals/:id/status', async (req, res) => {
              LIMIT 10`,
             [approval.campaign_id, approval.lead_id]
         );
-        
+
         const leadStatus = leadResult.rows[0] || {};
         const logs = logsResult.rows || [];
-        
+
         // Determine sending status
         let sendingStatus = 'pending';
         let containerId = null;
         let sentAt = null;
         let errorMessage = null;
-        
+
         if (approval.status === 'approved') {
             // Check logs for failures first
-            const failedLog = logs.find(log => 
-                (log.action === 'send_message' || log.action === 'send_connection_request') && 
+            const failedLog = logs.find(log =>
+                (log.action === 'send_message' || log.action === 'send_connection_request') &&
                 log.status === 'failed'
             );
-            
+
             if (failedLog) {
                 sendingStatus = 'failed';
                 const details = typeof failedLog.details === 'string' ? JSON.parse(failedLog.details) : failedLog.details;
                 errorMessage = details?.error || 'Failed to send message';
             } else {
                 // Check logs for actual sending
-                const sentLog = logs.find(log => 
-                    (log.action === 'send_message' || log.action === 'send_connection_request') && 
+                const sentLog = logs.find(log =>
+                    (log.action === 'send_message' || log.action === 'send_connection_request') &&
                     log.status === 'sent'
                 );
-                
+
                 if (sentLog) {
                     sendingStatus = 'sent';
                     const details = typeof sentLog.details === 'string' ? JSON.parse(sentLog.details) : sentLog.details;
@@ -408,7 +599,7 @@ router.get('/approvals/:id/status', async (req, res) => {
         } else if (approval.status === 'rejected') {
             sendingStatus = 'rejected';
         }
-        
+
         res.json({
             approval_status: approval.status,
             sending_status: sendingStatus,
@@ -424,9 +615,9 @@ router.get('/approvals/:id/status', async (req, res) => {
                 details: typeof log.details === 'string' ? JSON.parse(log.details) : log.details
             }))
         });
-    } catch (e) { 
+    } catch (e) {
         console.error('Error fetching approval status:', e);
-        res.status(500).json({ error: e.message }); 
+        res.status(500).json({ error: e.message });
     }
 });
 
@@ -435,7 +626,7 @@ router.get('/campaigns/:campaignId/activity', async (req, res) => {
     try {
         const pool = (await import('../db.js')).default;
         const campaignId = parseInt(req.params.campaignId);
-        
+
         // Get recent automation logs for this campaign
         const logsResult = await pool.query(
             `SELECT 
@@ -457,7 +648,7 @@ router.get('/campaigns/:campaignId/activity', async (req, res) => {
              LIMIT 50`,
             [campaignId]
         );
-        
+
         const activities = logsResult.rows.map(log => {
             const details = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
             return {
@@ -472,11 +663,11 @@ router.get('/campaigns/:campaignId/activity', async (req, res) => {
                 timestamp: log.created_at
             };
         });
-        
+
         res.json({ activities });
-    } catch (e) { 
+    } catch (e) {
         console.error('Error fetching activity:', e);
-        res.status(500).json({ error: e.message }); 
+        res.status(500).json({ error: e.message });
     }
 });
 
