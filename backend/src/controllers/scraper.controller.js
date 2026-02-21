@@ -95,11 +95,12 @@ export async function getRecentJobs(req, res) {
  * Manually trigger contact scraping for selected leads or all approved leads missing info
  */
 export async function startScraping(req, res) {
+    return res.status(403).json({ success: false, error: 'Contact scraping is currently disabled' });
     try {
         const { leadIds } = req.body;
-        
+
         let targetLeadIds = leadIds;
-        
+
         if (!targetLeadIds || !Array.isArray(targetLeadIds) || targetLeadIds.length === 0) {
             const result = await pool.query(`
                 SELECT id FROM leads 
@@ -109,7 +110,7 @@ export async function startScraping(req, res) {
             `);
             targetLeadIds = result.rows.map(r => r.id);
         }
-        
+
         if (targetLeadIds.length === 0) {
             return res.json({
                 success: true,
@@ -117,7 +118,7 @@ export async function startScraping(req, res) {
                 count: 0
             });
         }
-        
+
         const sessionCookie = process.env.LINKEDIN_SESSION_COOKIE;
         if (!sessionCookie) {
             return res.status(400).json({
@@ -125,7 +126,7 @@ export async function startScraping(req, res) {
                 error: 'LinkedIn session cookie (LINKEDIN_SESSION_COOKIE) is not configured'
             });
         }
-        
+
         // Force re-initialization if needed or just use existing
         try {
             await contactScraperService.initialize(sessionCookie);
@@ -133,7 +134,7 @@ export async function startScraping(req, res) {
             // LinkedIn is blocking Puppeteer automation - provide helpful error message
             if (initError.message.includes('ERR_TOO_MANY_REDIRECTS') || initError.message.includes('navigation failed')) {
                 console.error('❌ LinkedIn is blocking automated browser access');
-                return res.status(500).json({ 
+                return res.status(500).json({
                     error: 'LinkedIn bot detection is blocking contact scraping',
                     details: initError.message,
                     suggestions: [
@@ -146,9 +147,9 @@ export async function startScraping(req, res) {
             }
             throw initError; // Re-throw other errors
         }
-        
+
         const result = await contactScraperService.scrapeApprovedLeads(targetLeadIds);
-        
+
         res.json({
             success: true,
             message: `Contact scraping started for ${targetLeadIds.length} leads`,
@@ -169,21 +170,21 @@ export async function stopScraping(req, res) {
     try {
         const activeJobs = contactScraperService.activeJobs;
         let count = 0;
-        
+
         for (const [jobId, job] of activeJobs.entries()) {
             if (job.status === 'running') {
                 contactScraperService.cancelJob(jobId);
                 count++;
             }
         }
-        
+
         // Also update any 'running' jobs in DB to 'cancelled' just in case
         await pool.query(`
             UPDATE scraping_jobs 
             SET status = 'cancelled', completed_at = CURRENT_TIMESTAMP 
             WHERE status = 'running'
         `);
-        
+
         res.json({
             success: true,
             message: `Stopped ${count} active scraping jobs`,

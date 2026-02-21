@@ -16,16 +16,14 @@ import { TimeFilterProvider } from '../../context/TimeFilterContext';
 
 const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
-    { id: 'lead-import', label: 'Lead Search', icon: UserPlus, path: '/lead-import' },
-    // Temporarily hidden: Contact Search tab (not deleted, just hidden)
-    // { id: 'search', label: 'Contact Search', icon: Search, path: '/search' },
+    { id: 'search', label: 'Lead Search', icon: Search, path: '/search' },
     {
         id: 'leads',
-        label: 'Contacts',
+        label: 'Leads',
         icon: Users,
         path: '/leads',
         children: [
-            { id: 'my-contacts', label: 'My Contacts', path: '/leads?connection_degree=1st' },
+            { id: 'my-contacts', label: 'My Leads', path: '/leads?connection_degree=1st' },
             { id: 'prospects', label: 'Prospects', path: '/leads?connection_degree=2nd' },
         ]
     },

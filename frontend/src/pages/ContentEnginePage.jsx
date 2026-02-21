@@ -389,55 +389,58 @@ function KanbanCard({ item, onClick }) {
     const stage = stageFor(item.status);
     const preview = (item.edited_content || item.generated_content || '').slice(0, 160);
     return (
-        <motion.div layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full mb-3 shrink-0">
-            <CardSpotlight color={`${stage.color}30`} radius={280} className="cursor-pointer group shadow-sm hover:shadow-md border-border/30" onClick={onClick}>
-                <div className="p-4 flex flex-col gap-3 relative z-10" style={{ borderLeft: `3px solid ${stage.color}` }}>
-            {/* Title */}
-            <p className="text-sm font-semibold leading-snug line-clamp-2 group-hover:text-primary transition-colors mb-2 pr-1">
-                {item.title || 'Untitled'}
-            </p>
+        <motion.div layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full shrink-0">
+            <CardSpotlight color={`${stage.color}25`} radius={280} className="cursor-pointer group shadow-sm hover:shadow-md border border-border/20 rounded-xl overflow-hidden" onClick={onClick}>
+                <div className="p-3 flex flex-col gap-2 relative z-10 bg-background/80 hover:bg-background/95 transition-colors h-full" style={{ borderLeft: `3px solid ${stage.color}` }}>
+                    {/* Title */}
+                    <p className="text-[13px] font-semibold leading-tight line-clamp-1 group-hover:text-primary transition-colors pr-1">
+                        {item.title || 'Untitled Ideas'}
+                    </p>
 
-            {/* Content preview */}
-            {preview && (
-                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 mb-2 font-medium opacity-80">
-                    {preview}{preview.length === 160 ? '…' : ''}
-                </p>
-            )}
-
-            {/* Tags */}
-            <div className="flex flex-wrap gap-1.5 mb-3 mt-auto pt-2">
-                {item.persona && (
-                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-                        <Users className="w-2.5 h-2.5 shrink-0" />{item.persona}
-                    </span>
-                )}
-                {item.industry && (
-                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                        <Globe className="w-2.5 h-2.5 shrink-0" />{item.industry}
-                    </span>
-                )}
-                {item.cta_name && (
-                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                        <Tag className="w-2.5 h-2.5 shrink-0" />{item.cta_name}
-                    </span>
-                )}
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-3 mt-auto border-t border-border/30">
-                <span className="font-medium">{timeAgo(item.created_at)}</span>
-                <div className="flex items-center gap-2">
-                    {item.scheduled_at && (
-                        <span className="flex items-center gap-1 text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded text-[9px] font-semibold">
-                            <Calendar className="w-2.5 h-2.5" />
-                            {new Date(item.scheduled_at).toLocaleDateString()}
-                        </span>
+                    {/* Content preview */}
+                    {preview && (
+                        <p className="text-[12px] text-muted-foreground leading-snug line-clamp-2 font-medium opacity-85">
+                            {preview}{preview.length === 160 ? '…' : ''}
+                        </p>
                     )}
-                    {item.error_message && <AlertCircle className="w-3 h-3 text-red-500" />}
-                    {item.post_url && <ExternalLink className="w-3 h-3 text-emerald-500" />}
+
+                    {/* Tags (Compact Metadata) */}
+                    <div className="flex flex-wrap gap-1 mt-1">
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-[2px] rounded uppercase bg-gradient-to-r from-purple-500/10 to-indigo-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                            <Sparkles className="w-2 h-2 shrink-0" />AI
+                        </span>
+                        {item.persona && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                                <Users className="w-2.5 h-2.5 shrink-0" />{item.persona}
+                            </span>
+                        )}
+                        {item.objective && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                                <Target className="w-2.5 h-2.5 shrink-0" />{item.objective.replace('_', ' ')}
+                            </span>
+                        )}
+                        {item.industry && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                <Globe className="w-2.5 h-2.5 shrink-0" />{item.industry}
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-2 mt-auto border-t border-border/30">
+                        <span className="font-medium">{timeAgo(item.created_at)}</span>
+                        <div className="flex items-center gap-2">
+                            {item.scheduled_at && (
+                                <span className="flex items-center gap-1 text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded text-[9px] font-semibold">
+                                    <Calendar className="w-2.5 h-2.5" />
+                                    {new Date(item.scheduled_at).toLocaleDateString()}
+                                </span>
+                            )}
+                            {item.error_message && <AlertCircle className="w-3 h-3 text-red-500" />}
+                            {item.post_url && <ExternalLink className="w-3 h-3 text-emerald-500" />}
+                        </div>
+                    </div>
                 </div>
-            </div>
-            </div>
             </CardSpotlight>
         </motion.div>
     );
@@ -497,6 +500,7 @@ export default function ContentEnginePage() {
     // UI state
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('board'); // board | analytics
+    const [showFilters, setShowFilters] = useState(false);
     const [showGenerateModal, setShowGenerateModal] = useState(false);
     const [showAddSourceModal, setShowAddSourceModal] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
@@ -569,289 +573,313 @@ export default function ContentEnginePage() {
             <div className="absolute inset-0 -z-10 bg-gradient-to-b from-background/95 via-background/90 to-background" />
 
             <div className="flex flex-col h-full min-h-0 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* ── Header: Lamp-style gradient, refined typography ── */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-6 border-b border-border/30">
-                <div className="flex items-center gap-4">
-                    <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/20 via-purple-500/15 to-violet-500/20 border border-indigo-500/25 shadow-lg shadow-indigo-500/10 overflow-hidden">
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
-                        <Newspaper className="relative w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                {/* ── Header: Lamp-style gradient, refined typography ── */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-6 border-b border-border/30">
+                    <div className="flex items-center gap-4">
+                        <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/20 via-purple-500/15 to-violet-500/20 border border-indigo-500/25 shadow-lg shadow-indigo-500/10 overflow-hidden">
+                            <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent" />
+                            <Newspaper className="relative w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+                        </div>
+                        <div>
+                            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
+                                Content Engine
+                            </h1>
+                            <p className="text-muted-foreground text-sm mt-0.5">Create → Refine → Approve → Schedule → Publish</p>
+                        </div>
                     </div>
-                    <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-                            Content Engine
-                        </h1>
-                        <p className="text-muted-foreground text-sm mt-0.5">AI pipeline · Ideas → Draft → Review → Approved → Posted</p>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className={`gap-1.5 rounded-xl border ${showFilters ? 'bg-primary/10 text-primary border-primary/30' : 'border-transparent text-muted-foreground hover:bg-muted/50'}`}
+                            onClick={() => setShowFilters(!showFilters)}
+                        >
+                            <Filter className="w-4 h-4" /> Filters
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5 rounded-xl border-border/50 hover:border-primary/30 hover:bg-primary/5"
+                            onClick={() => setActiveTab(t => t === 'board' ? 'analytics' : 'board')}
+                        >
+                            {activeTab === 'board' ? <><BarChart2 className="w-4 h-4" /> Analytics</> : <><Rss className="w-4 h-4" /> Board</>}
+                        </Button>
+                        <Button
+                            size="sm"
+                            className="gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:via-purple-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-300 border-0"
+                            onClick={() => setShowGenerateModal(true)}
+                        >
+                            <Sparkles className="w-4 h-4" /> Generate Idea
+                        </Button>
                     </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5 rounded-xl border-border/50 hover:border-primary/30 hover:bg-primary/5"
-                        onClick={() => setActiveTab(t => t === 'board' ? 'analytics' : 'board')}
+
+                {/* ── Pipeline filter: horizontal stepper style ── */}
+                <div className="flex items-center gap-0 mb-6 overflow-x-auto pb-1">
+                    <button
+                        onClick={() => setFilterStatus('')}
+                        className={`shrink-0 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 ${!filterStatus ? 'bg-foreground text-background shadow-md' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
                     >
-                        {activeTab === 'board' ? <><BarChart2 className="w-4 h-4" /> Analytics</> : <><Rss className="w-4 h-4" /> Board</>}
-                    </Button>
-                    <Button
-                        size="sm"
-                        className="gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-violet-600 hover:from-indigo-500 hover:via-purple-500 hover:to-violet-500 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 transition-all duration-300 border-0"
-                        onClick={() => setShowGenerateModal(true)}
-                    >
-                        <Sparkles className="w-4 h-4" /> Generate Idea
-                    </Button>
-                </div>
-            </div>
-
-            {/* ── Pipeline filter: horizontal stepper style ── */}
-            <div className="flex items-center gap-0 mb-6 overflow-x-auto pb-1">
-                <button
-                    onClick={() => setFilterStatus('')}
-                    className={`shrink-0 px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 ${!filterStatus ? 'bg-foreground text-background shadow-md' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
-                >
-                    All ({items.length})
-                </button>
-                <div className="w-px h-5 bg-border/60 shrink-0 mx-1" />
-                {PIPELINE_STAGES.map((s, idx) => {
-                    const count = items.filter(i => i.status === s.key).length;
-                    const isActive = filterStatus === s.key;
-                    return (
-                        <React.Fragment key={s.key}>
-                            {idx > 0 && <div className="w-3 h-px bg-border/50 shrink-0" aria-hidden />}
-                            <button
-                                onClick={() => setFilterStatus(isActive ? '' : s.key)}
-                                className={`shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 ${isActive ? 'text-white shadow-md' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
-                                style={isActive ? { backgroundColor: s.color } : {}}
-                            >
-                                <span>{s.label}</span>
-                                {count > 0 && <span className={`tabular-nums ${isActive ? 'opacity-90' : 'text-muted-foreground'}`}>{count}</span>}
-                            </button>
-                        </React.Fragment>
-                    );
-                })}
-            </div>
-
-            {/* ── Main layout: 3-column responsive grid ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_200px] xl:grid-cols-[240px_1fr_220px] gap-4 min-h-0 flex-1 overflow-hidden">
-
-                {/* ── Left: Sources ── */}
-                <div className="shrink-0 min-w-0 flex flex-col max-lg:max-h-[200px]">
-                    <Card className="border border-border/40 bg-card/70 backdrop-blur-xl rounded-2xl shadow-sm shadow-black/5 dark:shadow-black/20 h-full overflow-hidden">
-                        <CardHeader className="py-4 px-4 border-b border-border/50">
-                            <div className="flex items-center justify-between">
-                                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                    <Rss className="w-4 h-4 text-orange-500" />
-                                    Content Sources
-                                </CardTitle>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-primary/10"
-                                    onClick={() => setShowAddSourceModal(true)}
+                        All ({items.length})
+                    </button>
+                    <div className="w-px h-5 bg-border/60 shrink-0 mx-1" />
+                    {PIPELINE_STAGES.map((s, idx) => {
+                        const count = items.filter(i => i.status === s.key).length;
+                        const isActive = filterStatus === s.key;
+                        return (
+                            <React.Fragment key={s.key}>
+                                {idx > 0 && <div className="w-3 h-px bg-border/50 shrink-0" aria-hidden />}
+                                <button
+                                    onClick={() => setFilterStatus(isActive ? '' : s.key)}
+                                    className={`shrink-0 px-4 py-2 rounded-xl text-xs font-medium transition-all duration-200 flex items-center gap-1.5 ${isActive ? 'text-white shadow-md' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
+                                    style={isActive ? { backgroundColor: s.color } : {}}
                                 >
-                                    <Plus className="w-4 h-4" />
-                                </Button>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="p-3 space-y-2 overflow-y-auto max-h-[calc(100vh-340px)]">
-                            {sources.length === 0 ? (
-                                <div className="text-center py-8 px-3 rounded-xl border border-dashed border-border/60 bg-muted/20">
-                                    <BookOpen className="w-8 h-8 mx-auto text-muted-foreground/50 mb-2" />
-                                    <p className="text-xs text-muted-foreground mb-2">No sources yet</p>
-                                    <Button variant="outline" size="sm" className="text-xs" onClick={() => setShowAddSourceModal(true)}>
-                                        Add Source
+                                    <span>{s.label}</span>
+                                    {count > 0 && <span className={`tabular-nums ${isActive ? 'opacity-90' : 'text-muted-foreground'}`}>{count}</span>}
+                                </button>
+                            </React.Fragment>
+                        );
+                    })}
+                </div>
+
+                {/* ── Main layout: 3-column responsive grid ── */}
+                <div className={`grid grid-cols-1 lg:grid-cols-[220px_1fr${showFilters ? '_220px' : ''}] xl:grid-cols-[240px_1fr${showFilters ? '_240px' : ''}] gap-4 min-h-0 flex-1 overflow-hidden transition-all duration-300`}>
+
+                    {/* ── Left: Sources ── */}
+                    <div className="shrink-0 min-w-0 flex flex-col max-lg:max-h-[200px]">
+                        <Card className="border border-border/40 bg-card/70 backdrop-blur-xl rounded-2xl shadow-sm shadow-black/5 dark:shadow-black/20 h-full overflow-hidden">
+                            <CardHeader className="py-4 px-4 border-b border-border/50">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                        <Rss className="w-4 h-4 text-orange-500" />
+                                        Content Sources
+                                    </CardTitle>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-primary/10"
+                                        onClick={() => setShowAddSourceModal(true)}
+                                    >
+                                        <Plus className="w-4 h-4" />
                                     </Button>
                                 </div>
-                            ) : (
-                                sources.map(s => (
-                                    <div
-                                        key={s.id}
-                                        onClick={() => setFilterSource(filterSource === String(s.id) ? '' : String(s.id))}
-                                        className={`group cursor-pointer rounded-lg p-3 border transition-all duration-200 ${filterSource === String(s.id) ? 'border-indigo-500/50 bg-indigo-500/10 shadow-sm shadow-indigo-500/5' : 'border-border/40 hover:border-border bg-muted/10 hover:bg-muted/30'}`}
-                                    >
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div className="flex items-center gap-2 min-w-0">
-                                                <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${s.type === 'rss' ? 'bg-orange-500/15 text-orange-500' : s.type === 'keyword' ? 'bg-blue-500/15 text-blue-500' : 'bg-purple-500/15 text-purple-500'}`}>
-                                                    {s.type === 'rss' ? <Rss className="w-3.5 h-3.5" /> : s.type === 'keyword' ? <Target className="w-3.5 h-3.5" /> : <BookOpen className="w-3.5 h-3.5" />}
-                                                </div>
-                                                <span className="text-xs font-medium truncate">{s.name}</span>
-                                            </div>
-                                            <button
-                                                onClick={e => { e.stopPropagation(); toggleSourceActive(s); }}
-                                                className={`w-9 h-5 rounded-full transition-all shrink-0 flex items-center ${s.active ? 'bg-emerald-500 justify-end' : 'bg-muted justify-start'}`}
-                                            >
-                                                <span className="w-3.5 h-3.5 rounded-full bg-white shadow-sm m-0.5 transition-transform" />
-                                            </button>
-                                        </div>
-                                        {(s.industry_tag || s.persona_tag) && (
-                                            <div className="flex gap-1 mt-2 flex-wrap">
-                                                {s.industry_tag && <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded-md border border-emerald-500/20">{s.industry_tag}</span>}
-                                                {s.persona_tag && <span className="text-[10px] px-2 py-0.5 bg-indigo-500/10 text-indigo-500 rounded-md border border-indigo-500/20">{s.persona_tag}</span>}
-                                            </div>
-                                        )}
+                            </CardHeader>
+                            <CardContent className="p-3 space-y-2 overflow-y-auto max-h-[calc(100vh-340px)]">
+                                {sources.length === 0 ? (
+                                    <div className="text-center py-8 px-3 rounded-xl border border-dashed border-border/60 bg-muted/20">
+                                        <BookOpen className="w-8 h-8 mx-auto text-muted-foreground/50 mb-2" />
+                                        <p className="text-xs text-muted-foreground mb-2">No sources yet</p>
+                                        <Button variant="outline" size="sm" className="text-xs" onClick={() => setShowAddSourceModal(true)}>
+                                            Add Source
+                                        </Button>
                                     </div>
-                                ))
-                            )}
-                        </CardContent>
-                    </Card>
-                </div>
-
-                {/* ── Main: Board or Analytics ── */}
-                <div className="min-w-0 flex-1 flex flex-col overflow-hidden h-full">
-                    <div className="h-full overflow-hidden flex flex-col">
-                        <div className="flex-1 overflow-hidden h-full">
-                    {loading ? (
-                        <div className="flex gap-6 overflow-x-hidden h-full">
-                            {PIPELINE_STAGES.map(s => (
-                                <div key={s.key} className="w-[320px] shrink-0 space-y-4 h-full flex flex-col">
-                                    <div className="h-10 w-32 bg-muted/50 rounded-xl animate-pulse" />
-                                    <div className="flex-1 rounded-2xl bg-muted/20 animate-pulse" />
-                                </div>
-                            ))}
-                        </div>
-                    ) : activeTab === 'analytics' ? (
-                        <AnalyticsView analytics={analytics} items={items} />
-                    ) : (
-                        /* Kanban: Horizontal scrolling board */
-                        <div className="flex h-full gap-6 overflow-x-auto pb-4 px-1 snap-x snap-mandatory">
-                            {PIPELINE_STAGES.map(stage => {
-                                const stageItems = itemsByStage(stage.key);
-                                const Icon = stage.icon;
-                                const isIdeaStage = stage.key === 'IDEA';
-                                
-                                return (
-                                    <div 
-                                        key={stage.key} 
-                                        className={`shrink-0 flex flex-col h-full snap-center ${isIdeaStage ? 'w-[360px] sm:w-[400px]' : 'w-[300px]'}`}
-                                    >
-                                        {/* Stage header */}
-                                        <div className="flex items-center gap-3 mb-4 px-2 shrink-0">
-                                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg shadow-sm ring-1 ring-inset ring-white/10" style={{ backgroundColor: stage.bg }}>
-                                                <Icon className="w-4 h-4" style={{ color: stage.color }} />
-                                            </div>
-                                            <div className="flex items-baseline gap-2">
-                                                <span className="text-sm font-bold tracking-tight" style={{ color: stage.color }}>{stage.label}</span>
-                                                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-muted/50 text-muted-foreground">{stageItems.length}</span>
-                                            </div>
-                                        </div>
-
-                                        {/* Column content */}
-                                        <div className="flex-1 rounded-2xl border border-border/40 bg-card/40 backdrop-blur-md overflow-hidden flex flex-col shadow-inner">
-                                            <div className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin hover:scrollbar-thumb-muted-foreground/20">
-                                                <AnimatePresence mode="popLayout">
-                                                    {stageItems.map(item => (
-                                                        <KanbanCard key={item.id} item={item} onClick={() => setSelectedItem(item)} />
-                                                    ))}
-                                                </AnimatePresence>
-                                                
-                                                {stageItems.length === 0 && (
-                                                    <div className="flex flex-col items-center justify-center h-40 text-center opacity-60">
-                                                        <Icon className="w-10 h-10 mb-3 opacity-20" style={{ color: stage.color }} />
-                                                        <p className="text-xs text-muted-foreground font-medium">No {stage.label.toLowerCase()} yet</p>
+                                ) : (
+                                    sources.map(s => (
+                                        <div
+                                            key={s.id}
+                                            onClick={() => setFilterSource(filterSource === String(s.id) ? '' : String(s.id))}
+                                            className={`group cursor-pointer rounded-lg p-3 border transition-all duration-200 ${filterSource === String(s.id) ? 'border-indigo-500/50 bg-indigo-500/10 shadow-sm shadow-indigo-500/5' : 'border-border/40 hover:border-border bg-muted/10 hover:bg-muted/30'}`}
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${s.type === 'rss' ? 'bg-orange-500/15 text-orange-500' : s.type === 'keyword' ? 'bg-blue-500/15 text-blue-500' : 'bg-purple-500/15 text-purple-500'}`}>
+                                                        {s.type === 'rss' ? <Rss className="w-3.5 h-3.5" /> : s.type === 'keyword' ? <Target className="w-3.5 h-3.5" /> : <BookOpen className="w-3.5 h-3.5" />}
                                                     </div>
-                                                )}
+                                                    <span className="text-xs font-medium truncate">{s.name}</span>
+                                                </div>
+                                                <button
+                                                    onClick={e => { e.stopPropagation(); toggleSourceActive(s); }}
+                                                    className={`w-9 h-5 rounded-full transition-all shrink-0 flex items-center ${s.active ? 'bg-emerald-500 justify-end' : 'bg-muted justify-start'}`}
+                                                >
+                                                    <span className="w-3.5 h-3.5 rounded-full bg-white shadow-sm m-0.5 transition-transform" />
+                                                </button>
                                             </div>
-                                            
-                                            {/* Quick action footer per column */}
-                                            {isIdeaStage && (
-                                                <div className="p-3 border-t border-border/30 bg-muted/20 backdrop-blur-sm shrink-0">
-                                                    <Button 
-                                                        variant="ghost" 
-                                                        size="sm" 
-                                                        className="w-full justify-start text-muted-foreground hover:text-primary hover:bg-primary/10 gap-2 h-9"
-                                                        onClick={() => setShowGenerateModal(true)}
-                                                    >
-                                                        <Plus className="w-4 h-4" /> Add Idea
-                                                    </Button>
+                                            {(s.industry_tag || s.persona_tag) && (
+                                                <div className="flex gap-1 mt-2 flex-wrap">
+                                                    {s.industry_tag && <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded-md border border-emerald-500/20">{s.industry_tag}</span>}
+                                                    {s.persona_tag && <span className="text-[10px] px-2 py-0.5 bg-indigo-500/10 text-indigo-500 rounded-md border border-indigo-500/20">{s.persona_tag}</span>}
                                                 </div>
                                             )}
                                         </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                        </div>
+                                    ))
+                                )}
+                            </CardContent>
+                        </Card>
                     </div>
-                </div>
 
-                {/* ── Right: Filters ── */}
-                <div className="shrink-0 min-w-0 flex flex-col max-lg:max-h-[240px]">
-                    <Card className="border border-border/40 bg-card/70 backdrop-blur-xl rounded-2xl shadow-sm shadow-black/5 dark:shadow-black/20 h-full overflow-hidden">
-                        <CardHeader className="py-4 px-4 border-b border-border/50">
-                            <div className="flex items-center justify-between">
-                                <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                                    <Filter className="w-4 h-4 text-violet-500" />
-                                    Filters
-                                </CardTitle>
-                                {hasFilters && (
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 text-[10px] text-primary hover:bg-primary/10"
-                                        onClick={() => { setFilterPersona(''); setFilterIndustry(''); setFilterObjective(''); setFilterSource(''); setFilterStatus(''); }}
-                                    >
-                                        Clear
-                                    </Button>
+                    {/* ── Main: Board or Analytics ── */}
+                    <div className="min-w-0 flex-1 flex flex-col overflow-hidden h-full">
+                        <div className="h-full overflow-hidden flex flex-col">
+                            <div className="flex-1 overflow-hidden h-full">
+                                {loading ? (
+                                    <div className="flex gap-6 overflow-x-hidden h-full">
+                                        {PIPELINE_STAGES.map(s => (
+                                            <div key={s.key} className="w-[320px] shrink-0 space-y-4 h-full flex flex-col">
+                                                <div className="h-10 w-32 bg-muted/50 rounded-xl animate-pulse" />
+                                                <div className="flex-1 rounded-2xl bg-muted/20 animate-pulse" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : activeTab === 'analytics' ? (
+                                    <AnalyticsView analytics={analytics} items={items} />
+                                ) : (
+                                    /* Kanban: Horizontal scrolling board */
+                                    <div className="flex h-full gap-4 overflow-x-auto pb-4 px-2 snap-x snap-mandatory">
+                                        {PIPELINE_STAGES.map((stage, index) => {
+                                            const stageItems = itemsByStage(stage.key);
+                                            const Icon = stage.icon;
+                                            const isIdeaStage = stage.key === 'IDEA';
+
+                                            return (
+                                                <React.Fragment key={stage.key}>
+                                                    {index > 0 && <div className="w-px shrink-0 bg-border/40 my-4" aria-hidden />}
+                                                    <div
+                                                        className="shrink-0 flex flex-col h-full snap-center w-[300px] sm:w-[320px]"
+                                                    >
+                                                        {/* Stage header */}
+                                                        <div className="flex items-center justify-between mb-3 px-1 shrink-0">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/5 shadow-sm" style={{ backgroundColor: stage.bg }}>
+                                                                    <Icon className="w-3.5 h-3.5" style={{ color: stage.color }} />
+                                                                </div>
+                                                                <span className="text-[13px] font-bold tracking-wide uppercase" style={{ color: stage.color }}>{stage.label}</span>
+                                                            </div>
+                                                            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-background border border-border/40 text-muted-foreground shadow-sm">{stageItems.length}</span>
+                                                        </div>
+
+                                                        {/* Column content */}
+                                                        <div className="flex-1 rounded-xl border border-border/30 overflow-hidden flex flex-col shadow-inner" style={{ backgroundColor: stage.bg }}>
+                                                            <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 scrollbar-thin hover:scrollbar-thumb-muted-foreground/20">
+                                                                <AnimatePresence mode="popLayout">
+                                                                    {stageItems.map(item => (
+                                                                        <KanbanCard key={item.id} item={item} onClick={() => setSelectedItem(item)} />
+                                                                    ))}
+                                                                </AnimatePresence>
+
+                                                                {stageItems.length === 0 && (
+                                                                    <div className="flex flex-col items-center justify-center pt-8 pb-6 text-center opacity-90 mx-2">
+                                                                        <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3 shadow-sm border border-black/5 dark:border-white/5" style={{ backgroundColor: stage.color + '15' }}>
+                                                                            <Icon className="w-5 h-5 opacity-80" style={{ color: stage.color }} />
+                                                                        </div>
+                                                                        <p className="text-xs text-muted-foreground font-medium mb-4 max-w-[200px] leading-relaxed">
+                                                                            {stage.key === 'IDEA' ? 'Need inspiration? Use AI to generate new content ideas.' : `Drag or move items here.`}
+                                                                        </p>
+                                                                        {stage.key === 'IDEA' && (
+                                                                            <Button size="sm" className="h-8 text-[11px] gap-1.5 rounded-lg w-full max-w-[160px] shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-0" onClick={() => setShowGenerateModal(true)}>
+                                                                                <Sparkles className="w-3.5 h-3.5" /> + Generate Idea
+                                                                            </Button>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+
+                                                                {/* Filler space at bottom of list to allow over-scrolling slightly */}
+                                                                <div className="h-6" aria-hidden />
+                                                            </div>
+
+                                                            {/* Quick action footer per column */}
+                                                            {isIdeaStage && (
+                                                                <div className="p-2 border-t border-border/20 bg-background/50 backdrop-blur-md shrink-0">
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        className="w-full justify-center text-muted-foreground hover:text-foreground hover:bg-background/80 gap-1.5 h-8 text-[11px] font-semibold rounded-lg shadow-sm border border-border/30"
+                                                                        onClick={() => setShowGenerateModal(true)}
+                                                                    >
+                                                                        <Plus className="w-3.5 h-3.5" /> Quick Idea
+                                                                    </Button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </div>
                                 )}
                             </div>
-                        </CardHeader>
-                        <CardContent className="p-3 space-y-3 overflow-y-auto max-h-[calc(100vh-340px)]">
-                            <div className="space-y-3">
-                                <Field label="Persona">
-                                    <Input placeholder="Any persona" value={filterPersona} onChange={e => setFilterPersona(e.target.value)} className="h-8 text-xs border-border/60" />
-                                </Field>
-                                <Field label="Industry">
-                                    <Input placeholder="Any industry" value={filterIndustry} onChange={e => setFilterIndustry(e.target.value)} className="h-8 text-xs border-border/60" />
-                                </Field>
-                                <Field label="Objective">
-                                    <select className="w-full h-8 px-3 rounded-md border border-input bg-background text-xs text-foreground border-border/60" value={filterObjective} onChange={e => setFilterObjective(e.target.value)}>
-                                        <option value="">All</option>
-                                        {OBJECTIVES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                                    </select>
-                                </Field>
-                            </div>
+                        </div>
+                    </div>
 
-                            {/* Pipeline stats */}
-                            <div className="pt-3 border-t border-border/50 space-y-2">
-                                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Pipeline</p>
-                                <div className="space-y-1.5">
-                                    {PIPELINE_STAGES.map(s => {
-                                        const count = items.filter(i => i.status === s.key).length;
-                                        return (
-                                            <div key={s.key} className="flex items-center justify-between text-xs py-1 px-2 rounded-md hover:bg-muted/30 transition-colors">
-                                                <span className="flex items-center gap-1.5" style={{ color: s.color }}>
-                                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-                                                    {s.label}
-                                                </span>
-                                                <span className="font-semibold tabular-nums text-foreground">{count}</span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
+                    {/* ── Right: Filters ── */}
+                    {showFilters && (
+                        <div className="shrink-0 min-w-0 flex flex-col max-lg:max-h-[240px] animate-in slide-in-from-right-8 fade-in duration-300">
+                            <Card className="border border-border/40 bg-card/70 backdrop-blur-xl rounded-2xl shadow-sm shadow-black/5 dark:shadow-black/20 h-full overflow-hidden flex flex-col">
+                                <CardHeader className="py-4 px-4 border-b border-border/50">
+                                    <div className="flex items-center justify-between">
+                                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                            <Filter className="w-4 h-4 text-violet-500" />
+                                            Filters
+                                        </CardTitle>
+                                        {hasFilters && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 text-[10px] text-primary hover:bg-primary/10"
+                                                onClick={() => { setFilterPersona(''); setFilterIndustry(''); setFilterObjective(''); setFilterSource(''); setFilterStatus(''); }}
+                                            >
+                                                Clear
+                                            </Button>
+                                        )}
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="p-3 space-y-3 overflow-y-auto max-h-[calc(100vh-340px)]">
+                                    <div className="space-y-3">
+                                        <Field label="Persona">
+                                            <Input placeholder="Any persona" value={filterPersona} onChange={e => setFilterPersona(e.target.value)} className="h-8 text-xs border-border/60" />
+                                        </Field>
+                                        <Field label="Industry">
+                                            <Input placeholder="Any industry" value={filterIndustry} onChange={e => setFilterIndustry(e.target.value)} className="h-8 text-xs border-border/60" />
+                                        </Field>
+                                        <Field label="Objective">
+                                            <select className="w-full h-8 px-3 rounded-md border border-input bg-background text-xs text-foreground border-border/60" value={filterObjective} onChange={e => setFilterObjective(e.target.value)}>
+                                                <option value="">All</option>
+                                                {OBJECTIVES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                            </select>
+                                        </Field>
+                                    </div>
+
+                                    {/* Pipeline stats */}
+                                    <div className="pt-3 border-t border-border/50 space-y-2">
+                                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Pipeline</p>
+                                        <div className="space-y-1.5">
+                                            {PIPELINE_STAGES.map(s => {
+                                                const count = items.filter(i => i.status === s.key).length;
+                                                return (
+                                                    <div key={s.key} className="flex items-center justify-between text-xs py-1 px-2 rounded-md hover:bg-muted/30 transition-colors">
+                                                        <span className="flex items-center gap-1.5" style={{ color: s.color }}>
+                                                            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                                                            {s.label}
+                                                        </span>
+                                                        <span className="font-semibold tabular-nums text-foreground">{count}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </div>
+                    )}
                 </div>
-            </div>
 
-            {/* ── Modals ── */}
-            <AnimatePresence>
-                {showGenerateModal && (
-                    <GenerateModal sources={sources} ctaTemplates={ctaTemplates} onClose={() => setShowGenerateModal(false)} onCreated={handleItemCreated} />
-                )}
-                {showAddSourceModal && (
-                    <AddSourceModal onClose={() => setShowAddSourceModal(false)} onCreated={handleSourceCreated} />
-                )}
-                {selectedItem && (
-                    <ItemDetailModal
-                        item={selectedItem}
-                        ctaTemplates={ctaTemplates}
-                        onClose={() => setSelectedItem(null)}
-                        onUpdated={updated => { handleItemUpdated(updated); setSelectedItem(prev => ({ ...prev, ...updated })); }}
-                        onDeleted={handleItemDeleted}
-                    />
-                )}
-            </AnimatePresence>
+                {/* ── Modals ── */}
+                <AnimatePresence>
+                    {showGenerateModal && (
+                        <GenerateModal sources={sources} ctaTemplates={ctaTemplates} onClose={() => setShowGenerateModal(false)} onCreated={handleItemCreated} />
+                    )}
+                    {showAddSourceModal && (
+                        <AddSourceModal onClose={() => setShowAddSourceModal(false)} onCreated={handleSourceCreated} />
+                    )}
+                    {selectedItem && (
+                        <ItemDetailModal
+                            item={selectedItem}
+                            ctaTemplates={ctaTemplates}
+                            onClose={() => setSelectedItem(null)}
+                            onUpdated={updated => { handleItemUpdated(updated); setSelectedItem(prev => ({ ...prev, ...updated })); }}
+                            onDeleted={handleItemDeleted}
+                        />
+                    )}
+                </AnimatePresence>
             </div>
         </div>
     );

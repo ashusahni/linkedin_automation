@@ -25,7 +25,7 @@ class ContactScraperService {
         }
 
         if (this.initialized && this.browser && this.sessionCookie !== sessionCookie) {
-             console.log('hz Reloading contact scraper with new session cookie...');
+            console.log('hz Reloading contact scraper with new session cookie...');
         }
 
         console.log('🚀 Initializing contact scraper...');
@@ -132,7 +132,7 @@ class ContactScraperService {
                 console.log(`   Current URL: ${currentUrl}`);
 
                 // If we're already on feed or logged in, great!
-                if (currentUrl.includes('/feed/') || 
+                if (currentUrl.includes('/feed/') ||
                     (!currentUrl.includes('/login') && !currentUrl.includes('/uas/login'))) {
                     console.log('   ✅ Already authenticated on homepage');
                     navigationSuccess = true;
@@ -146,13 +146,13 @@ class ContactScraperService {
                         waitUntil: 'domcontentloaded',
                         timeout: 30000
                     });
-                    
+
                     // Wait a bit
                     await new Promise(resolve => setTimeout(resolve, 2000));
-                    
+
                     const feedUrl = this.page.url();
                     console.log(`   Feed URL: ${feedUrl}`);
-                    
+
                     if (!feedUrl.includes('/login') && !feedUrl.includes('/uas/login')) {
                         navigationSuccess = true;
                         break;
@@ -187,7 +187,7 @@ class ContactScraperService {
         // Check if logged in
         const finalUrl = this.page.url();
         console.log(`   Final URL after navigation: ${finalUrl}`);
-        
+
         const isLoggedIn = await this.page.evaluate(() => {
             return !window.location.href.includes('/login') &&
                 !window.location.href.includes('/uas/login') &&
@@ -584,6 +584,7 @@ class ContactScraperService {
                             skipped: job.skipped || 0,
                             jobType: job.jobType || null,
                             campaignId: job.campaignId || null,
+                            link: job.campaignId ? `/campaigns/${job.campaignId}` : '/leads',
                         },
                     });
                 } catch (notifyErr) {

@@ -121,6 +121,12 @@ function handlePhantomError(res, context, error) {
 // 1. EXPORT CONNECTIONS (ONE-CLICK)
 // ============================================
 export async function exportConnectionsComplete(req, res) {
+  // 🛑 TEMPORARILY DISABLED
+  return res.status(503).json({
+    success: false,
+    message: "Automated Contact Sync is temporarily disabled."
+  });
+
   try {
     console.log("\n🎯 === FULL CONNECTION EXPORT STARTED ===\n");
 
@@ -202,7 +208,7 @@ export async function exportConnectionsComplete(req, res) {
           saved: savedCount,
           duplicates: leads.length - savedCount,
           csvFile: filename,
-          link: '/leads',
+          link: '/leads?source=connections_export',
         },
       });
     } catch (notifyErr) {
@@ -228,6 +234,12 @@ export async function exportConnectionsComplete(req, res) {
 // 2. SEARCH LEADS (ONE-CLICK)
 // ============================================
 export async function searchLeadsComplete(req, res) {
+  // 🛑 TEMPORARILY DISABLED
+  return res.status(503).json({
+    success: false,
+    message: "Automated Lead Search is temporarily disabled."
+  });
+
   try {
     console.log("\n🎯 === SEARCH & IMPORT REQUEST RECEIVED (search-leads-complete) ===\n");
     const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -338,7 +350,7 @@ export async function searchLeadsComplete(req, res) {
           duplicates: leads.length - savedCount,
           pushedToCrm,
           csvFile: filename,
-          link: '/leads',
+          link: '/leads?source=search_export',
         },
       });
     } catch (notifyErr) {
@@ -431,7 +443,7 @@ export async function importByContainerId(req, res) {
           saved: savedCount,
           duplicates: leads.length - savedCount,
           csvFile: filename,
-          link: '/leads',
+          link: '/leads?source=search_export',
         },
       });
     } catch (notifyErr) {
@@ -521,7 +533,7 @@ export async function enrichProfilesComplete(req, res) {
           totalProfiles: leads.length,
           saved: savedCount,
           csvFile: filename,
-          link: '/leads',
+          link: '/leads?source=search_export',
         },
       });
     } catch (notifyErr) {
@@ -657,7 +669,7 @@ export async function crmSearchRun(req, res) {
           duplicates: leads.length - savedCount,
           pushedToCrm,
           csvFile: filename,
-          link: '/leads',
+          link: '/leads?source=search_export',
         },
       });
     } catch (notifyErr) {

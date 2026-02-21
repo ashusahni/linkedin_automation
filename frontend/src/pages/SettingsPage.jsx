@@ -189,10 +189,10 @@ const SettingsPage = () => {
     // Fetch immediately
     fetchProgress();
 
-    // Then poll every 5 seconds
-    const interval = setInterval(fetchProgress, 5000);
-
-    return () => clearInterval(interval);
+    // Then poll every 5 seconds - TEMPORARILY DISABLED
+    // const interval = setInterval(fetchProgress, 5000);
+    // return () => clearInterval(interval);
+    return () => { };
   }, []);
 
   // 🆕 Poll phantom status every 5 seconds
@@ -222,10 +222,10 @@ const SettingsPage = () => {
     // Fetch immediately
     fetchPhantomStatus();
 
-    // Then poll every 5 seconds
-    const interval = setInterval(fetchPhantomStatus, 5000);
-
-    return () => clearInterval(interval);
+    // Then poll every 5 seconds - TEMPORARILY DISABLED
+    // const interval = setInterval(fetchPhantomStatus, 5000);
+    // return () => clearInterval(interval);
+    return () => { };
   }, []);
 
   const saveBranding = () => {
@@ -586,12 +586,14 @@ const SettingsPage = () => {
         }));
         setCountdownLabel("");
 
-        // AUTO-START logic: If autoRunEnabled is true, start the next cycle immediately
+        // AUTO-START logic: TEMPORARILY DISABLED
+        /*
         if (autoSyncState.autoRunEnabled) {
           setTimeout(() => {
             startOrResumeAutoSync();
           }, 1000);
         }
+        */
         return;
       }
 
@@ -672,8 +674,8 @@ const SettingsPage = () => {
         </p>
       </div>
 
-      {/* 🆕 Contact Scraping Progress Bar */}
-      {isScrapingActive && scrapingProgress && (
+      {/* 🆕 Contact Scraping Progress Bar - HIDDEN */}
+      {false && isScrapingActive && scrapingProgress && (
         <Card className="border-blue-500/50 bg-blue-500/5 backdrop-blur-sm">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between mb-3">
@@ -732,37 +734,37 @@ const SettingsPage = () => {
         </Card>
       )}
 
-      {/* 🆕 Automated Contact Sync Section – single slide control */}
-      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Share2 className="w-5 h-5 text-primary" />
-            Automated Contact Sync
-          </CardTitle>
-          <CardDescription>
-            One-touch sync that runs your full contact pipeline, then locks
-            itself for 24 hours.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-col items-center gap-4">
-            {/* Slim Slide-Toggle UI */}
-            {/* Slim Slide-Toggle UI */}
-            <div className={`relative w-full max-w-6xl overflow-hidden rounded-xl border transition-all duration-500 ${autoSyncState.status === "running"
-              ? "border-cyan-500/50 bg-cyan-950/10 shadow-[0_0_30px_-10px_rgba(6,182,212,0.3)]"
-              : autoSyncState.status === "cooldown"
-                ? "border-blue-500/30 bg-blue-950/10"
-                : "border-border/50 bg-card/40 hover:border-primary/30"
-              }`}>
+      {/* 🆕 Automated Contact Sync Section - HIDDEN */}
+      {false && (
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Share2 className="w-5 h-5 text-primary" />
+              Automated Contact Sync
+            </CardTitle>
+            <CardDescription>
+              One-touch sync that runs your full contact pipeline, then locks
+              itself for 24 hours.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col items-center gap-4">
+              {/* Slim Slide-Toggle UI */}
+              {/* Slim Slide-Toggle UI */}
+              <div className={`relative w-full max-w-6xl overflow-hidden rounded-xl border transition-all duration-500 ${autoSyncState.status === "running"
+                ? "border-cyan-500/50 bg-cyan-950/10 shadow-[0_0_30px_-10px_rgba(6,182,212,0.3)]"
+                : autoSyncState.status === "cooldown"
+                  ? "border-blue-500/30 bg-blue-950/10"
+                  : "border-border/50 bg-card/40 hover:border-primary/30"
+                }`}>
 
-              {/* Animated Background Mesh */}
-              {autoSyncState.status === "running" && (
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(6,182,212,0.1),transparent_70%)] animate-pulse" />
-              )}
+                {/* Animated Background Mesh */}
+                {autoSyncState.status === "running" && (
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(6,182,212,0.1),transparent_70%)] animate-pulse" />
+                )}
 
-              <div className="relative flex flex-col md:flex-row items-center justify-between px-6 py-5 gap-4">
-                {/* Left: Indicator & Status */}
-                <div className="flex items-center gap-4 w-full md:w-auto">
+                <div className="relative flex flex-col md:flex-row items-center justify-between px-6 py-5 gap-4">
+                  {/* Left: Indicator & Status */}
                   <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all ${autoSyncState.status === "running"
                     ? "bg-cyan-500/20 text-cyan-200 border-cyan-400/50 shadow-cyan-500/20 backdrop-blur-sm"
                     : autoSyncState.status === "cooldown"
@@ -868,9 +870,9 @@ const SettingsPage = () => {
                 Toggle ON to run contact sync automatically every 24 hours. Slide OFF to pause.
               </p>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* Branding / Welcome & Theme */}
@@ -1279,7 +1281,7 @@ const SettingsPage = () => {
       </div>
 
       <PageGuide pageKey="settings" />
-    </div>
+    </div >
   );
 };
 

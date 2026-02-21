@@ -54,6 +54,9 @@ export default function LeadsTable() {
     const [searchTerm, setSearchTerm] = useState('');
     const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
 
+    // Highlight state for deep-link notifications (e.g. ?highlight=1,2,3)
+    const [highlightedLeads, setHighlightedLeads] = useState(new Set());
+
     // Combined Meta Filters (includes all filters)
     const [searchParams, setSearchParams] = useSearchParams();
     const [metaFilters, setMetaFilters] = useState({
@@ -230,6 +233,7 @@ export default function LeadsTable() {
         const connectionDegree = searchParams.get('connection_degree') || '';
         const quality = searchParams.get('quality') || '';
         const industry = searchParams.get('industry') || '';
+        const source = searchParams.get('source') || '';
 
         // Check if URL params differ from current state to determine if we need to update/fetch
         // We treat empty URL params as "clear filter" (unlike previous logic which preserved state)
@@ -237,14 +241,16 @@ export default function LeadsTable() {
         const stateDiffers =
             connectionDegree !== metaFilters.connectionDegree ||
             quality !== metaFilters.quality ||
-            industry !== metaFilters.industry;
+            industry !== metaFilters.industry ||
+            (source && source !== metaFilters.source);
 
         if (stateDiffers) {
             const newFilters = {
                 ...metaFilters,
                 connectionDegree: connectionDegree,
                 quality: quality,
-                industry: industry
+                industry: industry,
+                ...(source ? { source } : {}),
             };
 
             setMetaFilters(newFilters);
@@ -319,6 +325,56 @@ export default function LeadsTable() {
 
         fetchPreferencesAndBranding();
     }, []);
+
+    // Deep-link notification highlight: Read ?highlight= and ?source= from URL
+    useEffect(() => {
+        const highlightParam = searchParams.get('highlight');
+        const sourceParam = searchParams.get('source');
+
+        // Handle source filter from notification deep-links (e.g. ?source=search_export)
+        if (sourceParam && metaFilters.source !== sourceParam) {
+            setMetaFilters(prev => ({ ...prev, source: sourceParam }));
+            // Clean up the source param from URL (optional: keep it for clarity)
+        }
+
+        // Handle lead highlighting from notification deep-links (e.g. ?highlight=1,2,3)
+        if (highlightParam && highlightParam !== 'recent_import') {
+            const ids = highlightParam.split(',').map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+            if (ids.length > 0) {
+                setHighlightedLeads(new Set(ids));
+
+                // Auto-clear highlights after 8 seconds
+                const timer = setTimeout(() => {
+                    setHighlightedLeads(new Set());
+                    // Remove highlight param from URL
+                    const newParams = new URLSearchParams(searchParams);
+                    newParams.delete('highlight');
+                    setSearchParams(newParams, { replace: true });
+                }, 8000);
+
+                return () => clearTimeout(timer);
+            }
+        }
+
+        // For 'recent_import', highlight all newly loaded leads (flash effect)
+        if (highlightParam === 'recent_import') {
+            // We'll highlight all visible leads briefly
+            const timer = setTimeout(() => {
+                if (leads.length > 0) {
+                    setHighlightedLeads(new Set(leads.map(l => l.id)));
+                    // Auto-clear after 5 seconds
+                    setTimeout(() => {
+                        setHighlightedLeads(new Set());
+                        const newParams = new URLSearchParams(searchParams);
+                        newParams.delete('highlight');
+                        setSearchParams(newParams, { replace: true });
+                    }, 5000);
+                }
+            }, 500); // Small delay to let leads load
+
+            return () => clearTimeout(timer);
+        }
+    }, [searchParams, leads.length]);
 
     // PHASE 4: Fetch whenever review tab changes
     useEffect(() => {
@@ -1764,7 +1820,7 @@ export default function LeadsTable() {
                                     </TableRow>
                                 ) : (
                                     scoredLeads.map((lead) => (
-                                        <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? "selected" : undefined}>
+                                        <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? "selected" : undefined} className={highlightedLeads.has(lead.id) ? "notification-highlight" : ""}>
                                             <TableCell>
                                                 <input
                                                     type="checkbox"

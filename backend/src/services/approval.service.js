@@ -24,7 +24,7 @@ export const ApprovalService = {
                 type: 'approval_needed',
                 title: 'Approval required',
                 message: `${stepLabel} for lead needs your approval`,
-                data: { campaignId, leadId, stepType, approvalId: row.id, link: '/campaigns' },
+                data: { campaignId, leadId, stepType, approvalId: row.id, link: `/campaigns/${campaignId}?tab=approvals` },
             });
         }
         return row;
@@ -173,7 +173,7 @@ export const ApprovalService = {
                             count,
                             stepTypes: [...new Set(items.map(i => i.step_type))],
                             approvalIds: items.map(i => i.id),
-                            link: `/campaigns/${campaignId}`,
+                            link: `/campaigns/${campaignId}?tab=approvals`,
                         },
                     });
                 }

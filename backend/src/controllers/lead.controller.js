@@ -15,6 +15,8 @@ import { NotificationService } from '../services/notification.service.js';
  * Runs asynchronously in the background - does NOT block approval
  */
 async function triggerContactScrapingForApprovedLeads(leadIds) {
+  // Completely disabled as requested
+  return;
   if (!leadIds || leadIds.length === 0) {
     return;
   }
@@ -1328,7 +1330,7 @@ export async function importLeadsFromCSV(req, res) {
         type: 'lead_imported',
         title: 'CSV import completed',
         message: `Imported ${saved} leads from CSV${duplicates > 0 ? ` (${duplicates} duplicates skipped)` : ''}`,
-        data: { saved, duplicates, errors, link: '/leads' },
+        data: { saved, duplicates, errors, link: `/leads?highlight=recent_import` },
       });
     }
 
@@ -1677,7 +1679,7 @@ export async function bulkApproveLeads(req, res) {
       type: 'approval_approved',
       title: 'Leads approved',
       message: `${result.rowCount} leads approved for campaigns`,
-      data: { leadIds, count: result.rowCount, link: '/leads' },
+      data: { leadIds, count: result.rowCount, link: `/leads?highlight=${leadIds.join(',')}` },
     });
 
     // 🆕 PHASE 6: Trigger contact scraping asynchronously (non-blocking)
@@ -1753,7 +1755,7 @@ export async function bulkRejectLeads(req, res) {
       type: 'approval_rejected',
       title: 'Leads rejected',
       message: `${result.rowCount} leads rejected${reason ? ` (${reason})` : ''}`,
-      data: { leadIds, count: result.rowCount, reason, link: '/leads' },
+      data: { leadIds, count: result.rowCount, reason, link: `/leads?highlight=${leadIds.join(',')}` },
     });
 
     res.json({
@@ -1855,8 +1857,8 @@ export async function qualifyLeadsByNiche(req, res) {
     const leadsResult = await pool.query(leadsQuery, [reviewStatus]);
 
     if (leadsResult.rows.length === 0) {
-      return res.json({ 
-        success: true, 
+      return res.json({
+        success: true,
         message: `No leads found with status '${reviewStatus}'`,
         qualified: 0,
         total: 0
@@ -1873,8 +1875,8 @@ export async function qualifyLeadsByNiche(req, res) {
     }
 
     if (leadsToQualify.length === 0) {
-      return res.json({ 
-        success: true, 
+      return res.json({
+        success: true,
         message: `No leads match your profile niche`,
         qualified: 0,
         total: leadsResult.rows.length
@@ -1909,8 +1911,8 @@ export async function qualifyLeadsByNiche(req, res) {
     }
 
     console.log(`🎯 Qualified ${result.rowCount} leads matching user's niche`);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `Qualified ${result.rowCount} lead(s) matching your profile niche`,
       qualified: result.rowCount,
       total: leadsResult.rows.length
@@ -2100,10 +2102,10 @@ export async function getReviewStats(req, res) {
     const importedWhereClause = whereConditions.length > 0
       ? whereClause + ' AND (source = $' + (params.length + 1) + ' OR source = $' + (params.length + 2) + ')'
       : 'WHERE (source = $1 OR source = $2)';
-    const importedParams = whereConditions.length > 0 
+    const importedParams = whereConditions.length > 0
       ? [...params, 'csv_import', 'excel_import']
       : ['csv_import', 'excel_import'];
-    
+
     const importedResult = await pool.query(`
       SELECT COUNT(*) as count
       FROM leads

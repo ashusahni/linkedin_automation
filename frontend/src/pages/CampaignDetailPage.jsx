@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
     ArrowLeft, Play, Pause, Users, TrendingUp, CheckCircle2,
@@ -55,11 +55,14 @@ import CampaignLeadsTable from '../components/CampaignLeadsTable';
 export default function CampaignDetailPage() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const { addToast } = useToast();
     const [campaign, setCampaign] = useState(null);
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState('leads'); // 'leads', 'analytics', 'approvals'
+    const validTabs = ['leads', 'analytics', 'approvals'];
+    const tabFromUrl = searchParams.get('tab');
+    const [activeTab, setActiveTab] = useState(validTabs.includes(tabFromUrl) ? tabFromUrl : 'leads'); // 'leads', 'analytics', 'approvals'
     const [editing, setEditing] = useState(false);
     const [formData, setFormData] = useState({});
 

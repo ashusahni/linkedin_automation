@@ -102,3 +102,39 @@
   background-size: 24px 24px;
   opacity: 0.4;
 }
+
+/* Notification deep-link highlight animation */
+@keyframes notification-pulse {
+  0%, 100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+  50% {
+    background-color: hsl(var(--primary) / 0.08);
+    box-shadow: inset 3px 0 0 hsl(var(--primary) / 0.6);
+  }
+}
+
+.notification-highlight {
+  animation: notification-pulse 1.5s ease-in-out 3;
+  border-left: 3px solid hsl(var(--primary) / 0.5) !important;
+}
+
+.dark .notification-highlight {
+  animation: notification-pulse 1.5s ease-in-out 3;
+}
+
+@keyframes notification-pulse-dark {
+  0%, 100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+  50% {
+    background-color: hsl(var(--primary) / 0.12);
+    box-shadow: inset 3px 0 0 hsl(var(--primary) / 0.7);
+  }
+}
+
+.dark .notification-highlight {
+  animation: notification-pulse-dark 1.5s ease-in-out 3;
+}
