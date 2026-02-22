@@ -60,19 +60,43 @@ function timeAgo(ts) {
     return `${Math.floor(h / 24)}d ago`;
 }
 
-// ── Generate Idea Modal ──────────────────────────────────────────────────────
+// ── Phantom Status Config ─────────────────────────────────────────────────────
+
+const PHANTOM_STATUS_CONFIG = {
+    pending: { label: 'Pending Sheet', color: '#64748b', bg: 'rgba(100,116,139,0.15)' },
+    queued: { label: 'Queued to Publish', color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+    processing: { label: 'Publishing…', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+    posted: { label: 'Published', color: '#10b981', bg: 'rgba(16,185,129,0.15)' },
+    failed: { label: 'Failed', color: '#ef4444', bg: 'rgba(239,68,68,0.15)' },
+};
+
+function PhantomBadge({ status }) {
+    if (!status) return null;
+    const cfg = PHANTOM_STATUS_CONFIG[status];
+    if (!cfg) return null;
+    return (
+        <span
+            className="inline-flex items-center gap-1 px-1.5 py-[2px] rounded-md text-[9px] font-bold border leading-none"
+            style={{ color: cfg.color, backgroundColor: cfg.bg, borderColor: `${cfg.color}35` }}
+        >
+            {status === 'processing' && <span className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0" style={{ backgroundColor: cfg.color }} />}
+            {cfg.label}
+        </span>
+    );
+}
+
+// ── Generate Idea Modal (Dual-variant picker) ────────────────────────────────
 
 function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
     const { addToast } = useToast();
     const [form, setForm] = useState({
-        source_id: '',
-        persona: '',
-        industry: '',
-        objective: 'thought_leadership',
-        cta_type_id: '',
-        topic: '',
+        source_id: '', persona: '', industry: '',
+        objective: 'thought_leadership', cta_type_id: '', topic: '',
     });
     const [loading, setLoading] = useState(false);
+    // Dual-variant picker state
+    const [variants, setVariants] = useState(null); // [{item}, {item}]
+    const [picking, setPicking] = useState(false);
 
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -82,14 +106,13 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
         }
         setLoading(true);
         try {
-            const res = await axios.post('/api/sow/engine/items/generate', {
-                ...form,
-                cta_type_id: form.cta_type_id || null,
-                source_id: form.source_id || null,
-            });
-            addToast('✅ Idea generated successfully!', 'success');
-            onCreated(res.data);
-            onClose();
+            const payload = { ...form, cta_type_id: form.cta_type_id || null, source_id: form.source_id || null };
+            // Generate 2 in parallel
+            const [r1, r2] = await Promise.all([
+                axios.post('/api/sow/engine/items/generate', payload),
+                axios.post('/api/sow/engine/items/generate', payload),
+            ]);
+            setVariants([r1.data, r2.data]);
         } catch (e) {
             addToast(e.response?.data?.error || 'Generation failed', 'error');
         } finally {
@@ -97,6 +120,67 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
         }
     };
 
+    const pickVariant = async (chosen, discard) => {
+        setPicking(true);
+        try {
+            // Delete the rejected variant silently
+            await axios.delete(`/api/sow/engine/items/${discard.id}`).catch(() => { });
+            addToast('✅ Idea added to your pipeline!', 'success');
+            onCreated(chosen);
+            onClose();
+        } finally { setPicking(false); }
+    };
+
+    // ── Variant picker view ──
+    if (variants) {
+        return (
+            <ModalShell title="✨ Pick Your Favourite" onClose={onClose} wide>
+                <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground text-center">
+                        AI generated two versions — choose the one you prefer. The other will be discarded.
+                    </p>
+                    <div className="grid grid-cols-1 gap-4">
+                        {variants.map((v, i) => (
+                            <motion.div
+                                key={v.id}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: i * 0.08 }}
+                                className="relative rounded-xl border border-border/40 bg-muted/20 hover:border-indigo-500/40 hover:bg-indigo-500/5 transition-all duration-200 overflow-hidden"
+                            >
+                                <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-t-xl" />
+                                <div className="p-4">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/25">
+                                            Variant {i + 1}
+                                        </span>
+                                        <span className="text-xs font-semibold text-foreground line-clamp-1 flex-1">{v.title}</span>
+                                    </div>
+                                    <p className="text-[12px] text-muted-foreground/80 leading-relaxed line-clamp-5 font-mono whitespace-pre-wrap">
+                                        {v.edited_content || v.generated_content}
+                                    </p>
+                                    <Button
+                                        size="sm"
+                                        className="mt-3 w-full gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-0 shadow-md shadow-indigo-500/20 rounded-xl"
+                                        disabled={picking}
+                                        onClick={() => pickVariant(v, variants[1 - i])}
+                                    >
+                                        {picking ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                                        Use This Version
+                                    </Button>
+                                </div>
+                            </motion.div>
+                        ))}
+                    </div>
+                    <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => setVariants(null)}>
+                        ← Regenerate with different settings
+                    </Button>
+                </div>
+            </ModalShell>
+        );
+    }
+
+    // ── Form view ──
     return (
         <ModalShell title="✨ AI Generate Idea" onClose={onClose}>
             <div className="space-y-4">
@@ -130,9 +214,14 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
                         {sources.filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                 </Field>
+                {/* Dual generate note */}
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-500/8 border border-indigo-500/20">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <p className="text-[11px] text-indigo-400/90">AI will generate <strong>2 variants</strong> — you'll choose your favourite before it's added to the pipeline.</p>
+                </div>
                 <Button className="w-full gap-2 h-10 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white shadow-md" onClick={submit} disabled={loading}>
                     {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                    {loading ? 'Generating with AI...' : 'Generate Idea'}
+                    {loading ? 'Generating 2 variants with AI…' : 'Generate 2 Variants'}
                 </Button>
             </div>
         </ModalShell>
@@ -194,6 +283,163 @@ function AddSourceModal({ onClose, onCreated }) {
     );
 }
 
+// ── Manual Create Modal ───────────────────────────────────────────────────────
+
+function ManualCreateModal({ onClose, onCreated }) {
+    const { addToast } = useToast();
+    const [form, setForm] = useState({ title: '', content: '', persona: '', industry: '', objective: 'thought_leadership' });
+    const [loading, setLoading] = useState(false);
+    const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+    const submit = async () => {
+        if (!form.title.trim() || !form.content.trim()) {
+            addToast('Title and Content are required', 'error'); return;
+        }
+        setLoading(true);
+        try {
+            const res = await axios.post('/api/sow/engine/items', {
+                title: form.title, generated_content: form.content,
+                edited_content: form.content,
+                persona: form.persona, industry: form.industry,
+                objective: form.objective, status: 'IDEA',
+            });
+            addToast('Item created!', 'success');
+            onCreated(res.data); onClose();
+        } catch (e) {
+            addToast(e.response?.data?.error || 'Failed to create', 'error');
+        } finally { setLoading(false); }
+    };
+
+    return (
+        <ModalShell title="✏️ Add Item Manually" onClose={onClose} wide>
+            <div className="space-y-4">
+                <Field label="Title *">
+                    <Input placeholder="Post title or topic summary" value={form.title} onChange={e => set('title', e.target.value)} className="border-border/60" />
+                </Field>
+                <Field label="Content *">
+                    <textarea
+                        rows={8}
+                        placeholder="Write your LinkedIn post content here…"
+                        value={form.content}
+                        onChange={e => set('content', e.target.value)}
+                        className="w-full rounded-lg border border-input bg-muted/30 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono leading-relaxed"
+                    />
+                </Field>
+                <div className="grid grid-cols-2 gap-4">
+                    <Field label="Persona">
+                        <Input placeholder="SaaS Founder" value={form.persona} onChange={e => set('persona', e.target.value)} className="border-border/60" />
+                    </Field>
+                    <Field label="Industry">
+                        <Input placeholder="Technology" value={form.industry} onChange={e => set('industry', e.target.value)} className="border-border/60" />
+                    </Field>
+                </div>
+                <Field label="Objective">
+                    <select className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm text-foreground border-border/60" value={form.objective} onChange={e => set('objective', e.target.value)}>
+                        {OBJECTIVES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                </Field>
+                <Button className="w-full h-10 gap-2" onClick={submit} disabled={loading}>
+                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    {loading ? 'Creating…' : 'Add to Pipeline'}
+                </Button>
+            </div>
+        </ModalShell>
+    );
+}
+
+// ── CTA Template Manager Modal ────────────────────────────────────────────────
+
+function CtaManagerModal({ ctaTemplates, onClose, onChange }) {
+    const { addToast } = useToast();
+    const [newName, setNewName] = useState('');
+    const [newText, setNewText] = useState('');
+    const [adding, setAdding] = useState(false);
+    const [deletingId, setDeletingId] = useState(null);
+
+    const addTemplate = async () => {
+        if (!newName.trim()) { addToast('Name is required', 'error'); return; }
+        setAdding(true);
+        try {
+            const res = await axios.post('/api/sow/engine/cta-templates', { name: newName, text: newText });
+            addToast('CTA template added!', 'success');
+            onChange(prev => [res.data, ...prev]);
+            setNewName(''); setNewText('');
+        } catch (e) {
+            addToast(e.response?.data?.error || 'Failed', 'error');
+        } finally { setAdding(false); }
+    };
+
+    return (
+        <ModalShell title="🏷️ CTA Templates" onClose={onClose}>
+            <div className="space-y-5">
+                {/* Add new */}
+                <div className="p-4 rounded-xl border border-border/40 bg-muted/20 space-y-3">
+                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Add New Template</p>
+                    <Field label="Name *">
+                        <Input placeholder="e.g. Book a Call" value={newName} onChange={e => setNewName(e.target.value)} className="border-border/60" />
+                    </Field>
+                    <Field label="CTA Text (optional)">
+                        <Input placeholder="e.g. Schedule a free 15-min chat → link" value={newText} onChange={e => setNewText(e.target.value)} className="border-border/60" />
+                    </Field>
+                    <Button size="sm" className="gap-1.5 w-full" onClick={addTemplate} disabled={adding}>
+                        {adding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                        {adding ? 'Saving…' : 'Add Template'}
+                    </Button>
+                </div>
+
+                {/* Existing templates */}
+                <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Existing ({ctaTemplates.length})</p>
+                    {ctaTemplates.length === 0 && (
+                        <p className="text-xs text-muted-foreground/60 text-center py-4">No CTA templates yet. Add one above.</p>
+                    )}
+                    {ctaTemplates.map(t => (
+                        <div key={t.id} className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-border/30 bg-card/60 group">
+                            <div className="min-w-0">
+                                <p className="text-sm font-semibold truncate">{t.name}</p>
+                                {t.text && <p className="text-[11px] text-muted-foreground truncate mt-0.5">{t.text}</p>}
+                            </div>
+                            <button
+                                onClick={() => setDeletingId(t.id)}
+                                className="h-6 w-6 shrink-0 rounded-md flex items-center justify-center text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                            >
+                                <Trash2 className="w-3 h-3" />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Delete confirmation inline */}
+                <AnimatePresence>
+                    {deletingId && (() => {
+                        const tpl = ctaTemplates.find(t => t.id === deletingId);
+                        return (
+                            <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                                className="p-3 rounded-xl border border-red-500/30 bg-red-500/8 space-y-3">
+                                <p className="text-sm text-red-400">Delete <strong>"{tpl?.name}"</strong>? This cannot be undone.</p>
+                                <div className="flex gap-2">
+                                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setDeletingId(null)}>Cancel</Button>
+                                    <Button size="sm" className="flex-1 bg-red-600 hover:bg-red-500 text-white border-0" onClick={async () => {
+                                        try {
+                                            // Note: no delete route exists in backend yet — we'll optimistically remove from UI
+                                            // await axios.delete(`/api/sow/engine/cta-templates/${deletingId}`);
+                                            onChange(prev => prev.filter(t => t.id !== deletingId));
+                                            addToast('Template removed from session', 'success');
+                                        } catch { addToast('Failed', 'error'); }
+                                        setDeletingId(null);
+                                    }}>
+                                        <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Delete
+                                    </Button>
+                                </div>
+                            </motion.div>
+                        );
+                    })()}
+                </AnimatePresence>
+            </div>
+        </ModalShell>
+    );
+}
+
 // ── Edit / Detail Modal ───────────────────────────────────────────────────────
 
 function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) {
@@ -204,9 +450,28 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
     const [scheduledAt, setScheduledAt] = useState('');
     const [showScheduleForm, setShowScheduleForm] = useState(false);
     const [sending, setSending] = useState(false);
+    const [retrying, setRetrying] = useState(false);
+    // History tab
+    const [activeTab, setActiveTab] = useState('content'); // 'content' | 'history'
+    const [history, setHistory] = useState([]);
+    const [historyLoaded, setHistoryLoaded] = useState(false);
 
     const stage = stageFor(item.status);
     const nextStates = VALID_NEXT[item.status] || [];
+
+    const loadHistory = async () => {
+        if (historyLoaded) return;
+        try {
+            const res = await axios.get(`/api/sow/engine/items/${item.id}/history`);
+            setHistory(Array.isArray(res.data) ? res.data : []);
+            setHistoryLoaded(true);
+        } catch { setHistory([]); setHistoryLoaded(true); }
+    };
+
+    const handleTabChange = (tab) => {
+        setActiveTab(tab);
+        if (tab === 'history') loadHistory();
+    };
 
     const saveContent = async () => {
         setSaving(true);
@@ -257,6 +522,18 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
         } finally { setSending(false); }
     };
 
+    const retryPhantom = async () => {
+        setRetrying(true);
+        try {
+            await axios.post(`/api/sow/engine/items/${item.id}/send`);
+            addToast('✅ Retried — sent to Phantom!', 'success');
+            onUpdated({ ...item, error_message: null });
+            onClose();
+        } catch (e) {
+            addToast(e.response?.data?.error || 'Retry failed', 'error');
+        } finally { setRetrying(false); }
+    };
+
     const deleteItem = async () => {
         if (!window.confirm('Delete this content item?')) return;
         try {
@@ -272,6 +549,9 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
         addToast('Copied to clipboard!', 'success');
     };
 
+    // Stage color map for history
+    const stageColor = (s) => stageFor(s)?.color || '#6366f1';
+
     return (
         <ModalShell title={item.title || 'Content Item'} onClose={onClose} wide>
             <div className="space-y-4">
@@ -284,68 +564,155 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
                     {item.industry && <Badge variant="outline" className="text-xs gap-1"><Globe className="w-3 h-3" />{item.industry}</Badge>}
                     {item.objective && <Badge variant="secondary" className="text-xs">{item.objective}</Badge>}
                     {item.cta_name && <Badge variant="secondary" className="text-xs gap-1"><Tag className="w-3 h-3" />{item.cta_name}</Badge>}
+                    {item.phantom_status && <PhantomBadge status={item.phantom_status} />}
                 </div>
 
-                {/* Content editor */}
-                <div className="relative">
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">LinkedIn Post Content</label>
-                    <textarea
-                        value={content}
-                        onChange={e => setContent(e.target.value)}
-                        rows={12}
-                        disabled={item.status === 'POSTED'}
-                        className="w-full rounded-lg border border-input bg-muted/30 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono leading-relaxed disabled:opacity-60"
-                    />
-                    <div className="flex gap-2 mt-2">
-                        <Button size="sm" onClick={saveContent} disabled={saving || item.status === 'POSTED'} className="gap-1.5">
-                            {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
-                            {saving ? 'Saving...' : 'Save Edits'}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={copyToClipboard} className="gap-1.5">
-                            <Copy className="w-3 h-3" /> Copy
-                        </Button>
-                    </div>
+                {/* Tab bar */}
+                <div className="flex gap-1 p-1 rounded-xl bg-muted/40 border border-border/30">
+                    {[['content', '📝 Content'], ['history', '🕐 History']].map(([key, label]) => (
+                        <button
+                            key={key}
+                            onClick={() => handleTabChange(key)}
+                            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${activeTab === key
+                                ? 'bg-card text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                        >
+                            {label}
+                        </button>
+                    ))}
                 </div>
 
-                {/* Schedule form */}
-                {showScheduleForm && (
-                    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 space-y-2">
-                        <p className="text-sm font-medium text-blue-400">📅 Schedule post for:</p>
-                        <Input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} className="bg-background" />
-                        <div className="flex gap-2">
-                            <Button size="sm" onClick={scheduleNow} disabled={transitioning} className="gap-1.5 bg-blue-600 hover:bg-blue-700">
-                                <Calendar className="w-3 h-3" /> Confirm Schedule
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setShowScheduleForm(false)}>Cancel</Button>
+                {/* ── Content Tab ── */}
+                {activeTab === 'content' && (
+                    <div className="space-y-4">
+                        <div className="relative">
+                            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">LinkedIn Post Content</label>
+                            <textarea
+                                value={content}
+                                onChange={e => setContent(e.target.value)}
+                                rows={10}
+                                disabled={item.status === 'POSTED'}
+                                className="w-full rounded-lg border border-input bg-muted/30 p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 font-mono leading-relaxed disabled:opacity-60"
+                            />
+                            <div className="flex gap-2 mt-2">
+                                <Button size="sm" onClick={saveContent} disabled={saving || item.status === 'POSTED'} className="gap-1.5">
+                                    {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                                    {saving ? 'Saving...' : 'Save Edits'}
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={copyToClipboard} className="gap-1.5">
+                                    <Copy className="w-3 h-3" /> Copy
+                                </Button>
+                            </div>
                         </div>
-                    </motion.div>
-                )}
 
-                {/* Scheduled at info */}
-                {item.scheduled_at && (
-                    <div className="flex items-center gap-2 text-sm text-blue-400">
-                        <Calendar className="w-4 h-4" />
-                        Scheduled: {new Date(item.scheduled_at).toLocaleString()}
+                        {showScheduleForm && (
+                            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 space-y-2">
+                                <p className="text-sm font-medium text-blue-400">📅 Schedule post for:</p>
+                                <Input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} className="bg-background" />
+                                <div className="flex gap-2">
+                                    <Button size="sm" onClick={scheduleNow} disabled={transitioning} className="gap-1.5 bg-blue-600 hover:bg-blue-700">
+                                        <Calendar className="w-3 h-3" /> Confirm Schedule
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={() => setShowScheduleForm(false)}>Cancel</Button>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {item.scheduled_at && (
+                            <div className="flex items-center gap-2 text-sm text-blue-400">
+                                <Calendar className="w-4 h-4" />
+                                Scheduled: {new Date(item.scheduled_at).toLocaleString()}
+                            </div>
+                        )}
+
+                        {item.post_url && (
+                            <a href={item.post_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm text-emerald-400 hover:underline">
+                                <ExternalLink className="w-4 h-4" /> View LinkedIn Post
+                            </a>
+                        )}
+
+                        {/* Error message + Retry */}
+                        {item.error_message && (
+                            <div className="space-y-2">
+                                <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
+                                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                                    <span className="flex-1 break-words">{item.error_message}</span>
+                                </div>
+                                {['APPROVED', 'SCHEDULED'].includes(item.status) && (
+                                    <Button
+                                        size="sm"
+                                        className="gap-1.5 w-full bg-red-600 hover:bg-red-500 text-white border-0"
+                                        onClick={retryPhantom}
+                                        disabled={retrying}
+                                    >
+                                        {retrying ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                                        {retrying ? 'Retrying…' : '🔄 Retry Phantom Send'}
+                                    </Button>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
 
-                {/* Post URL if posted */}
-                {item.post_url && (
-                    <a href={item.post_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm text-emerald-400 hover:underline">
-                        <ExternalLink className="w-4 h-4" /> View LinkedIn Post
-                    </a>
-                )}
-
-                {/* Error message */}
-                {item.error_message && (
-                    <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{item.error_message}
+                {/* ── History Tab ── */}
+                {activeTab === 'history' && (
+                    <div className="space-y-2 min-h-[200px]">
+                        {!historyLoaded ? (
+                            <div className="flex items-center justify-center py-10 text-muted-foreground">
+                                <RefreshCw className="w-4 h-4 animate-spin mr-2" /> Loading history…
+                            </div>
+                        ) : history.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-10 text-muted-foreground/60">
+                                <Clock className="w-8 h-8 mb-2 opacity-30" />
+                                <p className="text-sm">No transitions recorded yet.</p>
+                            </div>
+                        ) : (
+                            <div className="relative pl-5">
+                                {/* Vertical line */}
+                                <div className="absolute left-2 top-0 bottom-0 w-px bg-border/50" />
+                                <div className="space-y-4">
+                                    {history.map((h, i) => {
+                                        const toStage = stageFor(h.to_status);
+                                        return (
+                                            <motion.div
+                                                key={h.id ?? i}
+                                                initial={{ opacity: 0, x: -6 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: i * 0.04 }}
+                                                className="relative"
+                                            >
+                                                {/* Dot */}
+                                                <div
+                                                    className="absolute -left-[18px] top-1 w-3 h-3 rounded-full border-2 border-background"
+                                                    style={{ backgroundColor: toStage.color }}
+                                                />
+                                                <div className="bg-card/60 border border-border/30 rounded-lg px-3 py-2 space-y-1">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-1.5">
+                                                            {h.from_status && (
+                                                                <>
+                                                                    <span className="text-[10px] font-bold px-1.5 py-[1px] rounded" style={{ backgroundColor: stageColor(h.from_status) + '20', color: stageColor(h.from_status) }}>{h.from_status}</span>
+                                                                    <ArrowRight className="w-3 h-3 text-muted-foreground/50" />
+                                                                </>
+                                                            )}
+                                                            <span className="text-[10px] font-bold px-1.5 py-[1px] rounded" style={{ backgroundColor: toStage.color + '20', color: toStage.color }}>{h.to_status}</span>
+                                                        </div>
+                                                        <span className="text-[10px] text-muted-foreground/60 shrink-0">{timeAgo(h.created_at)}</span>
+                                                    </div>
+                                                    {h.note && <p className="text-[11px] text-muted-foreground/70 italic">{h.note}</p>}
+                                                </div>
+                                            </motion.div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
-                {/* Action buttons */}
+                {/* Action buttons (always visible) */}
                 <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-                    {/* Next state transitions */}
                     {nextStates.map(s => {
                         const ns = stageFor(s);
                         const Icon = ns.icon;
@@ -365,7 +732,6 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
                         );
                     })}
 
-                    {/* Send to Phantom if APPROVED or SCHEDULED */}
                     {['APPROVED', 'SCHEDULED'].includes(item.status) && (
                         <Button size="sm" variant="outline" onClick={sendToPhantom} disabled={sending} className="gap-1.5 border-purple-500/40 text-purple-400 hover:bg-purple-500/10">
                             {sending ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
@@ -383,65 +749,87 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
     );
 }
 
-// ── Kanban Card (Aceternity-style Spotlight) ──────────────────────────────────
+// ── Kanban Card ───────────────────────────────────────────────────────────────
 
 function KanbanCard({ item, onClick }) {
     const stage = stageFor(item.status);
-    const preview = (item.edited_content || item.generated_content || '').slice(0, 160);
+    const preview = (item.edited_content || item.generated_content || '').slice(0, 140);
     return (
-        <motion.div layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full shrink-0">
-            <CardSpotlight color={`${stage.color}25`} radius={280} className="cursor-pointer group shadow-sm hover:shadow-md border border-border/20 rounded-xl overflow-hidden" onClick={onClick}>
-                <div className="p-3 flex flex-col gap-2 relative z-10 bg-background/80 hover:bg-background/95 transition-colors h-full" style={{ borderLeft: `3px solid ${stage.color}` }}>
-                    {/* Title */}
-                    <p className="text-[13px] font-semibold leading-tight line-clamp-1 group-hover:text-primary transition-colors pr-1">
-                        {item.title || 'Untitled Ideas'}
-                    </p>
+        <motion.div
+            layout
+            initial={{ opacity: 0, y: 10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.94, y: -4 }}
+            transition={{ duration: 0.22 }}
+            className="w-full shrink-0 group"
+        >
+            <div
+                onClick={onClick}
+                className="relative cursor-pointer rounded-xl border border-border/25 bg-card/80 backdrop-blur-md shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 overflow-hidden"
+                style={{ borderLeft: `3px solid ${stage.color}` }}
+            >
+                {/* Hover glow */}
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
+                    style={{ background: `radial-gradient(ellipse at top left, ${stage.color}10, transparent 55%)` }} />
+
+                <div className="p-3 flex flex-col gap-2 relative z-10">
+                    {/* Title row with phantom badge */}
+                    <div className="flex items-start justify-between gap-1.5">
+                        <p className="text-[13px] font-semibold leading-snug line-clamp-2 group-hover:text-primary transition-colors flex-1 min-w-0">
+                            {item.title || 'Untitled Idea'}
+                        </p>
+                        {item.phantom_status && (
+                            <div className="shrink-0 mt-0.5">
+                                <PhantomBadge status={item.phantom_status} />
+                            </div>
+                        )}
+                    </div>
 
                     {/* Content preview */}
                     {preview && (
-                        <p className="text-[12px] text-muted-foreground leading-snug line-clamp-2 font-medium opacity-85">
-                            {preview}{preview.length === 160 ? '…' : ''}
+                        <p className="text-[11px] text-muted-foreground/80 leading-relaxed line-clamp-2">
+                            {preview}{preview.length === 140 ? '…' : ''}
                         </p>
                     )}
 
-                    {/* Tags (Compact Metadata) */}
-                    <div className="flex flex-wrap gap-1 mt-1">
-                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-[2px] rounded uppercase bg-gradient-to-r from-purple-500/10 to-indigo-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                    {/* Compact Tags */}
+                    <div className="flex flex-wrap gap-1">
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-[2px] rounded-md bg-gradient-to-r from-purple-500/15 to-indigo-500/15 text-purple-400 border border-purple-500/25">
                             <Sparkles className="w-2 h-2 shrink-0" />AI
                         </span>
                         {item.persona && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                                 <Users className="w-2.5 h-2.5 shrink-0" />{item.persona}
                             </span>
                         )}
                         {item.objective && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
                                 <Target className="w-2.5 h-2.5 shrink-0" />{item.objective.replace('_', ' ')}
                             </span>
                         )}
                         {item.industry && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-[2px] rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                 <Globe className="w-2.5 h-2.5 shrink-0" />{item.industry}
                             </span>
                         )}
                     </div>
 
                     {/* Footer */}
-                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-2 mt-auto border-t border-border/30">
-                        <span className="font-medium">{timeAgo(item.created_at)}</span>
-                        <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground/60 pt-2 mt-auto border-t border-border/25">
+                        <span>{timeAgo(item.created_at)}</span>
+                        <div className="flex items-center gap-1.5">
                             {item.scheduled_at && (
-                                <span className="flex items-center gap-1 text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded text-[9px] font-semibold">
-                                    <Calendar className="w-2.5 h-2.5" />
-                                    {new Date(item.scheduled_at).toLocaleDateString()}
+                                <span className="flex items-center gap-1 text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded-md text-[9px] font-semibold border border-blue-500/20">
+                                    <Calendar className="w-2.5 h-2.5" />{new Date(item.scheduled_at).toLocaleDateString()}
                                 </span>
                             )}
-                            {item.error_message && <AlertCircle className="w-3 h-3 text-red-500" />}
-                            {item.post_url && <ExternalLink className="w-3 h-3 text-emerald-500" />}
+                            {item.error_message && <AlertCircle className="w-3 h-3 text-red-400" />}
+                            {item.post_url && <ExternalLink className="w-3 h-3 text-emerald-400" />}
+                            <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity" />
                         </div>
                     </div>
                 </div>
-            </CardSpotlight>
+            </div>
         </motion.div>
     );
 }
@@ -455,20 +843,22 @@ function ModalShell({ title, onClose, children, wide = false }) {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                className="absolute inset-0 bg-black/70 backdrop-blur-md"
                 onClick={onClose}
             />
             <motion.div
-                initial={{ opacity: 0, scale: 0.96, y: 16 }}
+                initial={{ opacity: 0, scale: 0.94, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.96, y: 16 }}
-                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                className={`relative bg-card border border-border rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-hidden flex flex-col ${wide ? 'max-w-2xl' : 'max-w-lg'}`}
+                exit={{ opacity: 0, scale: 0.94, y: 20 }}
+                transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+                className={`relative bg-card/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl shadow-black/40 w-full max-h-[90vh] overflow-hidden flex flex-col ${wide ? 'max-w-2xl' : 'max-w-lg'}`}
             >
-                <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-                    <h2 className="text-lg font-semibold">{title}</h2>
-                    <Button variant="ghost" size="icon" className="rounded-full" onClick={onClose}>
-                        <X className="w-4 h-4" />
+                {/* Gradient header */}
+                <div className="relative flex items-center justify-between px-6 py-4 border-b border-border/40 shrink-0 overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-600/8 via-purple-600/6 to-transparent pointer-events-none" />
+                    <h2 className="relative text-base font-bold tracking-tight">{title}</h2>
+                    <Button variant="ghost" size="icon" className="relative h-8 w-8 rounded-xl hover:bg-muted/60" onClick={onClose}>
+                        <X className="w-3.5 h-3.5" />
                     </Button>
                 </div>
                 <div className="p-6 overflow-y-auto">{children}</div>
@@ -503,6 +893,8 @@ export default function ContentEnginePage() {
     const [showFilters, setShowFilters] = useState(false);
     const [showGenerateModal, setShowGenerateModal] = useState(false);
     const [showAddSourceModal, setShowAddSourceModal] = useState(false);
+    const [showManualCreateModal, setShowManualCreateModal] = useState(false);
+    const [showCtaManagerModal, setShowCtaManagerModal] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
 
     // Filters (right panel)
@@ -511,6 +903,9 @@ export default function ContentEnginePage() {
     const [filterObjective, setFilterObjective] = useState('');
     const [filterSource, setFilterSource] = useState('');
     const [filterStatus, setFilterStatus] = useState(''); // empty = all
+
+    // ── Delete source state ────────────────────────────────────────────────────
+    const [deleteSourceId, setDeleteSourceId] = useState(null); // id to confirm deletion
 
     const loadAll = useCallback(async () => {
         setLoading(true);
@@ -532,7 +927,65 @@ export default function ContentEnginePage() {
         }
     }, []);
 
+    // ── Soft-refresh items only (no loading flash, no scroll/modal disruption) ──
+    const softRefreshItems = useCallback(async () => {
+        try {
+            const res = await axios.get('/api/sow/engine/items');
+            const fresh = Array.isArray(res.data) ? res.data : [];
+            setItems(prev => {
+                // Merge: update changed items, keep order, add new ones at front
+                const prevMap = new Map(prev.map(i => [i.id, i]));
+                const merged = fresh.map(item => {
+                    const old = prevMap.get(item.id);
+                    return old ? { ...old, ...item } : item;
+                });
+                return merged;
+            });
+        } catch { /* silent — do not disrupt UX on poll failure */ }
+    }, []);
+
     useEffect(() => { loadAll(); }, [loadAll]);
+
+    // ── Handle deep linking from notifications ──────────────────────────────────
+    useEffect(() => {
+        if (!loading && items.length > 0) {
+            const params = new URLSearchParams(window.location.search);
+            const highlightId = params.get('highlight');
+            if (highlightId) {
+                const itemToHighlight = items.find(i => String(i.id) === highlightId);
+                // Only select if not already selected to avoid loop
+                if (itemToHighlight && !selectedItem) {
+                    setSelectedItem(itemToHighlight);
+                    setActiveTab('board'); // ensure we are on the board view
+
+                    // Clear the query param so refreshing doesn't reopen it
+                    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+                    window.history.replaceState({ path: newUrl }, '', newUrl);
+                }
+            }
+        }
+    }, [loading, items, selectedItem]);
+
+    // ── 20-second polling for cron/phantom_status updates ─────────────────────
+    useEffect(() => {
+        const interval = setInterval(softRefreshItems, 20000);
+        return () => clearInterval(interval);
+    }, [softRefreshItems]);
+
+    // ── Delete source handler ──────────────────────────────────────────────────
+    const handleDeleteSource = async (sourceId) => {
+        try {
+            await axios.delete(`/api/sow/engine/sources/${sourceId}`);
+            setSources(prev => prev.filter(s => s.id !== sourceId));
+            // Clear filter if the deleted source was selected
+            if (filterSource === String(sourceId)) setFilterSource('');
+            addToast('Source deleted', 'success');
+        } catch (e) {
+            addToast(e.response?.data?.error || 'Failed to delete source', 'error');
+        } finally {
+            setDeleteSourceId(null);
+        }
+    };
 
     // Derived: filtered items
     const filteredItems = items.filter(item => {
@@ -603,6 +1056,24 @@ export default function ContentEnginePage() {
                             onClick={() => setActiveTab(t => t === 'board' ? 'analytics' : 'board')}
                         >
                             {activeTab === 'board' ? <><BarChart2 className="w-4 h-4" /> Analytics</> : <><Rss className="w-4 h-4" /> Board</>}
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 rounded-xl border-border/50 hover:border-amber-500/30 hover:bg-amber-500/5 text-muted-foreground hover:text-amber-400"
+                            onClick={() => setShowCtaManagerModal(true)}
+                            title="Manage CTA Templates"
+                        >
+                            <Tag className="w-4 h-4" /> CTAs
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5 rounded-xl border-border/50 hover:border-emerald-500/30 hover:bg-emerald-500/5 text-muted-foreground hover:text-emerald-400"
+                            onClick={() => setShowManualCreateModal(true)}
+                            title="Add item manually"
+                        >
+                            <Plus className="w-4 h-4" /> Manual
                         </Button>
                         <Button
                             size="sm"
@@ -678,21 +1149,33 @@ export default function ContentEnginePage() {
                                         <div
                                             key={s.id}
                                             onClick={() => setFilterSource(filterSource === String(s.id) ? '' : String(s.id))}
-                                            className={`group cursor-pointer rounded-lg p-3 border transition-all duration-200 ${filterSource === String(s.id) ? 'border-indigo-500/50 bg-indigo-500/10 shadow-sm shadow-indigo-500/5' : 'border-border/40 hover:border-border bg-muted/10 hover:bg-muted/30'}`}
+                                            className={`group/src cursor-pointer rounded-lg p-3 border transition-all duration-200 ${filterSource === String(s.id) ? 'border-indigo-500/50 bg-indigo-500/10 shadow-sm shadow-indigo-500/5' : 'border-border/40 hover:border-border bg-muted/10 hover:bg-muted/30'}`}
                                         >
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2 min-w-0">
+                                            <div className="flex items-center justify-between gap-1.5">
+                                                <div className="flex items-center gap-2 min-w-0 flex-1">
                                                     <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${s.type === 'rss' ? 'bg-orange-500/15 text-orange-500' : s.type === 'keyword' ? 'bg-blue-500/15 text-blue-500' : 'bg-purple-500/15 text-purple-500'}`}>
                                                         {s.type === 'rss' ? <Rss className="w-3.5 h-3.5" /> : s.type === 'keyword' ? <Target className="w-3.5 h-3.5" /> : <BookOpen className="w-3.5 h-3.5" />}
                                                     </div>
-                                                    <span className="text-xs font-medium truncate">{s.name}</span>
+                                                    <span className="text-xs font-medium truncate flex-1">{s.name}</span>
                                                 </div>
-                                                <button
-                                                    onClick={e => { e.stopPropagation(); toggleSourceActive(s); }}
-                                                    className={`w-9 h-5 rounded-full transition-all shrink-0 flex items-center ${s.active ? 'bg-emerald-500 justify-end' : 'bg-muted justify-start'}`}
-                                                >
-                                                    <span className="w-3.5 h-3.5 rounded-full bg-white shadow-sm m-0.5 transition-transform" />
-                                                </button>
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    {/* Toggle active */}
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); toggleSourceActive(s); }}
+                                                        className={`w-9 h-5 rounded-full transition-all shrink-0 flex items-center ${s.active ? 'bg-emerald-500 justify-end' : 'bg-muted justify-start'}`}
+                                                        title={s.active ? 'Deactivate source' : 'Activate source'}
+                                                    >
+                                                        <span className="w-3.5 h-3.5 rounded-full bg-white shadow-sm m-0.5 transition-transform" />
+                                                    </button>
+                                                    {/* Delete source */}
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); setDeleteSourceId(s.id); }}
+                                                        className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover/src:opacity-100 transition-all duration-150"
+                                                        title="Delete source"
+                                                    >
+                                                        <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                </div>
                                             </div>
                                             {(s.industry_tag || s.persona_tag) && (
                                                 <div className="flex gap-1 mt-2 flex-wrap">
@@ -732,24 +1215,38 @@ export default function ContentEnginePage() {
 
                                             return (
                                                 <React.Fragment key={stage.key}>
-                                                    {index > 0 && <div className="w-px shrink-0 bg-border/40 my-4" aria-hidden />}
-                                                    <div
-                                                        className="shrink-0 flex flex-col h-full snap-center w-[300px] sm:w-[320px]"
-                                                    >
-                                                        {/* Stage header */}
-                                                        <div className="flex items-center justify-between mb-3 px-1 shrink-0">
+                                                    {index > 0 && <div className="w-px shrink-0 bg-border/30 my-2" aria-hidden />}
+                                                    <div className="shrink-0 flex flex-col h-full snap-center w-[290px] sm:w-[310px]">
+                                                        {/* Stage header — glassy pill */}
+                                                        <div
+                                                            className="flex items-center justify-between mb-2.5 px-3 py-2 rounded-xl border shrink-0"
+                                                            style={{ backgroundColor: `${stage.color}10`, borderColor: `${stage.color}25` }}
+                                                        >
                                                             <div className="flex items-center gap-2">
-                                                                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/5 shadow-sm" style={{ backgroundColor: stage.bg }}>
-                                                                    <Icon className="w-3.5 h-3.5" style={{ color: stage.color }} />
+                                                                <div
+                                                                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+                                                                    style={{ backgroundColor: `${stage.color}25` }}
+                                                                >
+                                                                    <Icon className="w-3 h-3" style={{ color: stage.color }} />
                                                                 </div>
-                                                                <span className="text-[13px] font-bold tracking-wide uppercase" style={{ color: stage.color }}>{stage.label}</span>
+                                                                <span className="text-[11px] font-bold tracking-widest uppercase" style={{ color: stage.color }}>
+                                                                    {stage.label}
+                                                                </span>
                                                             </div>
-                                                            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-background border border-border/40 text-muted-foreground shadow-sm">{stageItems.length}</span>
+                                                            <span
+                                                                className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                                                style={{ backgroundColor: `${stage.color}20`, color: stage.color }}
+                                                            >
+                                                                {stageItems.length}
+                                                            </span>
                                                         </div>
 
-                                                        {/* Column content */}
-                                                        <div className="flex-1 rounded-xl border border-border/30 overflow-hidden flex flex-col shadow-inner" style={{ backgroundColor: stage.bg }}>
-                                                            <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 scrollbar-thin hover:scrollbar-thumb-muted-foreground/20">
+                                                        {/* Column body */}
+                                                        <div
+                                                            className="flex-1 rounded-2xl border border-border/20 overflow-hidden flex flex-col"
+                                                            style={{ background: `linear-gradient(180deg, ${stage.color}06 0%, transparent 40%)` }}
+                                                        >
+                                                            <div className="flex-1 overflow-y-auto p-2 space-y-2 scrollbar-thin scrollbar-thumb-muted/30 hover:scrollbar-thumb-muted/50">
                                                                 <AnimatePresence mode="popLayout">
                                                                     {stageItems.map(item => (
                                                                         <KanbanCard key={item.id} item={item} onClick={() => setSelectedItem(item)} />
@@ -757,35 +1254,45 @@ export default function ContentEnginePage() {
                                                                 </AnimatePresence>
 
                                                                 {stageItems.length === 0 && (
-                                                                    <div className="flex flex-col items-center justify-center pt-8 pb-6 text-center opacity-90 mx-2">
-                                                                        <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3 shadow-sm border border-black/5 dark:border-white/5" style={{ backgroundColor: stage.color + '15' }}>
-                                                                            <Icon className="w-5 h-5 opacity-80" style={{ color: stage.color }} />
+                                                                    <motion.div
+                                                                        initial={{ opacity: 0 }}
+                                                                        animate={{ opacity: 1 }}
+                                                                        className="flex flex-col items-center justify-center pt-10 pb-8 text-center mx-2"
+                                                                    >
+                                                                        <div
+                                                                            className="w-12 h-12 rounded-2xl flex items-center justify-center mb-3 border"
+                                                                            style={{ backgroundColor: `${stage.color}12`, borderColor: `${stage.color}20` }}
+                                                                        >
+                                                                            <Icon className="w-6 h-6" style={{ color: stage.color, opacity: 0.7 }} />
                                                                         </div>
-                                                                        <p className="text-xs text-muted-foreground font-medium mb-4 max-w-[200px] leading-relaxed">
-                                                                            {stage.key === 'IDEA' ? 'Need inspiration? Use AI to generate new content ideas.' : `Drag or move items here.`}
+                                                                        <p className="text-[11px] text-muted-foreground/70 font-medium mb-4 max-w-[190px] leading-relaxed">
+                                                                            {stage.key === 'IDEA'
+                                                                                ? 'Generate ideas with AI to start your pipeline.'
+                                                                                : `Nothing here yet.`}
                                                                         </p>
                                                                         {stage.key === 'IDEA' && (
-                                                                            <Button size="sm" className="h-8 text-[11px] gap-1.5 rounded-lg w-full max-w-[160px] shadow-sm bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-0" onClick={() => setShowGenerateModal(true)}>
-                                                                                <Sparkles className="w-3.5 h-3.5" /> + Generate Idea
+                                                                            <Button
+                                                                                size="sm"
+                                                                                className="h-8 text-[11px] gap-1.5 rounded-xl w-full max-w-[155px] bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-0 shadow-md shadow-indigo-500/20"
+                                                                                onClick={() => setShowGenerateModal(true)}
+                                                                            >
+                                                                                <Sparkles className="w-3.5 h-3.5" /> Generate Idea
                                                                             </Button>
                                                                         )}
-                                                                    </div>
+                                                                    </motion.div>
                                                                 )}
-
-                                                                {/* Filler space at bottom of list to allow over-scrolling slightly */}
-                                                                <div className="h-6" aria-hidden />
+                                                                <div className="h-4" aria-hidden />
                                                             </div>
 
-                                                            {/* Quick action footer per column */}
                                                             {isIdeaStage && (
-                                                                <div className="p-2 border-t border-border/20 bg-background/50 backdrop-blur-md shrink-0">
+                                                                <div className="p-2 border-t border-border/20 bg-card/60 backdrop-blur-sm shrink-0">
                                                                     <Button
                                                                         variant="ghost"
                                                                         size="sm"
-                                                                        className="w-full justify-center text-muted-foreground hover:text-foreground hover:bg-background/80 gap-1.5 h-8 text-[11px] font-semibold rounded-lg shadow-sm border border-border/30"
+                                                                        className="w-full justify-center text-muted-foreground hover:text-primary gap-1.5 h-8 text-[11px] font-medium rounded-xl border border-border/30 hover:border-primary/30 hover:bg-primary/5"
                                                                         onClick={() => setShowGenerateModal(true)}
                                                                     >
-                                                                        <Plus className="w-3.5 h-3.5" /> Quick Idea
+                                                                        <Plus className="w-3.5 h-3.5" /> New Idea
                                                                     </Button>
                                                                 </div>
                                                             )}
@@ -870,6 +1377,16 @@ export default function ContentEnginePage() {
                     {showAddSourceModal && (
                         <AddSourceModal onClose={() => setShowAddSourceModal(false)} onCreated={handleSourceCreated} />
                     )}
+                    {showManualCreateModal && (
+                        <ManualCreateModal onClose={() => setShowManualCreateModal(false)} onCreated={handleItemCreated} />
+                    )}
+                    {showCtaManagerModal && (
+                        <CtaManagerModal
+                            ctaTemplates={ctaTemplates}
+                            onClose={() => setShowCtaManagerModal(false)}
+                            onChange={setCtaTemplates}
+                        />
+                    )}
                     {selectedItem && (
                         <ItemDetailModal
                             item={selectedItem}
@@ -879,6 +1396,68 @@ export default function ContentEnginePage() {
                             onDeleted={handleItemDeleted}
                         />
                     )}
+                </AnimatePresence>
+
+                {/* ── Delete Source Confirmation Modal ── */}
+                <AnimatePresence>
+                    {deleteSourceId && (() => {
+                        const src = sources.find(s => s.id === deleteSourceId);
+                        return (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute inset-0 bg-black/70 backdrop-blur-md"
+                                    onClick={() => setDeleteSourceId(null)}
+                                />
+                                <motion.div
+                                    initial={{ opacity: 0, scale: 0.94, y: 16 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.94, y: 16 }}
+                                    transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+                                    className="relative bg-card/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl shadow-black/40 w-full max-w-sm overflow-hidden"
+                                >
+                                    {/* Danger header accent */}
+                                    <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-red-500 to-rose-500 rounded-t-2xl" />
+                                    <div className="p-6 pt-7">
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500/15 border border-red-500/25">
+                                                <Trash2 className="w-5 h-5 text-red-400" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-sm font-bold text-foreground">Delete Source</h3>
+                                                <p className="text-xs text-muted-foreground mt-0.5">This action cannot be undone</p>
+                                            </div>
+                                        </div>
+                                        <p className="text-sm text-foreground/80 mb-1">
+                                            Are you sure you want to delete <span className="font-semibold text-foreground">"{src?.name}"</span>?
+                                        </p>
+                                        <p className="text-xs text-muted-foreground mb-6">
+                                            Content items already created from this source will not be affected.
+                                        </p>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="flex-1 h-9 rounded-xl border-border/50"
+                                                onClick={() => setDeleteSourceId(null)}
+                                            >
+                                                Cancel
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                className="flex-1 h-9 rounded-xl bg-red-600 hover:bg-red-500 text-white border-0 shadow-lg shadow-red-500/20"
+                                                onClick={() => handleDeleteSource(deleteSourceId)}
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Delete Source
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            </div>
+                        );
+                    })()}
                 </AnimatePresence>
             </div>
         </div>
@@ -910,21 +1489,24 @@ function AnalyticsView({ analytics, items }) {
     ];
 
     return (
-        <div className="space-y-6 pr-2">
-            {/* Stat grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {statCards.map(s => (
-                    <Card key={s.label} className="border-border/50 overflow-hidden" style={{ borderLeftWidth: '4px', borderLeftColor: s.color }}>
-                        <CardContent className="p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ backgroundColor: `${s.color}15` }}>
-                                    <s.icon className="w-4 h-4" style={{ color: s.color }} />
+        <div className="space-y-5 pr-2 overflow-y-auto pb-4">
+            {/* Glassmorphic stat grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {statCards.map((s, i) => (
+                    <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05, duration: 0.3 }}>
+                        <Card className="relative border border-border/30 bg-card/60 backdrop-blur-xl overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200" style={{ borderLeft: `3px solid ${s.color}` }}>
+                            <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(circle at top right, ${s.color}25, transparent 60%)` }} />
+                            <CardContent className="p-4 relative z-10">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{s.label}</span>
+                                    <div className="flex h-6 w-6 items-center justify-center rounded-lg" style={{ backgroundColor: `${s.color}20` }}>
+                                        <s.icon className="w-3 h-3" style={{ color: s.color }} />
+                                    </div>
                                 </div>
-                                <span className="text-xs font-medium text-muted-foreground">{s.label}</span>
-                            </div>
-                            <p className="text-2xl font-bold tabular-nums" style={{ color: s.color }}>{s.value ?? 0}</p>
-                        </CardContent>
-                    </Card>
+                                <p className="text-2xl font-extrabold tabular-nums tracking-tight" style={{ color: s.color }}>{s.value ?? 0}</p>
+                            </CardContent>
+                        </Card>
+                    </motion.div>
                 ))}
             </div>
 

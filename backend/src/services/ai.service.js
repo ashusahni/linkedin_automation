@@ -3,8 +3,13 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import '../config/index.js'; // Ensure config is loaded
 
-// Determine which AI provider to use
-const AI_PROVIDER = (process.env.AI_PROVIDER || 'openai').toLowerCase();
+// AI_PROVIDER is read dynamically on each call so Settings page changes take effect immediately.
+// Use the getter function getProvider() everywhere instead of a module-level const.
+function getProvider() {
+    return (process.env.AI_PROVIDER || 'openai').toLowerCase();
+}
+// Keep a readable alias for logging at startup
+const AI_PROVIDER = getProvider();
 
 // Initialize OpenAI client
 // Initialize OpenAI client
@@ -60,9 +65,10 @@ class AIService {
      * Call AI API with automatic fallback
      */
     static async callAI(prompt, maxTokens = 300, temperature = 0.8) {
-        // Determine primary and secondary providers
-        let primary = AI_PROVIDER === 'claude' ? 'claude' : 'openai';
-        let secondary = AI_PROVIDER === 'claude' ? 'openai' : 'claude';
+        // Read provider dynamically — reflects Settings page changes without restart
+        const activeProvider = getProvider();
+        let primary = activeProvider === 'claude' ? 'claude' : 'openai';
+        let secondary = activeProvider === 'claude' ? 'openai' : 'claude';
 
         // Helper to execute call per provider
         const executeCall = async (provider) => {

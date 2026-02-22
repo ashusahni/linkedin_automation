@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageGuide from './PageGuide';
 import axios from 'axios';
-import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network } from 'lucide-react';
+import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, FileSpreadsheet } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -73,6 +73,7 @@ export default function LeadsTable() {
         // Advanced filters
         hasEmail: false,
         hasLinkedin: false,
+        hasContactInfo: searchParams.get('has_contact_info') === 'true',
         createdFrom: '',
         createdTo: '',
     });
@@ -234,14 +235,14 @@ export default function LeadsTable() {
         const quality = searchParams.get('quality') || '';
         const industry = searchParams.get('industry') || '';
         const source = searchParams.get('source') || '';
+        const hasContactInfo = searchParams.get('has_contact_info') === 'true';
 
         // Check if URL params differ from current state to determine if we need to update/fetch
-        // We treat empty URL params as "clear filter" (unlike previous logic which preserved state)
-        // to support navigating from a filtered view (Sidebar "My Contacts") back to "All Contacts" (/leads).
         const stateDiffers =
             connectionDegree !== metaFilters.connectionDegree ||
             quality !== metaFilters.quality ||
             industry !== metaFilters.industry ||
+            hasContactInfo !== metaFilters.hasContactInfo ||
             (source && source !== metaFilters.source);
 
         if (stateDiffers) {
@@ -250,6 +251,7 @@ export default function LeadsTable() {
                 connectionDegree: connectionDegree,
                 quality: quality,
                 industry: industry,
+                hasContactInfo: hasContactInfo,
                 ...(source ? { source } : {}),
             };
 
@@ -262,14 +264,6 @@ export default function LeadsTable() {
             // Trigger fetch with new filters immediately
             fetchLeads(false, newFilters);
             fetchStats({ metaFilters: newFilters });
-        } else {
-            // Initial fetch or no-op if params match state
-            // If it's pure mount (no diff), we still might want to fetch if data is empty?
-            // Usually useEffect runs on mount. If state matches (empty), we fetch.
-            // But since 'stateDiffers' compares with initial state (mostly empty), logic holds.
-            // However, on strict mount, both might be empty.
-            // We should ensure initial fetch happens.
-            // But we don't want double fetch if stateDiffers triggers one.
         }
     }, [searchParams]); // Run whenever URL parameters change
 
@@ -286,10 +280,11 @@ export default function LeadsTable() {
         const connectionDegree = searchParams.get('connection_degree') || '';
         const quality = searchParams.get('quality') || '';
         const industry = searchParams.get('industry') || '';
+        const hasContactInfo = searchParams.get('has_contact_info') || '';
 
         // If NO params are set (default view), the above effect won't trigger if default state is also empty.
         // So we must ensure fetch happens.
-        if (!connectionDegree && !quality && !industry) {
+        if (!connectionDegree && !quality && !industry && !hasContactInfo) {
             fetchLeads();
             fetchStats();
         }
@@ -518,6 +513,9 @@ export default function LeadsTable() {
             }
             if (filtersToUse.hasLinkedin) {
                 params.set('hasLinkedin', 'true');
+            }
+            if (filtersToUse.hasContactInfo) {
+                params.set('has_contact_info', 'true');
             }
             if (filtersToUse.createdFrom) {
                 params.set('createdFrom', filtersToUse.createdFrom);
@@ -770,6 +768,7 @@ export default function LeadsTable() {
             source: 'all',
             hasEmail: false,
             hasLinkedin: false,
+            hasContactInfo: false,
             createdFrom: '',
             createdTo: '',
         };
@@ -1246,27 +1245,27 @@ export default function LeadsTable() {
                                 {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
                                     <Button
                                         variant="outline"
-                                        className="gap-2 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
+                                        size="icon"
+                                        className="h-10 w-10 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
                                         onClick={handleManualScrape}
                                         disabled={enriching}
+                                        title="Enrich Contact Info"
                                     >
-                                        <Database className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                        Enrich Contact Info
+                                        <Contact className={cn("h-4 w-4", enriching && "animate-spin")} />
                                     </Button>
                                 )}
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
-                                        <Button className="gap-2 shadow-sm">
-                                            <Download className="h-4 w-4" /> Export Report
-                                            <ChevronDown className="h-4 w-4" />
+                                        <Button variant="outline" size="icon" className="h-10 w-10 shadow-sm" title="Export Report">
+                                            <Upload className="h-4 w-4" />
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
                                         <DropdownMenuItem onClick={() => handleExport('csv')} className="gap-2">
-                                            <Database className="h-4 w-4" /> Export Report (CSV)
+                                            <Upload className="h-4 w-4" /> Export Report (CSV)
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleExport('xlsx')} className="gap-2">
-                                            <Database className="h-4 w-4" /> Export Report (Excel)
+                                            <Upload className="h-4 w-4" /> Export Report (Excel)
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
@@ -1309,6 +1308,24 @@ export default function LeadsTable() {
                                             }
                                         </span>
                                     )}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={() => {
+                                        setMetaFilters(prev => ({
+                                            ...prev,
+                                            source: prev.source === 'csv_import,excel_import' ? 'all' : 'csv_import,excel_import'
+                                        }));
+                                    }}
+                                    className={cn(
+                                        "shrink-0 h-10 w-10 transition-colors",
+                                        metaFilters.source === 'csv_import,excel_import' && "bg-primary/10 border-primary text-primary"
+                                    )}
+                                    title="Filter imported leads (CSV/Excel)"
+                                >
+                                    <FileSpreadsheet className="h-4 w-4" />
                                 </Button>
                                 <Button variant="outline" size="icon" className="h-10 w-10" onClick={() => fetchLeads(false)} title="Refresh">
                                     <RefreshCw className="h-4 w-4" />

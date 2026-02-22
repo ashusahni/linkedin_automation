@@ -2,6 +2,7 @@ import "./config/index.js"; // 👈 This loads environment variables and config
 import app from "./app.js";
 import config from "./config/index.js";
 import { initScheduler } from "./services/scheduler.service.js";
+import { initContentSheetSync } from "./services/contentSheetSync.service.js";
 import { runMigrations } from "./db/migrations.js";
 import logger from "./utils/logger.js";
 import industryHierarchyService from "./services/industryHierarchy.service.js";
@@ -56,6 +57,10 @@ async function init() {
   } else {
     logger.info("⏰ Scheduler disabled (SCHEDULER_ENABLED=false)");
   }
+
+  // Start the Content Engine → Google Sheets sync cron
+  // Respects GOOGLE_SHEETS_ENABLED=false flag to disable without code changes
+  initContentSheetSync();
 
   app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);

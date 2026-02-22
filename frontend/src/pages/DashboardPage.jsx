@@ -187,11 +187,7 @@ export default function DashboardPage() {
   const [preferencesLoading, setPreferencesLoading] = useState(false);
   const [showPreferenceSuccess, setShowPreferenceSuccess] = useState(false);
 
-  // CSV Import State
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState(null);
-  const [importType, setImportType] = useState("csv"); // 'csv' or 'excel'
-  const fileInputRef = useRef(null);
+
 
   useEffect(() => {
     fetchAnalytics();
@@ -267,73 +263,7 @@ export default function DashboardPage() {
     }
   };
 
-  const handleFileSelect = (type) => {
-    setImportType(type);
-    fileInputRef.current?.click();
-  };
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    if (importType === "csv" && !file.name.endsWith(".csv")) {
-      setUploadResult({
-        success: false,
-        message: "Please upload a CSV file",
-      });
-      return;
-    }
-
-    if (importType === "excel" && !file.name.match(/\.(xlsx|xls)$/)) {
-      setUploadResult({
-        success: false,
-        message: "Please upload an Excel file (.xlsx or .xls)",
-      });
-      return;
-    }
-
-    const formData = new FormData();
-    if (importType === "csv") {
-      formData.append("csvFile", file);
-    } else {
-      formData.append("excelFile", file);
-    }
-
-    try {
-      setUploading(true);
-      setUploadResult(null);
-
-      const endpoint =
-        importType === "csv"
-          ? "/api/leads/import-csv"
-          : "/api/leads/import-excel";
-      const res = await axios.post(endpoint, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-
-      setUploadResult({
-        success: true,
-        message: "Import completed successfully!",
-        summary: res.data.summary,
-      });
-
-      // Refresh data
-      fetchAnalytics();
-    } catch (error) {
-      console.error("Upload failed:", error);
-      let errorMessage = `Failed to upload ${importType.toUpperCase()} file`;
-      if (error.response?.data?.error) errorMessage = error.response.data.error;
-      else if (error.message) errorMessage = error.message;
-
-      setUploadResult({
-        success: false,
-        message: errorMessage,
-      });
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
 
   const ls = analytics?.leadScraping ?? {};
   const ca = analytics?.campaignAnalytics ?? {};
@@ -630,49 +560,7 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            {/* Vertical Divider (Desktop) */}
-            <div className="h-8 w-px bg-border hidden sm:block"></div>
 
-            {/* Import Action Group */}
-            <div className="flex items-center">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={importType === "csv" ? ".csv" : ".xlsx,.xls"}
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="default"
-                    disabled={uploading}
-                    className="gap-2 border-primary/20 hover:bg-primary/5 font-bold tracking-wide w-full sm:w-auto"
-                  >
-                    <Upload className="h-4 w-4" />
-                    {uploading ? "IMPORTING..." : "IMPORT CONTACTS"}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-[180px]">
-                  <DropdownMenuItem
-                    onClick={() => handleFileSelect("csv")}
-                    className="gap-2 cursor-pointer"
-                  >
-                    <FileText className="h-4 w-4" />
-                    <span>From CSV File</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => handleFileSelect("excel")}
-                    className="gap-2 cursor-pointer"
-                  >
-                    <FileText className="h-4 w-4 text-green-600" />
-                    <span>From Excel File</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <InfoTooltip content="Import external leads (CSV/Excel) to track and analyze them in your dashboard." />
-            </div>
           </div>
         </div>
 
@@ -722,62 +610,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Upload Result Alert */}
-        {uploadResult && (
-          <div
-            className={cn(
-              "w-full animate-in slide-in-from-top-2 fade-in duration-300 rounded-lg border p-4 shadow-sm mb-4",
-              uploadResult.success
-                ? "bg-green-50/50 border-green-200"
-                : "bg-red-50/50 border-red-200",
-            )}
-          >
-            <div className="flex items-start gap-3">
-              {uploadResult.success ? (
-                <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5" />
-              ) : (
-                <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
-              )}
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <p
-                    className={cn(
-                      "font-medium text-sm",
-                      uploadResult.success ? "text-green-800" : "text-red-800",
-                    )}
-                  >
-                    {uploadResult.message}
-                  </p>
-                  <button
-                    onClick={() => setUploadResult(null)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-                {uploadResult.summary && (
-                  <div className="mt-2 text-xs text-green-700 grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <p>
-                      <strong>Leads:</strong> {uploadResult.summary.totalLeads}
-                    </p>
-                    <p>
-                      <strong>Saved:</strong> {uploadResult.summary.saved}
-                    </p>
-                    <p>
-                      <strong>Duplicates:</strong>{" "}
-                      {uploadResult.summary.duplicates}
-                    </p>
-                    {uploadResult.summary.errors > 0 && (
-                      <p>
-                        <strong>Errors:</strong> {uploadResult.summary.errors}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+
 
         {/* —— Search & Lead Scraping —— */}
         <Card
@@ -890,7 +723,7 @@ export default function DashboardPage() {
                           </div>
                           <div className="text-right">
                             <p className="text-3xl font-bold tabular-nums tracking-tight leading-none">
-                              {item.percentage}%
+                              {item.value}
                             </p>
                           </div>
                         </div>
@@ -1071,7 +904,7 @@ export default function DashboardPage() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="font-medium text-foreground">
-                        Total count breakdown
+                        Quality percentage breakdown
                       </span>
                       <span className="font-bold text-foreground">
                         {ls.totalLeads || 0} total
@@ -1087,10 +920,10 @@ export default function DashboardPage() {
                           }}
                         >
                           <span className="text-[10px] sm:text-xs font-bold text-white px-1 truncate">
-                            {lq.primary}
+                            {ls.totalLeads > 0 ? Math.round((lq.primary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Primary: {lq.primary}
+                            Primary: {ls.totalLeads > 0 ? Math.round((lq.primary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}
@@ -1103,10 +936,10 @@ export default function DashboardPage() {
                           }}
                         >
                           <span className="text-[10px] sm:text-xs font-bold text-white px-1 truncate">
-                            {lq.secondary}
+                            {ls.totalLeads > 0 ? Math.round((lq.secondary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Secondary: {lq.secondary}
+                            Secondary: {ls.totalLeads > 0 ? Math.round((lq.secondary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}
@@ -1119,10 +952,10 @@ export default function DashboardPage() {
                           }}
                         >
                           <span className="text-[10px] sm:text-xs font-bold text-white px-1 truncate">
-                            {lq.tertiary}
+                            {ls.totalLeads > 0 ? Math.round((lq.tertiary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Tertiary: {lq.tertiary}
+                            Tertiary: {ls.totalLeads > 0 ? Math.round((lq.tertiary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}

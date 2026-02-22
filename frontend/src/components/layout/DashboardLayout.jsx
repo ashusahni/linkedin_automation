@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { LayoutDashboard, Users, Megaphone, Settings, Menu, FileText, Newspaper, Search, ChevronDown, UserPlus } from 'lucide-react';
+import { LayoutDashboard, Users, Megaphone, Settings, Menu, Newspaper, Search, ChevronDown, X, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
-import { ScottishChemicalIcon } from '../ui/ScottishChemicalLogo';
 import NotificationDropdown from '../NotificationDropdown';
 import {
     DropdownMenu,
@@ -15,25 +14,28 @@ import {
 import { TimeFilterProvider } from '../../context/TimeFilterContext';
 
 const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/' },
-    { id: 'search', label: 'Lead Search', icon: Search, path: '/search' },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/', color: '#6366f1' },
+    { id: 'search', label: 'Lead Search', icon: Search, path: '/search', color: '#0ea5e9' },
     {
         id: 'leads',
         label: 'Leads',
         icon: Users,
         path: '/leads',
+        color: '#10b981',
         children: [
-            { id: 'my-contacts', label: 'My Contacts', path: '/leads?connection_degree=1st' },
+            { id: 'my-contacts-new', label: 'My Contacts', path: '/leads?has_contact_info=true' },
+            { id: 'my-contacts', label: 'Connections', path: '/leads?connection_degree=1st' },
             { id: 'prospects', label: 'Prospects', path: '/leads?connection_degree=2nd' },
         ]
     },
-    { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns' },
-    { id: 'content', label: 'Content Engine', icon: Newspaper, path: '/content' },
-    { id: 'settings', label: 'Settings', icon: Settings, path: '/settings' },
+    { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns', color: '#f59e0b' },
+    { id: 'content', label: 'Content Engine', icon: Newspaper, path: '/content', color: '#a855f7' },
+    { id: 'settings', label: 'Settings', icon: Settings, path: '/settings', color: '#64748b' },
 ];
 
 export default function DashboardLayout() {
     const location = useLocation();
+    const navigate = useNavigate();
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [expandedItems, setExpandedItems] = useState({});
     const [branding, setBranding] = useState({ userName: '', companyName: '', logoUrl: '', profileImageUrl: '', theme: 'default', linkedinAccountName: '' });
@@ -50,254 +52,277 @@ export default function DashboardLayout() {
 
     const displayName = branding.userName || branding.companyName || 'there';
 
-    // Generate initials: first letter of first name + first letter of last name
-    // e.g., "Ashu Sahni" -> "AS", "Shane" -> "S"
     const getInitials = (name) => {
         if (!name || name === 'there') return 'JD';
         const parts = name.trim().split(/\s+/);
-        if (parts.length === 1) {
-            // Single name: just first letter (e.g., "Shane" -> "S")
-            return parts[0][0].toUpperCase();
-        }
-        // Multiple names: first letter of first + first letter of last (e.g., "Ashu Sahni" -> "AS")
+        if (parts.length === 1) return parts[0][0].toUpperCase();
         return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     };
 
     const initials = getInitials(branding.userName || branding.companyName);
 
+    // Determine the current page label for the header breadcrumb
+    const currentPage = navItems.reduce((found, item) => {
+        if (found) return found;
+        if (item.children) {
+            const child = item.children.find(c => location.pathname + location.search === c.path || location.pathname === c.path.split('?')[0]);
+            if (child) return { label: child.label, parent: item.label };
+        }
+        if (item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)) return { label: item.label };
+        return null;
+    }, null);
+
     return (
         <TimeFilterProvider>
-            <div className="min-h-screen bg-background flex font-sans text-foreground">
-                {/* Sidebar */}
+            <div className="min-h-screen bg-background flex text-foreground" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+                {/* ── Aurora background ── */}
+                <div className="aurora-bg" aria-hidden="true" />
+                <div className="dot-grid fixed inset-0 -z-[1] pointer-events-none" aria-hidden="true" />
+
+                {/* ── Sidebar ── */}
                 <aside
                     className={cn(
-                        "bg-card border-r border-border transition-all duration-300 flex flex-col fixed h-full z-20",
-                        sidebarOpen ? "w-64" : "w-20"
+                        "fixed h-full z-30 flex flex-col transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                        sidebarOpen ? "w-[240px]" : "w-[68px]"
                     )}
                 >
-                    {/* Logo */}
-                    <div className="h-20 flex items-center px-6 border-b border-border overflow-hidden">
-                        {branding.logoUrl ? (
-                            <div className="flex items-center w-full">
-                                <img
-                                    src={branding.logoUrl}
-                                    alt="Scottish Chemical Industries"
-                                    className={cn(
-                                        "h-14 w-auto object-contain transition-all duration-300",
-                                        sidebarOpen ? "max-w-[200px]" : "max-w-[40px]"
-                                    )}
-                                />
+                    {/* Sidebar inner (glassmorphism applied via global CSS) */}
+                    <div className="flex flex-col h-full">
+
+                        {/* ── Logo area ── */}
+                        <div className={cn(
+                            "flex items-center border-b border-border/40 overflow-hidden transition-all duration-300",
+                            sidebarOpen ? "h-[64px] px-5 gap-3" : "h-[64px] px-0 justify-center"
+                        )}>
+                            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-lg shadow-primary/30 shrink-0 select-none border border-primary/20">
+                                <span className="font-extrabold text-primary-foreground text-sm tracking-tight">LF</span>
                             </div>
-                        ) : (
-                            <>
-                                <ScottishChemicalIcon className="w-10 h-10 mr-4 shadow-xl" />
-                                {sidebarOpen && (
-                                    <div className="flex flex-col justify-center">
-                                        <span className="font-extrabold text-sm uppercase tracking-wider text-foreground leading-none">
-                                            Scottish Chemical
+                            {sidebarOpen && (
+                                <div className="flex flex-col justify-center overflow-hidden select-none">
+                                    <div className="flex items-baseline gap-[2px]">
+                                        <span className="font-black text-[18px] tracking-tight text-foreground leading-none">
+                                            Lead
                                         </span>
-                                        <span className="font-bold text-lg text-primary tracking-tight leading-none mt-1">
-                                            Industries
+                                        <span className="font-black text-[18px] text-primary tracking-tight leading-none bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/70">
+                                            Forge
                                         </span>
                                     </div>
-                                )}
-                            </>
-                        )}
-                    </div>
+                                    <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground mt-[2px] ml-[1px]">
+                                        Workspace
+                                    </span>
+                                </div>
+                            )}
+                        </div>
 
-                    {/* Nav */}
-                    <nav className="flex-1 p-4 space-y-2">
-                        {navItems.map((item) => {
-                            // Check if it has children (Nested Sidebar Item)
-                            if (item.children) {
-                                const isParentActive = location.pathname.startsWith(item.path);
-                                // Auto-expand if on a child route, BUT allow manual toggle override
-                                // If user has explicitly toggled (true/false), use that state.
-                                // If undefined (initial load), default to isParentActive.
-                                const isExpanded = expandedItems[item.id] !== undefined ? expandedItems[item.id] : isParentActive;
+                        {/* ── Nav ── */}
+                        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-3 space-y-0.5">
+                            {navItems.map((item) => {
+                                if (item.children) {
+                                    const isParentActive = location.pathname.startsWith(item.path);
+                                    const isExpanded = expandedItems[item.id] !== undefined ? expandedItems[item.id] : isParentActive;
 
-                                return (
-                                    <div key={item.id} className="w-full flex flex-col gap-1">
-                                        <NavLink
-                                            to={item.path}
-                                            onClick={(e) => {
-                                                // Determine current effective state (same logic as above)
-                                                // We need to calculate this at the moment of click to toggle correctly
-                                                const currentlyExpanded = expandedItems[item.id] !== undefined ? expandedItems[item.id] : isParentActive;
-
-                                                // Toggle the state
-                                                setExpandedItems(prev => ({ ...prev, [item.id]: !currentlyExpanded }));
-                                            }}
-                                            className={({ isActive }) =>
-                                                cn(
-                                                    "w-full flex items-center justify-between px-4 py-3 rounded-lg transition-all duration-200 group relative overflow-hidden",
-                                                    isActive
-                                                        ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
-                                                        : "hover:bg-accent hover:text-accent-foreground text-muted-foreground"
-                                                )
-                                            }
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <item.icon className="w-5 h-5 min-w-[20px]" />
-                                                {sidebarOpen && <span className="font-medium">{item.label}</span>}
+                                    return (
+                                        <div key={item.id} className="w-full flex flex-col">
+                                            <div
+                                                className={cn(
+                                                    "w-full flex items-center justify-between rounded-xl transition-all duration-200 group relative",
+                                                    sidebarOpen ? "px-3 py-2.5 gap-3" : "px-0 py-2.5 justify-center cursor-pointer",
+                                                    isParentActive
+                                                        ? "bg-primary/12 text-primary"
+                                                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                                                )}
+                                                onClick={() => {
+                                                    navigate(item.path);
+                                                    setExpandedItems(prev => ({ ...prev, [item.id]: true }));
+                                                }}
+                                            >
+                                                {isParentActive && (
+                                                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-primary pointer-events-none" />
+                                                )}
+                                                <div className="flex items-center gap-3 flex-1 flex-shrink-0 cursor-pointer">
+                                                    <div className={cn(
+                                                        "flex items-center justify-center w-7 h-7 rounded-lg transition-all",
+                                                        isParentActive ? "bg-primary/15" : "group-hover:bg-accent"
+                                                    )}>
+                                                        <item.icon className="w-4 h-4 min-w-[16px]" style={{ color: isParentActive ? item.color : undefined }} />
+                                                    </div>
+                                                    {sidebarOpen && <span className="font-semibold text-sm select-none">{item.label}</span>}
+                                                </div>
+                                                {sidebarOpen && (
+                                                    <div
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setExpandedItems(prev => ({ ...prev, [item.id]: !isExpanded }));
+                                                        }}
+                                                        className="p-1 -mr-1 hover:bg-accent/50 rounded-md transition-colors cursor-pointer"
+                                                    >
+                                                        <ChevronDown className={cn("w-3.5 h-3.5 opacity-50 transition-transform duration-200 shrink-0", isExpanded && "rotate-180")} />
+                                                    </div>
+                                                )}
+                                                {!sidebarOpen && (
+                                                    <div className="absolute left-full ml-3 w-max px-2.5 py-1.5 bg-popover/95 backdrop-blur-xl text-popover-foreground text-xs font-medium rounded-lg shadow-xl border border-border/50 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 -translate-x-1 group-hover:translate-x-0">
+                                                        {item.label}
+                                                    </div>
+                                                )}
                                             </div>
-                                            {sidebarOpen && (
-                                                <ChevronDown
-                                                    className={cn(
-                                                        "w-4 h-4 opacity-70 transition-transform duration-200",
-                                                        isExpanded ? "transform rotate-180" : ""
-                                                    )}
-                                                />
-                                            )}
 
-                                            {!sidebarOpen && (
-                                                <div className="absolute left-full ml-2 w-max px-2 py-1 bg-popover text-popover-foreground text-xs rounded shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                                                    {item.label}
+                                            {sidebarOpen && isExpanded && (
+                                                <div className="flex flex-col gap-0.5 ml-5 pl-3 border-l border-border/40 mt-1 mb-1 animate-slide-up">
+                                                    {item.children.map((child) => {
+                                                        const searchParams = new URLSearchParams(location.search);
+                                                        const childPath = child.path.split('?')[0];
+                                                        const childQuery = new URLSearchParams(child.path.split('?')[1]);
+                                                        let isActive = false;
+                                                        if (location.pathname === childPath) {
+                                                            isActive = searchParams.get('connection_degree') === childQuery.get('connection_degree');
+                                                        }
+                                                        return (
+                                                            <NavLink
+                                                                key={child.id}
+                                                                to={child.path}
+                                                                className={cn(
+                                                                    "w-full flex items-center px-3 py-2 text-[13px] rounded-lg transition-colors duration-150 font-medium",
+                                                                    isActive
+                                                                        ? "text-primary bg-primary/10"
+                                                                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                                                                )}
+                                                            >
+                                                                {child.label}
+                                                            </NavLink>
+                                                        );
+                                                    })}
                                                 </div>
                                             )}
-                                        </NavLink>
-
-                                        {/* Nested Children (only visible when sidebar is open AND expanded) */}
-                                        {sidebarOpen && isExpanded && (
-                                            <div className="flex flex-col gap-0.5 ml-4 border-l-2 border-border/40 pl-2 mt-1 transition-all animate-in fade-in slide-in-from-top-1">
-                                                {item.children.map((child) => {
-                                                    const searchParams = new URLSearchParams(location.search);
-                                                    // Check active state by matching exact path + query
-                                                    // We can simply compare full path, but location.search order might vary?
-                                                    // For robustness, check pathname and specific param.
-
-                                                    let isActive = false;
-                                                    const childPath = child.path.split('?')[0];
-                                                    const childQuery = new URLSearchParams(child.path.split('?')[1]);
-
-                                                    if (location.pathname === childPath) {
-                                                        const currentDegree = searchParams.get('connection_degree');
-                                                        const targetDegree = childQuery.get('connection_degree');
-                                                        isActive = currentDegree === targetDegree;
-                                                    }
-
-                                                    return (
-                                                        <NavLink
-                                                            key={child.id}
-                                                            to={child.path}
-                                                            className={cn(
-                                                                "w-full flex items-center px-4 py-2 text-sm rounded-md transition-colors duration-200",
-                                                                isActive
-                                                                    ? "text-primary font-medium bg-primary/10"
-                                                                    : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                                                            )}
-                                                        >
-                                                            {child.label}
-                                                        </NavLink>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            }
-
-                            // Standard Item
-                            return (
-                                <NavLink
-                                    key={item.id}
-                                    to={item.path}
-                                    className={({ isActive }) =>
-                                        cn(
-                                            "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group relative overflow-hidden",
-                                            isActive
-                                                ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
-                                                : "hover:bg-accent hover:text-accent-foreground text-muted-foreground"
-                                        )
-                                    }
-                                >
-                                    <item.icon className="w-5 h-5 min-w-[20px]" />
-                                    {sidebarOpen && <span className="font-medium">{item.label}</span>}
-                                    {!sidebarOpen && (
-                                        <div className="absolute left-full ml-2 w-max px-2 py-1 bg-popover text-popover-foreground text-xs rounded shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                                            {item.label}
                                         </div>
-                                    )}
-                                </NavLink>
-                            );
-                        })}
-                    </nav>
+                                    );
+                                }
 
-                    {/* User Info / Footer */}
-                    <div className="p-4 border-t border-border">
-                        <div className={cn("flex items-center gap-3", !sidebarOpen && "justify-center")}>
-                            {branding.profileImageUrl ? (
-                                <img src={branding.profileImageUrl} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
-                            ) : (
-                                <div className="w-10 h-10 rounded-full bg-primary/90 flex items-center justify-center text-primary-foreground font-bold text-sm shrink-0">
-                                    {initials}
-                                </div>
-                            )}
-                            {sidebarOpen && (
-                                <div className="flex-1 min-w-0">
-                                    <p className="font-medium text-sm truncate">{displayName}</p>
-                                    <p className="text-xs text-muted-foreground truncate">{branding.companyName || 'Scottish Chemical Industries'}</p>
-                                </div>
-                            )}
+                                // Standard item
+                                return (
+                                    <NavLink
+                                        key={item.id}
+                                        to={item.path}
+                                        end={item.path === '/'}
+                                        className={({ isActive }) => cn(
+                                            "w-full flex items-center rounded-xl transition-all duration-200 group relative",
+                                            sidebarOpen ? "px-3 py-2.5 gap-3" : "px-0 py-2.5 justify-center",
+                                            isActive
+                                                ? "bg-primary/12 text-primary"
+                                                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                                        )}
+                                    >
+                                        {({ isActive }) => (
+                                            <>
+                                                {isActive && (
+                                                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-primary" />
+                                                )}
+                                                <div className={cn(
+                                                    "flex items-center justify-center w-7 h-7 rounded-lg transition-all",
+                                                    isActive ? "bg-primary/15" : "group-hover:bg-accent"
+                                                )}>
+                                                    <item.icon className="w-4 h-4 min-w-[16px]" style={{ color: isActive ? item.color : undefined }} />
+                                                </div>
+                                                {sidebarOpen && <span className="font-semibold text-sm">{item.label}</span>}
+                                                {!sidebarOpen && (
+                                                    <div className="absolute left-full ml-3 w-max px-2.5 py-1.5 bg-popover/95 backdrop-blur-xl text-popover-foreground text-xs font-medium rounded-lg shadow-xl border border-border/50 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 -translate-x-1 group-hover:translate-x-0">
+                                                        {item.label}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </NavLink>
+                                );
+                            })}
+                        </nav>
+
+                        {/* ── User Footer ── */}
+                        <div className={cn(
+                            "border-t border-border/40 transition-all duration-300",
+                            sidebarOpen ? "p-4" : "p-2 flex justify-center"
+                        )}>
+                            <div className={cn("flex items-center gap-3", !sidebarOpen && "justify-center")}>
+                                {branding.profileImageUrl ? (
+                                    <img src={branding.profileImageUrl} alt="" className="w-9 h-9 rounded-full object-cover ring-2 ring-border shrink-0" />
+                                ) : (
+                                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground font-bold text-xs shrink-0 ring-2 ring-primary/20 shadow-lg shadow-primary/20">
+                                        {initials}
+                                    </div>
+                                )}
+                                {sidebarOpen && (
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-semibold text-sm truncate">{displayName}</p>
+                                        <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">{branding.companyName || 'Scottish Chemical Industries'}</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </aside>
 
-                {/* Main Content */}
-                <main
-                    className={cn(
-                        "flex-1 transition-all duration-300 flex flex-col",
-                        sidebarOpen ? "ml-64" : "ml-20"
-                    )}
-                >
-                    {/* Header: welcome + menu */}
-                    <header className="h-20 bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-10 px-6 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <Button
-                                variant="ghost"
-                                size="icon"
+                {/* ── Main Content ── */}
+                <main className={cn(
+                    "flex-1 flex flex-col min-h-screen transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                    sidebarOpen ? "ml-[240px]" : "ml-[68px]"
+                )}>
+                    {/* ── Top Header ── */}
+                    <header className="h-[64px] sticky top-0 z-20 px-6 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            {/* Sidebar toggle */}
+                            <button
                                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                                className="text-muted-foreground hover:text-foreground"
+                                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150"
+                                aria-label="Toggle sidebar"
                             >
-                                <Menu className="w-5 h-5" />
-                            </Button>
-                            {!sidebarOpen && branding.logoUrl && (
-                                <img src={branding.logoUrl} alt="Logo" className="h-8 w-auto object-contain md:hidden" />
+                                <Menu className="w-4 h-4" />
+                            </button>
+
+                            {/* Breadcrumb */}
+                            {currentPage && (
+                                <div className="hidden sm:flex items-center gap-1.5 text-sm">
+                                    {currentPage.parent && (
+                                        <>
+                                            <span className="text-muted-foreground font-medium">{currentPage.parent}</span>
+                                            <span className="text-border">/</span>
+                                        </>
+                                    )}
+                                    <span className="font-semibold text-foreground">{currentPage.label}</span>
+                                </div>
                             )}
-                            <div className="hidden sm:flex items-center gap-3">
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {/* Notifications */}
+                            <NotificationDropdown />
+
+                            {/* User chip */}
+                            <div className="hidden sm:flex items-center gap-2.5 pl-3 border-l border-border/40">
                                 {branding.profileImageUrl ? (
-                                    <img src={branding.profileImageUrl} alt="" className="w-9 h-9 rounded-full object-cover border-2 border-border" />
+                                    <img src={branding.profileImageUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-border" />
                                 ) : (
-                                    <div className="w-9 h-9 rounded-full bg-primary/90 flex items-center justify-center text-primary-foreground font-semibold text-sm">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground font-bold text-xs ring-2 ring-primary/20">
                                         {initials}
                                     </div>
                                 )}
-                                <div>
-                                    <h2 className="text-lg font-semibold text-foreground">
-                                        Welcome, {displayName}
-                                    </h2>
-                                    <p className="text-xs text-muted-foreground">
-                                        {branding.linkedinAccountName ? (
-                                            <span className="flex items-center gap-1">
-                                                <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
-                                                LinkedIn: {branding.linkedinAccountName}
-                                            </span>
-                                        ) : (
-                                            "Search, lead generation & campaign analytics"
-                                        )}
-                                    </p>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-semibold text-foreground leading-none">{displayName}</span>
+                                    {branding.linkedinAccountName ? (
+                                        <span className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                                            {branding.linkedinAccountName}
+                                        </span>
+                                    ) : (
+                                        <span className="text-[11px] text-muted-foreground mt-0.5">Analytics & Outreach</span>
+                                    )}
                                 </div>
                             </div>
                         </div>
-
-                        <div className="flex items-center gap-4">
-                            <NotificationDropdown />
-                        </div>
                     </header>
 
-                    {/* Content Area */}
-                    <div className="p-6 md:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
-                        <Outlet />
+                    {/* ── Page Content ── */}
+                    <div className="flex-1 p-6 md:p-8 max-w-[1440px] mx-auto w-full">
+                        <div className="page-enter">
+                            <Outlet />
+                        </div>
                     </div>
                 </main>
             </div>

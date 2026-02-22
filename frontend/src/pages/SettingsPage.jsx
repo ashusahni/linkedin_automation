@@ -27,6 +27,9 @@ import {
   Search,
   Clock,
   Lock,
+  Brain,
+  Sparkles,
+  ChevronRight,
 } from "lucide-react";
 import PageGuide from "../components/PageGuide";
 import { Button } from "@/components/ui/button";
@@ -54,6 +57,11 @@ const SettingsPage = () => {
     theme: "default",
   });
   const [brandingSaving, setBrandingSaving] = useState(false);
+
+  // AI Model selection state
+  // 'openai' = GPT-4o (Model 1) | 'claude' = Claude 3.5 (Model 2)
+  const [aiProvider, setAiProvider] = useState('openai');
+  const [aiModelSaving, setAiModelSaving] = useState(false);
 
   const [settings, setSettings] = useState({
     pbApiKey: "",
@@ -131,6 +139,35 @@ const SettingsPage = () => {
       .then((r) => setBranding(r.data || {}))
       .catch(() => { });
   }, []);
+
+  // Load current AI provider from backend
+  useEffect(() => {
+    axios.get("/api/settings")
+      .then((r) => {
+        if (r.data?.ai?.provider) {
+          setAiProvider(r.data.ai.provider);
+        }
+      })
+      .catch(() => { });
+  }, []);
+
+  const saveAiProvider = async (provider) => {
+    setAiModelSaving(true);
+    setAiProvider(provider);
+    try {
+      await axios.put("/api/settings", { ai: { provider } });
+      addToast(
+        provider === 'openai'
+          ? '✅ Switched to GPT-4o (OpenAI)'
+          : '✅ Switched to Claude 3.5 Sonnet',
+        'success'
+      );
+    } catch {
+      addToast('Failed to save model preference', 'error');
+    } finally {
+      setAiModelSaving(false);
+    }
+  };
 
   // Persist unified auto sync state
   useEffect(() => {
@@ -875,6 +912,111 @@ const SettingsPage = () => {
       )}
 
       <div className="grid gap-6 md:grid-cols-2">
+
+        {/* ── AI Model Selector ─────────────────────────────────────── */}
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm md:col-span-2 overflow-hidden">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <Brain className="w-5 h-5 text-violet-500" />
+              AI Model
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Select which AI powers your message generation, content ideas, and personalization.
+              The other model acts as automatic fallback.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+              {/* Model 1 — OpenAI GPT-4o */}
+              <button
+                id="ai-model-openai"
+                onClick={() => saveAiProvider('openai')}
+                disabled={aiModelSaving}
+                className={`relative group flex flex-col gap-3 p-5 rounded-2xl border-2 text-left transition-all duration-300 ${aiProvider === 'openai'
+                  ? 'border-emerald-500 bg-emerald-500/8 shadow-lg shadow-emerald-500/10'
+                  : 'border-border/50 bg-muted/20 hover:border-border hover:bg-muted/40'
+                  }`}
+              >
+                {/* Active badge */}
+                {aiProvider === 'openai' && (
+                  <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500 text-white shadow">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                    Active
+                  </span>
+                )}
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${aiProvider === 'openai'
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
+                    : 'bg-muted/50 border-border/50 text-muted-foreground'
+                    }`}>
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold">Model 1 — GPT-4o</p>
+                    <p className="text-[11px] text-muted-foreground">OpenAI · Latest</p>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[12px] text-muted-foreground leading-relaxed">
+                    Best for structured, professional outreach. Excellent at following tone and length rules precisely.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {['Fast', 'Precise', 'Professional'].map(tag => (
+                      <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </button>
+
+              {/* Model 2 — Claude 3.5 Sonnet */}
+              <button
+                id="ai-model-claude"
+                onClick={() => saveAiProvider('claude')}
+                disabled={aiModelSaving}
+                className={`relative group flex flex-col gap-3 p-5 rounded-2xl border-2 text-left transition-all duration-300 ${aiProvider === 'claude'
+                  ? 'border-violet-500 bg-violet-500/8 shadow-lg shadow-violet-500/10'
+                  : 'border-border/50 bg-muted/20 hover:border-border hover:bg-muted/40'
+                  }`}
+              >
+                {/* Active badge */}
+                {aiProvider === 'claude' && (
+                  <span className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-violet-500 text-white shadow">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                    Active
+                  </span>
+                )}
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${aiProvider === 'claude'
+                    ? 'bg-violet-500/15 border-violet-500/30 text-violet-500'
+                    : 'bg-muted/50 border-border/50 text-muted-foreground'
+                    }`}>
+                    <Brain className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold">Model 2 — Claude 3.5</p>
+                    <p className="text-[11px] text-muted-foreground">Anthropic · Sonnet</p>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[12px] text-muted-foreground leading-relaxed">
+                    Best for creative, nuanced writing. More human-feeling messages with deep context understanding.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {['Creative', 'Nuanced', 'Human-like'].map(tag => (
+                      <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </button>
+
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-3 flex items-center gap-1.5">
+              <ChevronRight className="w-3 h-3" />
+              The inactive model is used as automatic fallback if the active one fails.
+            </p>
+          </CardContent>
+        </Card>
         {/* Branding / Welcome & Theme */}
         <Card className="border-border/50 bg-card/50 backdrop-blur-sm md:col-span-2">
           <CardHeader>
@@ -921,20 +1063,6 @@ const SettingsPage = () => {
               </div>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="logo-url" className="flex items-center gap-2">
-                  <Image className="w-4 h-4" /> Logo URL
-                </Label>
-                <Input
-                  id="logo-url"
-                  type="url"
-                  placeholder="https://..."
-                  value={branding.logoUrl}
-                  onChange={(e) =>
-                    setBranding({ ...branding, logoUrl: e.target.value })
-                  }
-                />
-              </div>
               <div className="space-y-2">
                 <Label
                   htmlFor="profile-url"

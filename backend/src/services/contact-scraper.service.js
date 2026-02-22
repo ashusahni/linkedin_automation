@@ -486,6 +486,9 @@ class ContactScraperService {
      * 🆕 REFACTORED: Run scraping job with fault tolerance and retry logic
      */
     async runScrapeJob(jobId, profileIds) {
+        // SCRAPING DISABLED
+        console.log("🛑 runScrapeJob called but scraping is DISABLED");
+        return;
         const job = this.activeJobs.get(jobId);
 
         try {

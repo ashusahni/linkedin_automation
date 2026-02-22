@@ -206,6 +206,7 @@ export async function getLeads(req, res) {
       review_status, // PHASE 4: Review status filter
       hasEmail,
       hasLinkedin,
+      has_contact_info, // My Contacts filter: leads with email OR phone
       search,
       title,
       location,
@@ -273,6 +274,11 @@ export async function getLeads(req, res) {
 
       if (hasLinkedin === "true") {
         conditionClauses.push(`linkedin_url IS NOT NULL AND linkedin_url != ''`);
+      }
+
+      // My Contacts: leads with email OR phone
+      if (has_contact_info === "true") {
+        conditionClauses.push(`((email IS NOT NULL AND email != '') OR (phone IS NOT NULL AND phone != ''))`);
       }
 
       // Lead Search–style meta filters (same fields as Lead Search page)

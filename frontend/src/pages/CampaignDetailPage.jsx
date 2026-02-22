@@ -6,7 +6,7 @@ import {
     XCircle, Clock, Edit2, Save, Plus, Trash2, Download,
     MessageSquare, Mail, Link as LinkIcon, ChevronRight, BarChart3, Settings as SettingsIcon,
     AlertCircle, AlertTriangle, Zap, Sparkles, Send, Eye, CheckCheck, Copy, Target, Tag, Flag,
-    Phone, Search, Smartphone, RefreshCw, Loader2, Info
+    Phone, Search, Smartphone, RefreshCw, Loader2, Info, Contact, Upload
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -813,94 +813,107 @@ export default function CampaignDetailPage() {
     const totalLeads = leads.length;
 
     return (
-        <div className="space-y-8 max-w-7xl mx-auto px-4 py-8 animate-in fade-in duration-700">
-            {/* Nav & Action Bar */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                    <Button variant="ghost" size="icon" onClick={() => navigate('/campaigns')} className="rounded-full">
-                        <ArrowLeft className="h-5 w-5" />
+        <div className="space-y-6 max-w-7xl mx-auto px-4 py-6 animate-in fade-in slide-in-from-bottom-3 duration-500">
+            {/* ── Nav & Action Bar ──────────────────────────────────────── */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-border/30">
+                <div className="flex items-center gap-3">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate('/campaigns')}
+                        className="h-9 w-9 rounded-xl border border-border/40 hover:border-border hover:bg-card/80 transition-all"
+                    >
+                        <ArrowLeft className="h-4 w-4" />
                     </Button>
                     <div>
                         {editing ? (
                             <Input
                                 value={formData.name || ''}
                                 onChange={e => setFormData({ ...formData, name: e.target.value })}
-                                className="text-2xl font-bold bg-transparent border-primary/20 focus:border-primary"
+                                className="text-xl font-bold bg-transparent border-primary/30 focus:border-primary h-8"
                             />
                         ) : (
-                            <h1 className="text-3xl font-extrabold tracking-tight text-white">{campaign.name}</h1>
+                            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-foreground leading-tight">{campaign.name}</h1>
                         )}
-                        <div className="flex items-center gap-2 mt-1">
-                            <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'} className="capitalize px-3">
-                                {campaign.status}
-                            </Badge>
-                            <span className="text-sm text-muted-foreground">• {totalLeads} Leads</span>
+                        <div className="flex items-center gap-2 mt-1.5">
+                            {/* Polished status badge */}
+                            {(() => {
+                                const sc = { active: { c: '#10b981', bg: 'rgba(16,185,129,0.12)', label: 'Active', pulse: true }, draft: { c: '#f59e0b', bg: 'rgba(245,158,11,0.12)', label: 'Draft', pulse: false }, paused: { c: '#64748b', bg: 'rgba(100,116,139,0.12)', label: 'Paused', pulse: false }, completed: { c: '#8b5cf6', bg: 'rgba(139,92,246,0.12)', label: 'Completed', pulse: false } }[campaign.status] || { c: '#f59e0b', bg: 'rgba(245,158,11,0.12)', label: 'Draft', pulse: false };
+                                return (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest border" style={{ color: sc.c, backgroundColor: sc.bg, borderColor: `${sc.c}30` }}>
+                                        {sc.pulse && <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: sc.c }} />}
+                                        {sc.label}
+                                    </span>
+                                );
+                            })()}
+                            <span className="text-xs text-muted-foreground">· {totalLeads} leads</span>
                         </div>
                     </div>
                 </div>
 
+                {/* Action buttons */}
                 <div className="flex items-center gap-2">
-                    <TooltipProvider delayDuration={300}>
+                    <TooltipProvider delayDuration={200}>
                         {editing ? (
-                            <Button onClick={handleSaveMetadata} className="bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20">
-                                <Save className="w-4 h-4 mr-2" /> Save Settings
+                            <Button onClick={handleSaveMetadata} size="sm" className="gap-1.5 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20">
+                                <Save className="w-3.5 h-3.5" /> Save
                             </Button>
                         ) : (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button variant="outline" size="icon" onClick={() => setEditing(true)}>
-                                        <SettingsIcon className="w-4 h-4" />
+                                    <Button variant="outline" size="icon" onClick={() => setEditing(true)} className="h-9 w-9 rounded-xl border-border/50 hover:border-border hover:bg-card/80">
+                                        <SettingsIcon className="w-3.5 h-3.5" />
                                     </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Settings</TooltipContent>
+                                <TooltipContent side="bottom">Settings</TooltipContent>
                             </Tooltip>
                         )}
 
                         {campaign.status === 'active' ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button onClick={handlePause} variant="destructive" size="icon">
-                                        <Pause className="w-4 h-4" />
+                                    <Button onClick={handlePause} size="icon" className="h-9 w-9 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 border border-orange-500/30 hover:border-orange-500/50">
+                                        <Pause className="w-3.5 h-3.5" />
                                     </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Pause Campaign</TooltipContent>
+                                <TooltipContent side="bottom">Pause Campaign</TooltipContent>
                             </Tooltip>
                         ) : campaign.status === 'paused' ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button onClick={handleResume} size="icon" className="bg-green-600 hover:bg-green-500 shadow-lg shadow-green-500/20">
-                                        <Play className="w-4 h-4" />
+                                    <Button onClick={handleResume} size="icon" className="h-9 w-9 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 hover:border-emerald-500/50">
+                                        <Play className="w-3.5 h-3.5" />
                                     </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Resume Campaign</TooltipContent>
+                                <TooltipContent side="bottom">Resume Campaign</TooltipContent>
                             </Tooltip>
                         ) : (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button onClick={handleLaunch} size="icon" className="bg-green-600 hover:bg-green-500 shadow-lg shadow-green-500/20">
-                                        <Play className="w-4 h-4" />
+                                    <Button onClick={handleLaunch} size="sm" className="gap-1.5 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white border-0 shadow-lg shadow-emerald-500/25">
+                                        <Play className="w-3.5 h-3.5" /> Launch
                                     </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>Launch Campaign</TooltipContent>
+                                <TooltipContent side="bottom">Launch Campaign</TooltipContent>
                             </Tooltip>
                         )}
 
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="outline" size="icon" onClick={handleDuplicate}>
-                                    <Copy className="w-4 h-4" />
+                                <Button variant="outline" size="icon" onClick={handleDuplicate} className="h-9 w-9 rounded-xl border-border/50 hover:border-border hover:bg-card/80">
+                                    <Copy className="w-3.5 h-3.5" />
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Duplicate</TooltipContent>
+                            <TooltipContent side="bottom">Duplicate</TooltipContent>
                         </Tooltip>
 
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="destructive" size="icon" onClick={handleDelete}>
-                                    <Trash2 className="w-4 h-4" />
+                                <Button size="icon" onClick={handleDelete} className="h-9 w-9 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40">
+                                    <Trash2 className="w-3.5 h-3.5" />
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Delete</TooltipContent>
+                            <TooltipContent side="bottom">Delete</TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
                 </div>
@@ -1045,79 +1058,93 @@ export default function CampaignDetailPage() {
                 </Card>
             )}
 
-            {/* Quick Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/* ── Quick Stats Grid ─── polished tiles ──────────────────── */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                    { label: 'Total', value: totalLeads, icon: Users, color: 'text-blue-400' },
-                    { label: 'Processing', value: stats.processing || 0, icon: Clock, color: 'text-yellow-400' },
-                    { label: 'Sent', value: stats.sent || 0, icon: CheckCircle2, color: 'text-green-400' },
-                    { label: 'Replies', value: stats.replied || 0, icon: MessageSquare, color: 'text-purple-400' },
-                ].map((stat, i) => (
-                    <Card key={i} className="bg-card/50 border-white/5 backdrop-blur-sm">
-                        <CardContent className="p-6 flex items-center gap-4">
-                            <div className={cn("p-2 rounded-lg bg-white/5", stat.color)}>
-                                <stat.icon className="w-5 h-5" />
-                            </div>
-                            <div>
-                                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{stat.label}</p>
-                                <p className="text-xl font-bold text-white">{stat.value}</p>
-                            </div>
-                        </CardContent>
-                    </Card>
+                    { label: 'Total Leads', value: totalLeads, icon: Users, accent: '#6366f1' },
+                    { label: 'Processing', value: stats.processing || 0, icon: Clock, accent: '#f59e0b' },
+                    { label: 'Sent', value: stats.sent || 0, icon: CheckCircle2, accent: '#10b981' },
+                    { label: 'Replies', value: stats.replied || 0, icon: MessageSquare, accent: '#8b5cf6' },
+                ].map((s, i) => (
+                    <motion.div key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06, duration: 0.35 }}>
+                        <Card className="relative border border-border/30 bg-card/60 backdrop-blur-xl overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+                            <div className="absolute inset-0 opacity-40" style={{ background: `radial-gradient(circle at top right, ${s.accent}22, transparent 65%)` }} />
+                            <CardContent className="p-4 relative z-10">
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{s.label}</p>
+                                    <div className="flex h-6 w-6 items-center justify-center rounded-lg" style={{ backgroundColor: `${s.accent}20` }}>
+                                        <s.icon className="w-3 h-3" style={{ color: s.accent }} />
+                                    </div>
+                                </div>
+                                <p className="text-2xl font-extrabold tracking-tight" style={{ color: s.accent }}>{s.value}</p>
+                            </CardContent>
+                        </Card>
+                    </motion.div>
                 ))}
             </div>
 
-            {/* Automation Rules Banner */}
-            <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border border-white/5 bg-card/30 backdrop-blur-sm">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mr-1">Automation Rules:</span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-blue-500/10 border border-blue-500/20 text-blue-300">
-                    <LinkIcon className="w-3 h-3" /> Connection limit: 20/day
+            {/* ── Automation Rules Banner ───────────────────────────────── */}
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-2xl border border-border/30 bg-card/40 backdrop-blur-xl">
+                <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-widest shrink-0">Automation</span>
+                <div className="w-px h-4 bg-border/50" />
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                    <LinkIcon className="w-2.5 h-2.5" /> 20 connections/day
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-500/10 border border-amber-500/20 text-amber-300">
-                    <CheckCircle2 className="w-3 h-3" /> Approval required: Yes
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                    <CheckCircle2 className="w-2.5 h-2.5" /> Approval gate
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
-                    <AlertCircle className="w-3 h-3" /> Stop on reply: Yes
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                    <AlertCircle className="w-2.5 h-2.5" /> Stop on reply
                 </span>
                 {campaign.status === 'active' && (
-                    <span className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-500/10 border border-green-500/20 text-green-400 animate-pulse">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /> Scheduler Active
+                    <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 border border-emerald-500/25 text-emerald-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" /> Scheduler Active
                     </span>
                 )}
                 {campaign.status === 'paused' && (
-                    <span className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-500/10 border border-orange-500/20 text-orange-400">
+                    <span className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-orange-500/10 border border-orange-500/25 text-orange-400">
                         <span className="w-1.5 h-1.5 rounded-full bg-orange-400 inline-block" /> Paused
                     </span>
                 )}
             </div>
 
-            {/* Tabs Navigation */}
-            <div className="flex border-b border-white/5 gap-8">
+            {/* ── Tab Navigation ────────────────────────────────────────── */}
+            <div className="flex items-center border-b border-border/30 gap-1">
                 {[
                     { id: 'sequence', label: 'Sequence', badge: campaign.sequences?.length ?? 0 },
                     { id: 'leads', label: 'Leads', badge: leads.length },
-                    { id: 'approvals', label: 'Approvals', badge: pendingApprovalCount > 0 ? pendingApprovalCount : approvals.length },
+                    { id: 'approvals', label: 'Approvals', badge: pendingApprovalCount > 0 ? pendingApprovalCount : approvals.length, urgent: pendingApprovalCount > 0 },
                     { id: 'analytics', label: 'Analytics', badge: null }
                 ].map((tab) => (
                     <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}
                         className={cn(
-                            "pb-4 text-sm font-semibold transition-all relative capitalize flex items-center gap-2",
-                            activeTab === tab.id ? "text-primary" : "text-muted-foreground hover:text-white"
+                            "relative px-4 pb-3 pt-1 text-sm font-semibold transition-all capitalize flex items-center gap-2 rounded-t-lg",
+                            activeTab === tab.id
+                                ? "text-primary"
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
                         )}
                     >
                         {tab.label}
                         {tab.badge !== null && tab.badge > 0 && (
                             <span className={cn(
-                                "px-2 py-0.5 rounded-full text-[10px] font-bold",
-                                activeTab === tab.id ? "bg-primary text-primary-foreground" : "bg-white/10 text-muted-foreground"
+                                "px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none",
+                                tab.urgent
+                                    ? "bg-amber-500 text-white"
+                                    : activeTab === tab.id
+                                        ? "bg-primary/20 text-primary"
+                                        : "bg-muted text-muted-foreground"
                             )}>
                                 {tab.badge}
                             </span>
                         )}
                         {activeTab === tab.id && (
-                            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full" />
+                            <motion.div
+                                layoutId="campaign-tab-indicator"
+                                className="absolute bottom-0 left-0 right-0 h-[2px] bg-primary rounded-full"
+                                transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                            />
                         )}
                     </button>
                 ))}
@@ -1219,24 +1246,15 @@ export default function CampaignDetailPage() {
                                 <CardDescription>Manage individual contacts in this campaign</CardDescription>
                             </div>
                             <div className="flex gap-2 flex-wrap">
-                                {selectedLeads.length > 0 && (
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={toggleSelectAllLeads}
-                                        className="gap-2"
-                                    >
-                                        {selectedLeads.length === leads.length ? 'Deselect All' : `Selected: ${selectedLeads.length}`}
-                                    </Button>
-                                )}
+
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                         <Button
-                                            size="sm"
-                                            className="gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 shadow-lg shadow-blue-500/20"
+                                            size="icon"
+                                            className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 shadow-lg shadow-blue-500/20 h-9 w-9"
+                                            title="Get Contact Info"
                                         >
-                                            <Info className="w-4 h-4" />
-                                            Get Contact Info
+                                            <Contact className="w-4 h-4" />
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" className="w-56 bg-card border-white/10">
@@ -1266,8 +1284,8 @@ export default function CampaignDetailPage() {
                                             ? `LinkedIn AI (${selectedLeads.length})`
                                             : 'LinkedIn AI (Messages + Emails)'}
                                 </Button>
-                                <Button size="sm" variant="outline" className="gap-2">
-                                    <Download className="w-4 h-4" /> Export Report
+                                <Button size="icon" variant="outline" className="h-9 w-9" title="Export Report">
+                                    <Upload className="w-4 h-4" />
                                 </Button>
                             </div>
                         </CardHeader>

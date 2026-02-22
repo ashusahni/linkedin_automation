@@ -404,6 +404,20 @@ export const ContentPhantomService = {
             [result.postUrl || null, result.containerId || null, itemId]
         );
         await ContentItemService._logTransition(itemId, item.status, 'POSTED', 'Manually triggered via Send Now');
+
+        // Notify the user with a deep-link
+        try {
+            const { default: NotificationService } = await import('./notification.service.js');
+            await NotificationService.create({
+                type: 'phantom_completed',
+                title: 'Post sent to Phantom',
+                message: `Your post "${item.title || 'Untitled Idea'}" has been sent to LinkedIn.`,
+                data: { link: `/content-engine?highlight=${item.id}&tab=board` }
+            });
+        } catch (notifErr) {
+            console.error('ContentEngine: Failed to create notification', notifErr);
+        }
+
         return { success: true, postUrl: result.postUrl, containerId: result.containerId };
     },
 
@@ -416,22 +430,25 @@ export const ContentPhantomService = {
         }
 
         const content = item.edited_content || item.generated_content;
-        const sessionCookie = process.env.LINKEDIN_SESSION_COOKIE || '';
 
-        const payload = {
-            content: content.trim(),
-            scheduled_time: item.scheduled_at ? new Date(item.scheduled_at).toISOString() : new Date().toISOString(),
-            ...(sessionCookie && { sessionCookie: sessionCookie.trim() })
-        };
-
-        console.log(`🚀 ContentEngine: Sending item ${item.id} to Phantom ${phantomId}`);
+        console.log(`🚀 ContentEngine: Triggering Phantom ${phantomId} via Google Sheet integration`);
         console.log(`   Content preview: ${content.substring(0, 80)}...`);
 
-        // Use PhantomBuster service to launch
-        const { default: PhantomBusterService } = await import('./phantombuster.service.js');
-        const pb = new PhantomBusterService();
+        // 1. Append the post to the Google Sheet (this is where the Phantom reads from)
+        try {
+            const { default: GoogleSheetsService } = await import('./googleSheets.service.js');
+            await GoogleSheetsService.appendPost(content);
+            console.log(`✅ ContentEngine: Appended to Google Sheet successfully.`);
+        } catch (sheetError) {
+            console.error(`❌ ContentEngine: Failed to write to Google Sheet.`, sheetError);
+            throw new Error(`Failed to write to Google Sheet: ${sheetError.message}`);
+        }
 
-        const launchResult = await pb.launchPhantom(phantomId, payload, { noSessionCookie: !sessionCookie });
+        // 2. Launch the Phantom with ZERO arguments.
+        // It uses its dashboard configuration (LinkedIn Session Cookie + Google Sheet URL).
+        const { default: pb } = await import('./phantombuster.service.js');
+        const launchResult = await pb.launchPhantom(phantomId, {}, { minimalArgs: true });
+
         const containerId = launchResult.containerId;
 
         console.log(`✅ ContentEngine: Phantom launched. Container: ${containerId}`);
