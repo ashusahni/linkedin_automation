@@ -6,7 +6,6 @@ uploads/
 logs/
 # Windows reserved name - avoid "git add" failures
 nul
-backend/src/config/*.json
-
-backend/src/config/linkedin-post-488117-96c95d33663a.json
-Z:\linkedin-engine_23\linkedin_automation\backend\src\config\linkedin-post-488117-96c95d33663a.json
+# LinkedIn/Phantom config (secrets)
+src/config/*.json
+src/config/linkedin-post-488117-96c95d33663a.json
