@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Industry Hierarchy Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #4CAF50;
+        }
+        .test-section h3 {
+            margin-top: 0;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            max-height: 400px;
+        }
+        .success {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .error {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .subtag-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .subtag-item {
+            background: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .subtag-item strong {
+            color: #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Industry Hierarchy API Test</h1>
+        <p>This page tests the new hierarchical industry distribution system.</p>
+
+        <!-- Test 1: Get All Top-Level Industries -->
+        <div class="test-section">
+            <h3>Test 1: Get All Top-Level Industries</h3>
+            <button onclick="testTopLevelIndustries()">Run Test</button>
+            <div id="test1-result"></div>
+        </div>
+
+        <!-- Test 2: Get Education Subtags -->
+        <div class="test-section">
+            <h3>Test 2: Get Education Subtags</h3>
+            <button onclick="testEducationSubtags()">Run Test</button>
+            <div id="test2-result"></div>
+        </div>
+
+        <!-- Test 3: Get Full Hierarchy -->
+        <div class="test-section">
+            <h3>Test 3: Get Full Hierarchy</h3>
+            <button onclick="testFullHierarchy()">Run Test</button>
+            <div id="test3-result"></div>
+        </div>
+
+        <!-- Test 4: Interactive Industry Selector -->
+        <div class="test-section">
+            <h3>Test 4: Interactive Industry Selector</h3>
+            <select id="industry-selector" onchange="loadIndustrySubtags()">
+                <option value="">Select an industry...</option>
+            </select>
+            <div id="test4-result"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api/industry';
+
+        async function testTopLevelIndustries() {
+            const resultDiv = document.getElementById('test1-result');
+            resultDiv.innerHTML = '<p>Loading...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/top-level`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const industries = data.data;
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ Success! Found ${industries.length} top-level industries</p>
+                        <pre>${JSON.stringify(industries.slice(0, 20), null, 2)}</pre>
+                        <p><em>Showing first 20 industries...</em></p>
+                    `;
+                    
+                    // Populate the selector
+                    const selector = document.getElementById('industry-selector');
+                    selector.innerHTML = '<option value="">Select an industry...</option>';
+                    industries.forEach(ind => {
+                        const option = document.createElement('option');
+                        option.value = ind;
+                        option.textContent = ind;
+                        selector.appendChild(option);
+                    });
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Network Error: ${error.message}</p>`;
+            }
+        }
+
+        async function testEducationSubtags() {
+            const resultDiv = document.getElementById('test2-result');
+            resultDiv.innerHTML = '<p>Loading...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/subtags?industry=Education`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const subtags = data.data;
+                    const subIndustries = subtags.subIndustries || [];
+                    const jobRoles = subtags.jobRoles || [];
+                    const metadataTags = subtags.metadataTags || [];
+                    
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ Success! Found subtags for Education</p>
+                        <h4>Sub-Industries (${subIndustries.length})</h4>
+                        <div class="subtag-list">
+                            ${subIndustries.slice(0, 10).map(sub => `
+                                <div class="subtag-item">
+                                    <strong>${sub.name}</strong><br>
+                                    <small>Level: ${sub.level} | Code: ${sub.code}</small><br>
+                                    <small>${sub.fullPath}</small>
+                                </div>
+                            `).join('')}
+                        </div>
+                        ${subIndustries.length > 10 ? `<p><em>... and ${subIndustries.length - 10} more</em></p>` : ''}
+                        
+                        <h4>Job Roles (${jobRoles.length})</h4>
+                        <p>${jobRoles.join(', ')}</p>
+                        
+                        <h4>Metadata Tags (${metadataTags.length})</h4>
+                        <p>${metadataTags.join(', ')}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Network Error: ${error.message}</p>`;
+            }
+        }
+
+        async function testFullHierarchy() {
+            const resultDiv = document.getElementById('test3-result');
+            resultDiv.innerHTML = '<p>Loading...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/hierarchy`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const hierarchy = data.data;
+                    const industryCount = Object.keys(hierarchy).length;
+                    const totalSubIndustries = Object.values(hierarchy).reduce((sum, ind) => 
+                        sum + (ind.subIndustries?.length || 0), 0
+                    );
+                    
+                    // Show sample from Education
+                    const educationSample = hierarchy['Education'];
+                    
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ Success! Loaded full hierarchy</p>
+                        <p><strong>Total Industries:</strong> ${industryCount}</p>
+                        <p><strong>Total Sub-Industries:</strong> ${totalSubIndustries}</p>
+                        <h4>Sample: Education Industry</h4>
+                        <pre>${JSON.stringify(educationSample, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Network Error: ${error.message}</p>`;
+            }
+        }
+
+        async function loadIndustrySubtags() {
+            const selector = document.getElementById('industry-selector');
+            const industry = selector.value;
+            const resultDiv = document.getElementById('test4-result');
+            
+            if (!industry) {
+                resultDiv.innerHTML = '';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<p>Loading...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/subtags?industry=${encodeURIComponent(industry)}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const subtags = data.data;
+                    const subIndustries = subtags.subIndustries || [];
+                    const jobRoles = subtags.jobRoles || [];
+                    const metadataTags = subtags.metadataTags || [];
+                    
+                    resultDiv.innerHTML = `
+                        <h4>${industry} - Subtags</h4>
+                        <p><strong>Sub-Industries:</strong> ${subIndustries.length}</p>
+                        <div class="subtag-list">
+                            ${subIndustries.map(sub => `
+                                <div class="subtag-item">
+                                    <strong>${sub.name}</strong><br>
+                                    <small>${sub.fullPath}</small>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <p><strong>Job Roles:</strong> ${jobRoles.join(', ') || 'None'}</p>
+                        <p><strong>Categories:</strong> ${metadataTags.join(', ') || 'None'}</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Network Error: ${error.message}</p>`;
+            }
+        }
+
+        // Auto-run first test on load
+        window.addEventListener('load', () => {
+            testTopLevelIndustries();
+        });
+    </script>
+</body>
+</html>

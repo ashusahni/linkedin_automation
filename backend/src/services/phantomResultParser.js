@@ -1,0 +1,9 @@
+{
+  linkedinUrl,
+  firstName,
+  lastName,
+  fullName,
+  title,
+  company,
+  profileImage
+}

@@ -1,0 +1,776 @@
+import pool from '../db.js';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
+import '../config/index.js'; // Ensure config is loaded
+
+// AI_PROVIDER is read dynamically on each call so Settings page changes take effect immediately.
+// Use the getter function getProvider() everywhere instead of a module-level const.
+function getProvider() {
+    return (process.env.AI_PROVIDER || 'openai').toLowerCase();
+}
+// Keep a readable alias for logging at startup
+const AI_PROVIDER = getProvider();
+
+// Initialize OpenAI client
+// Initialize OpenAI client
+const openaiKey = process.env.OPENAI_API_KEY || '';
+let openai = null;
+if (openaiKey) {
+    try {
+        openai = new OpenAI({ apiKey: openaiKey });
+    } catch (e) {
+        console.error('Failed to initialize OpenAI client:', e.message);
+    }
+}
+
+// Initialize Anthropic (Claude) client
+const anthropicKey = process.env.ANTHROPIC_API_KEY || '';
+let anthropic = null;
+if (anthropicKey) {
+    try {
+        anthropic = new Anthropic({ apiKey: anthropicKey });
+    } catch (e) {
+        console.error('Failed to initialize Claude client:', e.message);
+    }
+}
+
+// Log configuration status
+console.log(`\n🤖 AI Configuration:`);
+console.log(`   Primary Provider: ${AI_PROVIDER.toUpperCase()}`);
+
+if (anthropic) {
+    console.log(`   ✅ Claude API Key loaded`);
+    console.log(`   Model: ${process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229'}`);
+} else {
+    console.log('   ⚪ Claude not configured');
+}
+
+if (openai) {
+    console.log(`   ✅ OpenAI API Key loaded`);
+    console.log(`   Model: ${process.env.OPENAI_MODEL || 'gpt-4o-mini'}`);
+} else {
+    console.log('   ⚪ OpenAI not configured');
+}
+console.log('');
+
+class AIService {
+    /**
+     * Check if ANY AI is configured
+     */
+    static isConfigured() {
+        return !!openai || !!anthropic;
+    }
+
+    /**
+     * Call AI API with automatic fallback
+     */
+    static async callAI(prompt, maxTokens = 300, temperature = 0.8) {
+        // Read provider dynamically — reflects Settings page changes without restart
+        const activeProvider = getProvider();
+        let primary = activeProvider === 'claude' ? 'claude' : 'openai';
+        let secondary = activeProvider === 'claude' ? 'openai' : 'claude';
+
+        // Helper to execute call per provider
+        const executeCall = async (provider) => {
+            if (provider === 'claude') {
+                if (!anthropic) throw new Error('Claude not configured');
+                console.log('   📡 Calling Claude API...');
+                const model = process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229';
+                const response = await anthropic.messages.create({
+                    model: model,
+                    max_tokens: maxTokens,
+                    temperature: temperature,
+                    messages: [{ role: 'user', content: prompt }]
+                });
+                if (!response?.content?.[0]?.text) throw new Error('Invalid response from Claude');
+                return response.content[0].text.trim();
+            } else {
+                if (!openai) throw new Error('OpenAI not configured');
+                console.log('   📡 Calling OpenAI API...');
+                const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+                const response = await openai.chat.completions.create({
+                    model: model,
+                    messages: [{ role: 'user', content: prompt }],
+                    temperature: temperature,
+                    max_tokens: maxTokens
+                });
+                if (!response?.choices?.[0]?.message?.content) throw new Error('Invalid response from OpenAI');
+                return response.choices[0].message.content.trim();
+            }
+        };
+
+        try {
+            // Try Primary
+            return await executeCall(primary);
+        } catch (error) {
+            console.error(`⚠️ ${primary.toUpperCase()} failed: ${error.message}`);
+
+            // Try Fallback
+            if ((primary === 'claude' && openai) || (primary === 'openai' && anthropic)) {
+                console.log(`   🔄 Falling back to ${secondary.toUpperCase()}...`);
+                try {
+                    const result = await executeCall(secondary);
+                    console.log(`   ✅ ${secondary.toUpperCase()} fallback successful`);
+                    return result;
+                } catch (secondaryError) {
+                    console.error(`❌ ${secondary.toUpperCase()} fallback also failed: ${secondaryError.message}`);
+                    throw error; // Throw original error to trigger superior fallback (template)
+                }
+            } else {
+                throw error;
+            }
+        }
+    }
+
+    /**
+     * Personalization options for connection requests (human-selectable before send).
+     * @param {Object} options
+     * @param {string} [options.tone] - professional | friendly | casual | formal | warm
+     * @param {string} [options.length] - short | medium | long
+     * @param {string} [options.focus] - recent_post | company | role | mutual_connection | general
+     */
+    static getFallbackConnectionMessage(lead, enrichment = null) {
+        if (enrichment && enrichment.bio) {
+            const bioSnippet = (enrichment.bio || '').substring(0, 80);
+            return `Hi ${lead.first_name}, I noticed your work at ${lead.company || 'your company'} and your background in ${enrichment.interests?.[0] || lead.title || 'your field'}. ${bioSnippet}${bioSnippet.length >= 80 ? '...' : ''} I'd love to connect!`;
+        }
+        return `Hi ${lead.first_name}, I'd love to connect and explore potential synergies between our work.`;
+    }
+
+    /**
+     * Generates a personalized connection request note (max 300 chars).
+     * Supports optional personalization: tone, length, focus. On API/quota failure returns fallback so user can edit and send.
+     * @param {Object} lead - Lead information
+     * @param {Object} enrichment - Enriched profile data (optional)
+     * @param {Object} options - Options including campaign context
+     * @param {Object} options.campaign - Campaign details (goal, type, description, target_audience)
+     */
+    static async generateConnectionRequest(lead, enrichment = null, options = {}) {
+        const tone = options.tone || 'professional';
+        const length = options.length || 'medium';
+        const focus = options.focus || 'general';
+        const campaign = options.campaign || null;
+
+        try {
+            if (!this.isConfigured()) {
+                console.warn('⚠️ AI not configured, using personalized template. Edit and send.');
+                return this.getFallbackConnectionMessage(lead, enrichment);
+            }
+
+            // Build rich prompt with all available data
+            let enrichmentContext = '';
+            let hasEnrichmentData = false;
+
+            if (enrichment) {
+                hasEnrichmentData = true;
+                if (enrichment.bio && enrichment.bio.trim().length > 0) {
+                    enrichmentContext += `\n\nProfile Bio (USE THIS for personalization):\n${enrichment.bio}`;
+                    console.log(`      Bio available: ${enrichment.bio.substring(0, 60)}...`);
+                }
+                if (enrichment.interests && Array.isArray(enrichment.interests) && enrichment.interests.length > 0) {
+                    enrichmentContext += `\n\nInterests/Skills (REFERENCE THESE):\n${enrichment.interests.slice(0, 8).join(', ')}`;
+                }
+                if (enrichment.recent_posts && Array.isArray(enrichment.recent_posts) && enrichment.recent_posts.length > 0) {
+                    enrichmentContext += `\n\nRecent Activity/Posts (MENTION IF RELEVANT):`;
+                    enrichment.recent_posts.slice(0, 3).forEach((post, idx) => {
+                        const postText = post.title || post.text || JSON.stringify(post);
+                        enrichmentContext += `\n${idx + 1}. ${postText.substring(0, 200)}`;
+                    });
+                }
+            }
+
+            // Build campaign context
+            let campaignContext = '';
+            if (campaign) {
+                campaignContext = '\n\nCAMPAIGN CONTEXT (ALIGN YOUR MESSAGE WITH THIS):';
+                if (campaign.goal) {
+                    campaignContext += `\n- Campaign Goal: ${campaign.goal}`;
+                }
+                if (campaign.type) {
+                    campaignContext += `\n- Campaign Type: ${campaign.type}`;
+                }
+                if (campaign.description) {
+                    campaignContext += `\n- Campaign Description: ${campaign.description}`;
+                }
+                if (campaign.target_audience) {
+                    campaignContext += `\n- Target Audience: ${campaign.target_audience}`;
+                }
+                console.log(`      Campaign context: ${campaign.goal || 'N/A'} - ${campaign.type || 'N/A'}`);
+            }
+
+            const toneInstructions = {
+                professional: 'Professional and polished. Respectful, clear, no slang.',
+                friendly: 'Warm and approachable. Conversational but still professional.',
+                casual: 'Relaxed and conversational. Slightly informal, human touch.',
+                formal: 'Formal and businesslike. Best for senior/executive contacts.',
+                warm: 'Warm and personable. Show genuine interest and enthusiasm.'
+            };
+            const lengthInstructions = {
+                short: '2-3 sentences only. Target 150-250 characters. Be concise.',
+                medium: '3-5 sentences. Target 400-600 characters. Balanced.',
+                long: '4-6 sentences. Target 500-600 characters (LinkedIn limit). More detail.'
+            };
+            const focusInstructions = {
+                recent_post: 'Reference or mention their recent post/activity if available. Show you saw it.',
+                company: 'Focus on their company and role there. Why their company/industry interests you.',
+                role: 'Focus on their job title and expertise. Tie to your shared domain.',
+                mutual_connection: 'If you have mutual connections, you can reference shared context (keep it natural).',
+                general: 'Use a mix of their bio, title, and company. Balanced personalization.'
+            };
+
+            const prompt = `You are writing a personalized LinkedIn connection request. Generate a UNIQUE message that shows you've researched this person's profile AND aligns with the campaign goals.
+
+Lead Information:
+- Name: ${lead.full_name}
+- Title: ${lead.title || 'N/A'}
+- Company: ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+
+PERSONALIZATION (follow these):
+- TONE: ${toneInstructions[tone] || toneInstructions.professional}
+- LENGTH: ${lengthInstructions[length] || lengthInstructions.medium}
+- FOCUS: ${focusInstructions[focus] || focusInstructions.general}
+
+RULES:
+1. Reference SPECIFIC details from their profile (bio, title, company, or recent activity).
+2. NO generic "I'd love to connect" without context. Explain WHY based on their profile.
+3. ${campaign ? 'ALIGN the message with the campaign goal and context. Make it relevant to why you\'re reaching out in this campaign.' : ''}
+4. NO emojis.
+5. Generate ONLY the message body. No "Hi [Name]," prefix (I'll add it). No quotes.`;
+
+            console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} (tone=${tone}, length=${length}, focus=${focus})...`);
+
+            let message = await this.callAI(prompt, length === 'short' ? 150 : 350, 0.8);
+
+            if (!message || typeof message !== 'string') message = '';
+            message = message.trim();
+            if (!message.toLowerCase().startsWith('hi ') && !message.toLowerCase().startsWith('hello ')) {
+                message = `Hi ${lead.first_name}, ${message}`;
+            }
+
+            const maxLen = length === 'short' ? 300 : 600;
+            if (message.length > maxLen) {
+                const sentences = message.match(/[^.!?]+[.!?]+/g);
+                if (sentences && sentences.length > 1) {
+                    let truncated = '';
+                    for (const s of sentences) {
+                        if ((truncated + s).length <= maxLen - 3) truncated += s;
+                        else break;
+                    }
+                    message = (truncated.trim() || message.substring(0, maxLen - 3)) + '...';
+                } else {
+                    message = message.substring(0, maxLen - 3) + '...';
+                }
+            }
+
+            console.log(`   ✅ AI call successful (${message.length} chars)`);
+            return message;
+        } catch (error) {
+            console.error('❌ AI Connection Request Error:', error.message);
+            if (error.response) {
+                console.error('AI API Response:', error.response.status, error.response.data);
+            }
+            if (error.code === 'insufficient_quota') {
+                console.warn('   ⚠️ API quota exceeded. Returning fallback — edit and send.');
+            } else if (error.message && (error.message.includes('API key') || error.message.includes('401') || error.message.includes('429'))) {
+                console.warn('   ⚠️ API key or rate limit issue. Returning fallback — edit and send.');
+            }
+            return this.getFallbackConnectionMessage(lead, enrichment);
+        }
+    }
+
+    /**
+     * Generates a personalized follow-up message
+     * @param {Object} lead - Lead information
+     * @param {Object} enrichment - Enriched profile data (optional)
+     * @param {Array} previousMessages - Previous messages sent to this lead
+     * @param {Object} options - Personalization options including campaign context
+     * @param {string} [options.tone] - professional | friendly | casual | formal | warm
+     * @param {string} [options.length] - short | medium | long
+     * @param {string} [options.focus] - recent_post | company | role | mutual_connection | general
+     * @param {Object} [options.campaign] - Campaign details (goal, type, description, target_audience)
+     */
+    static async generateFollowUpMessage(lead, enrichment = null, previousMessages = [], options = {}) {
+        const tone = options.tone || 'professional';
+        const length = options.length || 'medium';
+        const focus = options.focus || 'general';
+        const campaign = options.campaign || null;
+
+        try {
+            if (!this.isConfigured()) {
+                console.warn(`⚠️ ${AI_PROVIDER.toUpperCase()} not configured, using personalized template`);
+                // Even without AI, use enrichment data to personalize
+                if (enrichment && enrichment.bio) {
+                    const bioSnippet = enrichment.bio.substring(0, 80);
+                    return `Hi ${lead.first_name}, following up on my previous message. I saw your recent work in ${enrichment.interests?.[0] || lead.title || 'your field'} and thought you might find this relevant. Would love to hear your thoughts!`;
+                }
+                return `Hi ${lead.first_name}, following up on my previous message. Would love to hear your thoughts!`;
+            }
+
+            // Build rich prompt with all available data
+            let enrichmentContext = '';
+            let hasEnrichmentData = false;
+
+            if (enrichment) {
+                hasEnrichmentData = true;
+                if (enrichment.bio && enrichment.bio.trim().length > 0) {
+                    enrichmentContext += `\n\nProfile Bio (USE THIS for personalization):\n${enrichment.bio}`;
+                    console.log(`      Bio available: ${enrichment.bio.substring(0, 60)}...`);
+                }
+                if (enrichment.interests && Array.isArray(enrichment.interests) && enrichment.interests.length > 0) {
+                    enrichmentContext += `\n\nInterests/Skills (REFERENCE THESE):\n${enrichment.interests.slice(0, 10).join(', ')}`;
+                    console.log(`      Interests: ${enrichment.interests.slice(0, 5).join(', ')}`);
+                }
+                if (enrichment.recent_posts && Array.isArray(enrichment.recent_posts) && enrichment.recent_posts.length > 0) {
+                    enrichmentContext += `\n\nRecent Activity/Posts (MENTION IF RELEVANT):`;
+                    enrichment.recent_posts.slice(0, 3).forEach((post, idx) => {
+                        const postText = post.title || post.text || JSON.stringify(post);
+                        enrichmentContext += `\n${idx + 1}. ${postText.substring(0, 250)}`;
+                    });
+                    console.log(`      Recent posts: ${enrichment.recent_posts.length} items`);
+                }
+            }
+
+            if (!hasEnrichmentData || enrichmentContext.trim().length === 0) {
+                console.log(`      ⚠️  No enrichment data available - will use basic lead info only`);
+            }
+
+            // Build campaign context
+            let campaignContext = '';
+            if (campaign) {
+                campaignContext = '\n\nCAMPAIGN CONTEXT (ALIGN YOUR MESSAGE WITH THIS):';
+                if (campaign.goal) {
+                    campaignContext += `\n- Campaign Goal: ${campaign.goal}`;
+                }
+                if (campaign.type) {
+                    campaignContext += `\n- Campaign Type: ${campaign.type}`;
+                }
+                if (campaign.description) {
+                    campaignContext += `\n- Campaign Description: ${campaign.description}`;
+                }
+                if (campaign.target_audience) {
+                    campaignContext += `\n- Target Audience: ${campaign.target_audience}`;
+                }
+                console.log(`      Campaign context: ${campaign.goal || 'N/A'} - ${campaign.type || 'N/A'}`);
+            }
+
+            const toneInstructions = {
+                professional: 'Professional and polished. Respectful, clear, no slang.',
+                friendly: 'Warm and approachable. Conversational but still professional.',
+                casual: 'Relaxed and conversational. Slightly informal, human touch.',
+                formal: 'Formal and businesslike. Best for senior/executive contacts.',
+                warm: 'Warm and personable. Show genuine interest and enthusiasm.'
+            };
+            const lengthInstructions = {
+                short: '2-3 sentences only. Target 150-250 characters. Be concise.',
+                medium: '3-5 sentences. Target 400-600 characters. Balanced.',
+                long: '4-6 sentences. Target 500-800 characters. More detail.'
+            };
+            const focusInstructions = {
+                recent_post: 'Reference or mention their recent post/activity if available. Show you saw it.',
+                company: 'Focus on their company and role there. Why their company/industry interests you.',
+                role: 'Focus on their job title and expertise. Tie to your shared domain.',
+                mutual_connection: 'If you have mutual connections, you can reference shared context (keep it natural).',
+                general: 'Use a mix of their bio, title, and company. Balanced personalization.'
+            };
+
+            const prompt = `You are writing a personalized LinkedIn follow-up message. Generate a DETAILED, UNIQUE message that shows you've researched this person and are providing genuine value, while aligning with the campaign goals.
+
+Lead Information:
+- Name: ${lead.full_name}
+- Title: ${lead.title || 'N/A'}
+- Company: ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+
+${previousMessages.length > 0 ? `\nPrevious Messages Sent:\n${previousMessages.join('\n---\n')}\n\nBuild on these previous messages naturally.` : ''}
+
+PERSONALIZATION (follow these):
+- TONE: ${toneInstructions[tone] || toneInstructions.professional}
+- LENGTH: ${lengthInstructions[length] || lengthInstructions.medium}
+- FOCUS: ${focusInstructions[focus] || focusInstructions.general}
+
+CRITICAL REQUIREMENTS:
+1. Reference SPECIFIC details from their profile - their bio, recent posts, interests, or work. Show you've been following their activity.
+2. Provide genuine value or insight related to THEIR specific background or recent activity, not generic advice.
+3. ${campaign ? 'ALIGN the message with the campaign goal and context. Make it relevant to why you\'re reaching out in this campaign and what you\'re trying to achieve.' : ''}
+4. Make it UNIQUE - each message must be completely different based on what's unique about this person.
+5. Show genuine interest in their work and demonstrate you've researched them.
+6. NO generic follow-up phrases. Instead, reference something specific from their profile or recent activity.
+7. NO emojis.
+8. Generate ONLY the message body. No "Hi [Name]," prefix (I'll add it). No quotes.
+
+Example of what NOT to write:
+"Hi John, just following up on my previous message. Would love to hear your thoughts!"
+
+Example of what TO write:
+"Hi John, I noticed your recent post about the future of AI in healthcare, and it got me thinking about the challenges you mentioned around data privacy. In my experience working with similar projects, I've found that implementing federated learning approaches can address some of those concerns while maintaining patient confidentiality. I'd love to hear your perspective on this, especially given your background in healthcare technology. Would you be open to a quick conversation about this?"
+
+Generate ONLY the message text, no quotes, no "Hi [Name]," prefix (I'll add that), just the message content.`;
+
+            console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} API (follow-up message, tone=${tone}, length=${length}, focus=${focus})...`);
+            console.log(`      Enrichment data available: ${enrichment ? 'Yes' : 'No'}`);
+
+            const maxTokens = length === 'short' ? 150 : length === 'long' ? 400 : 300;
+            let message = await this.callAI(prompt, maxTokens, 0.85);
+
+            // Add greeting if not present
+            if (!message.toLowerCase().startsWith('hi ') && !message.toLowerCase().startsWith('hello ')) {
+                message = `Hi ${lead.first_name}, ${message}`;
+            }
+
+            // Ensure reasonable length based on selected length option
+            const maxLen = length === 'short' ? 300 : length === 'long' ? 800 : 600;
+            if (message.length > maxLen) {
+                // Try to cut at sentence boundary
+                const sentences = message.match(/[^.!?]+[.!?]+/g);
+                if (sentences && sentences.length > 1) {
+                    let truncated = '';
+                    for (const sentence of sentences) {
+                        if ((truncated + sentence).length <= maxLen - 3) {
+                            truncated += sentence;
+                        } else {
+                            break;
+                        }
+                    }
+                    message = truncated.trim() || message.substring(0, maxLen - 3) + '...';
+                } else {
+                    message = message.substring(0, maxLen - 3) + '...';
+                }
+            }
+
+            console.log(`   ✅ AI call successful (${message.length} chars)`);
+            return message;
+        } catch (error) {
+            console.error('❌ AI Follow-up Message Error:', error.message);
+            if (error.response) {
+                console.error('AI API Response Error:', error.response.status, error.response.data);
+            }
+            if (error.code) {
+                console.error('AI API Error Code:', error.code);
+                if (error.code === 'insufficient_quota') {
+                    throw new Error('AI API quota exceeded. Please check your account billing.');
+                }
+            }
+            // Return fallback message
+            return `Hi ${lead.first_name}, following up on my previous message. Would love to connect!`;
+        }
+    }
+
+    /**
+     * Generates a thought-leadership LinkedIn post from an article
+     */
+    static async generateThoughtLeadershipPost(article) {
+        try {
+            if (!this.isConfigured()) {
+                console.warn(`⚠️ ${AI_PROVIDER.toUpperCase()} not configured, using template`);
+                return `Interesting article: ${article.original_title}\n\n${article.source_url}\n\n#Leadership #Industry`;
+            }
+
+            const prompt = `Create a thought-leadership LinkedIn post based on this article.
+
+Article Title: ${article.original_title}
+Article URL: ${article.source_url}
+${article.summary ? `Summary: ${article.summary}` : ''}
+
+Requirements:
+- Share your perspective on the topic
+- Explain what it means for the industry
+- Discuss potential impact or implications
+- Professional yet engaging tone
+- 200-300 words
+- Include 3-5 relevant hashtags at the end
+- Make it feel authentic and personal, not robotic
+- Start with a hook that grabs attention
+
+Generate ONLY the post text, no quotes or extra formatting.`;
+
+            return await this.callAI(prompt, 500, 0.8);
+        } catch (error) {
+            console.error('❌ AI Post Generation Error:', error.message);
+            return `Interesting insights from this article: ${article.original_title}\n\nRead more: ${article.source_url}\n\n#Industry #Insights`;
+        }
+    }
+
+    /**
+     * Generates a personalized message based on lead data and template
+     * (Legacy method - enhanced with real AI)
+     * @param {number} leadId - Lead ID
+     * @param {string} template - Template string (optional)
+     * @param {string} stepType - Step type (connection_request, message, follow_up)
+     * @param {Object} campaignContext - Campaign context (optional)
+     */
+    static async generatePersonalizedMessage(leadId, template, stepType = 'message', campaignContext = null) {
+        try {
+            // 1. Fetch Lead & Enrichment Data
+            const leadResult = await pool.query("SELECT * FROM leads WHERE id = $1", [leadId]);
+            const lead = leadResult.rows[0];
+
+            if (!lead) {
+                throw new Error('Lead not found');
+            }
+
+            const enrichmentResult = await pool.query("SELECT * FROM lead_enrichment WHERE lead_id = $1", [leadId]);
+            const enrichment = enrichmentResult.rows[0];
+
+            console.log(`   📋 Generating ${stepType} for: ${lead.first_name} ${lead.last_name}`);
+            console.log(`      Enrichment: ${enrichment ? 'Available' : 'Not available'}`);
+            console.log(`      Campaign context: ${campaignContext ? 'Available' : 'Not available'}`);
+            console.log(`      AI Provider: ${this.isConfigured() ? AI_PROVIDER.toUpperCase() : 'Not configured (using template)'}`);
+
+            // 2. Use AI based on step type
+            let message = '';
+            try {
+                const options = campaignContext ? { campaign: campaignContext } : {};
+                if (stepType === 'connection_request') {
+                    message = await this.generateConnectionRequest(lead, enrichment, options);
+                } else if (stepType === 'message' || stepType === 'follow_up') {
+                    message = await this.generateFollowUpMessage(lead, enrichment, [], options);
+                } else {
+                    // Fallback to template replacement
+                    message = template || '';
+                    message = message.replace(/\{firstName\}/g, lead.first_name || "there");
+                    message = message.replace(/\{lastName\}/g, lead.last_name || "");
+                    message = message.replace(/\{fullName\}/g, lead.full_name || "there");
+                    message = message.replace(/\{company\}/g, lead.company || "your company");
+                    message = message.replace(/\{title\}/g, lead.title || "your role");
+                }
+            } catch (aiError) {
+                console.error(`❌ Error during AI generation for ${stepType}:`, aiError.message);
+                // Continue to fallback below
+            }
+
+            // Ensure we always return a message
+            if (!message || message.trim().length === 0) {
+                console.warn(`⚠️ Generated empty message, using fallback`);
+                if (stepType === 'connection_request') {
+                    message = `Hi ${lead.first_name}, I'd love to connect and explore potential synergies between our work.`;
+                } else {
+                    message = `Hi ${lead.first_name}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+                }
+            }
+
+            console.log(`   ✅ Generated message (${message.length} chars)`);
+            return message;
+        } catch (error) {
+            console.error("❌ AI Generation Error:", error.message);
+            console.error("Error stack:", error.stack);
+
+            // Always return a fallback message
+            const leadResult = await pool.query("SELECT * FROM leads WHERE id = $1", [leadId]);
+            const lead = leadResult.rows[0];
+
+            if (stepType === 'connection_request') {
+                return `Hi ${lead?.first_name || 'there'}, I'd love to connect and explore potential synergies between our work.`;
+            } else {
+                return `Hi ${lead?.first_name || 'there'}, I hope this message finds you well. I'd love to connect and discuss how we might work together.`;
+            }
+        }
+    }
+
+    /**
+     * Generate email content for failover
+     */
+    static async generateEmailFailover(lead, enrichment = null, linkedinMessages = []) {
+        try {
+            if (!this.isConfigured()) {
+                return `Hi ${lead.first_name},\n\nI tried reaching out on LinkedIn but wanted to follow up via email.\n\nBest regards`;
+            }
+
+            const prompt = `Generate a professional email for LinkedIn failover.
+
+Lead Information:
+- Name: ${lead.full_name}
+- Title: ${lead.title || 'N/A'}
+- Company: ${lead.company || 'N/A'}
+
+Context: We connected on LinkedIn but haven't received a response. This is a respectful follow-up via email.
+
+Requirements:
+- Professional email format
+- Acknowledge the LinkedIn connection attempt
+- Provide value or insight
+- Clear call-to-action
+- Respectful of their time
+- 150-200 words
+
+Generate ONLY the email body, no subject line.`;
+
+            return await this.callAI(prompt, 300, 0.7);
+        } catch (error) {
+            console.error('❌ AI Email Generation Error:', error.message);
+            return `Hi ${lead.first_name},\n\nI tried reaching out on LinkedIn but wanted to follow up via email.\n\nBest regards`;
+        }
+    }
+
+    /**
+     * Generate personalized email outreach (direct email, not failover)
+     */
+    async generateEmailOutreach(lead, enrichment = null, template = null) {
+        try {
+            // Build context about the lead
+            let context = `Lead: ${lead.first_name} ${lead.last_name}
+Title: ${lead.title || 'Unknown'}
+Company: ${lead.company || 'Unknown'}`;
+
+            if (enrichment) {
+                if (enrichment.bio) context += `\nBio: ${enrichment.bio}`;
+                if (enrichment.interests?.length > 0) {
+                    context += `\nInterests: ${enrichment.interests.join(', ')}`;
+                }
+            }
+
+            const prompt = `You are an expert at writing personalized, professional outreach emails.
+
+${context}
+
+Task: Write a compelling email to ${lead.first_name} that will get a response.
+
+${template ? `Style guide/Template:\n${template}\n` : ''}
+
+Requirements:
+- Start with a personalized hook based on their background
+- Show genuine interest in their work
+- Provide clear value proposition
+- Include a specific call-to-action
+- Keep it conversational and human
+- 120-180 words max
+- Do NOT sound like a sales pitch
+- Mention that you found their contact info and wanted to reach out directly
+
+Generate ONLY the email body (no subject line).`;
+
+            return await this.callAI(prompt, 300, 0.8);
+        } catch (error) {
+            console.error('❌ AI Email Outreach Generation Error:', error.message);
+            return `Hi ${lead.first_name},\n\nI came across your profile and was impressed by your work at ${lead.company || 'your company'}. I'd love to connect and explore potential collaboration.\n\nWould you be open to a quick chat?\n\nBest regards`;
+        }
+    }
+
+    /**
+     * Generate a Gmail/email draft with subject line and longer body (for approval queue).
+     * Returns { subject, body } for use in gmail_outreach step_type.
+     * @param {Object} lead - Lead information
+     * @param {Object} enrichment - Enriched profile data (optional)
+     * @param {Object} options - { tone, length, focus, campaign }
+     */
+    static async generateGmailDraft(lead, enrichment = null, options = {}) {
+        const tone = options.tone || 'professional';
+        const length = options.length || 'medium';
+        const focus = options.focus || 'general';
+        const campaign = options.campaign || null;
+
+        try {
+            if (!this.isConfigured()) {
+                const fallbackSubject = `Quick thought for ${lead.first_name}`;
+                const fallbackBody = `Hi ${lead.first_name},\n\nI came across your profile and was impressed by your work at ${lead.company || 'your company'}. I'd love to connect and explore potential collaboration.\n\nWould you be open to a quick chat?\n\nBest regards`;
+                return { subject: fallbackSubject, body: fallbackBody };
+            }
+
+            let enrichmentContext = '';
+            if (enrichment) {
+                if (enrichment.bio?.trim()) enrichmentContext += `\nProfile Bio:\n${enrichment.bio}`;
+                if (enrichment.interests?.length) enrichmentContext += `\nInterests: ${enrichment.interests.slice(0, 8).join(', ')}`;
+                if (enrichment.recent_posts?.length) {
+                    enrichmentContext += '\nRecent activity (mention if relevant):';
+                    enrichment.recent_posts.slice(0, 3).forEach((p, i) => {
+                        const t = p.title || p.text || JSON.stringify(p);
+                        enrichmentContext += `\n${i + 1}. ${t.substring(0, 180)}`;
+                    });
+                }
+            }
+
+            let campaignContext = '';
+            if (campaign) {
+                campaignContext = '\nCampaign context (align with this):';
+                if (campaign.goal) campaignContext += ` Goal: ${campaign.goal}`;
+                if (campaign.type) campaignContext += ` | Type: ${campaign.type}`;
+                if (campaign.description) campaignContext += ` | ${campaign.description}`;
+            }
+
+            const toneMap = {
+                professional: 'Professional and polished, no slang.',
+                friendly: 'Warm and approachable, conversational.',
+                casual: 'Relaxed and conversational.',
+                formal: 'Formal and businesslike.',
+                warm: 'Warm and personable, genuine interest.'
+            };
+            const lengthMap = {
+                short: 'Body: 120-180 words. Subject: concise, under 60 characters.',
+                medium: 'Body: 180-280 words. Subject: clear, under 80 characters.',
+                long: 'Body: 280-400 words. Subject: descriptive, under 100 characters.'
+            };
+
+            const prompt = `You are writing a personalized outreach EMAIL (Gmail) to a prospect. Generate a complete draft.
+
+Lead:
+- Name: ${lead.full_name}
+- Title: ${lead.title || 'N/A'}
+- Company: ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+
+Requirements:
+- TONE: ${toneMap[tone] || toneMap.professional}
+- LENGTH: ${lengthMap[length] || lengthMap.medium}
+- FOCUS: Reference specific details from their profile/company when possible. ${focus === 'recent_post' ? 'Mention recent post/activity if available.' : focus === 'company' ? 'Focus on their company and role.' : 'Balanced personalization.'}
+
+OUTPUT FORMAT (strict):
+1. First line must be exactly: SUBJECT: <your subject line>
+2. Then one blank line.
+3. Then the full email body. Start with a greeting (e.g. Hi ${lead.first_name},). Use proper paragraphs. Sign off professionally (e.g. Best regards).
+- No quotes around subject or body.
+- No "Subject:" in the body text—only in the first line as SUBJECT: ...
+- Body should be longer and more substantive than a short LinkedIn message (multiple paragraphs, 150-350 words depending on length).`;
+
+            console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} (Gmail draft, tone=${tone}, length=${length})...`);
+            const maxTokens = length === 'long' ? 650 : length === 'short' ? 350 : 500;
+            const raw = await this.callAI(prompt, maxTokens, 0.8);
+            if (!raw || typeof raw !== 'string') {
+                throw new Error('Invalid AI response');
+            }
+
+            const subjectMatch = raw.match(/^\s*SUBJECT:\s*(.+?)(?:\n|$)/im);
+            const subject = subjectMatch ? subjectMatch[1].trim() : `Quick thought for ${lead.first_name}`;
+            let body = raw;
+            if (subjectMatch) {
+                body = raw.slice(raw.indexOf('\n')).replace(/^\s*\n?/, '').trim();
+            }
+            if (body.length > 4000) body = body.substring(0, 3997) + '...';
+
+            console.log(`   ✅ Gmail draft generated (subject: ${subject.length} chars, body: ${body.length} chars)`);
+            return { subject, body };
+        } catch (error) {
+            console.error('❌ AI Gmail Draft Error:', error.message);
+            return {
+                subject: `Quick thought for ${lead.first_name}`,
+                body: `Hi ${lead.first_name},\n\nI came across your profile and was impressed by your work at ${lead.company || 'your company'}. I'd love to connect and explore potential collaboration.\n\nWould you be open to a quick chat?\n\nBest regards`
+            };
+        }
+    }
+
+    /**
+     * Generate personalized SMS message (max 160 chars)
+     */
+    async generateSMSOutreach(lead, enrichment = null) {
+        try {
+            const prompt = `Generate a short, personalized SMS message for ${lead.first_name} ${lead.last_name}, ${lead.title || 'professional'} at ${lead.company || 'their company'}.
+
+Requirements:
+- MAX 160 characters (strict limit)
+- Friendly, not salesy
+- Mention LinkedIn connection
+- Clear CTA
+- Professional but casual tone
+
+Example good SMS:
+"Hi John! Connected on LinkedIn - loved your recent post on AI. Quick q: open to chat about XYZ? -Mike"
+
+Generate ONLY the SMS text, nothing else.`;
+
+            const result = await this.callAI(prompt, 50, 0.9);
+            // Ensure it's under 160 chars
+            return result.substring(0, 160);
+        } catch (error) {
+            console.error('❌ AI SMS Generation Error:', error.message);
+            return `Hi ${lead.first_name}! Saw your LinkedIn profile. Would love to connect. Can we chat?`;
+        }
+    }
+}
+
+export default AIService;

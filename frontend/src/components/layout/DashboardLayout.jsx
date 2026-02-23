@@ -1,0 +1,478 @@
+import { useState, useEffect } from 'react';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { LayoutDashboard, Users, Megaphone, Settings, Menu, Newspaper, Search, ChevronDown, Sparkles, Sun, Moon } from 'lucide-react';
+import { cn } from '../../lib/utils';
+import NotificationDropdown from '../NotificationDropdown';
+import { TimeFilterProvider } from '../../context/TimeFilterContext';
+
+const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/', color: '#6366f1' },
+    { id: 'search', label: 'Lead Search', icon: Search, path: '/search', color: '#0ea5e9' },
+    {
+        id: 'leads',
+        label: 'Leads',
+        icon: Users,
+        path: '/leads',
+        color: '#10b981',
+        children: [
+            { id: 'my-contacts-new', label: 'My Contacts', path: '/leads?has_contact_info=true' },
+            { id: 'my-contacts', label: 'Connections', path: '/leads?connection_degree=1st' },
+            { id: 'prospects', label: 'Prospects', path: '/leads?connection_degree=2nd' },
+        ]
+    },
+    { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns', color: '#f59e0b' },
+    { id: 'content', label: 'Content Engine', icon: Newspaper, path: '/content', color: '#a855f7' },
+    { id: 'settings', label: 'Settings', icon: Settings, path: '/settings', color: '#64748b' },
+];
+
+const UI_PREFS_STORAGE_KEY = 'ui-preferences-v1';
+
+const applyUiPreferencesFromStorage = () => {
+    try {
+        const raw = localStorage.getItem(UI_PREFS_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        const root = document.documentElement;
+        const contrast = ['soft', 'normal', 'high'].includes(parsed.contrast) ? parsed.contrast : 'normal';
+        const radius = ['rounded', 'square'].includes(parsed.radius) ? parsed.radius : 'rounded';
+        const effects = ['rich', 'minimal'].includes(parsed.effects) ? parsed.effects : 'rich';
+        root.setAttribute('data-ui-contrast', contrast);
+        root.setAttribute('data-ui-radius', radius);
+        root.setAttribute('data-ui-effects', effects);
+        return parsed;
+    } catch {
+        document.documentElement.setAttribute('data-ui-contrast', 'normal');
+        document.documentElement.setAttribute('data-ui-radius', 'rounded');
+        document.documentElement.setAttribute('data-ui-effects', 'rich');
+        return {};
+    }
+};
+
+export default function DashboardLayout() {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [expandedItems, setExpandedItems] = useState({});
+    const [isDarkMode, setIsDarkMode] = useState(() => {
+        try {
+            const rawPrefs = localStorage.getItem(UI_PREFS_STORAGE_KEY);
+            if (rawPrefs) {
+                const parsedPrefs = JSON.parse(rawPrefs);
+                if (parsedPrefs.mode === 'light') return false;
+                if (parsedPrefs.mode === 'dark') return true;
+            }
+        } catch { }
+        const storedTheme = localStorage.getItem('theme-mode');
+        if (storedTheme === 'light') return false;
+        if (storedTheme === 'dark') return true;
+        return document.documentElement.classList.contains('dark');
+    });
+    const [branding, setBranding] = useState({ userName: '', companyName: '', logoUrl: '', profileImageUrl: '', theme: 'default', linkedinAccountName: '' });
+
+    useEffect(() => {
+        axios.get('/api/settings/branding').then((r) => setBranding(r.data || {})).catch(() => { });
+    }, []);
+
+    useEffect(() => {
+        const theme = branding.theme && branding.theme !== 'default' ? branding.theme : '';
+        document.documentElement.setAttribute('data-theme', theme);
+        return () => document.documentElement.removeAttribute('data-theme');
+    }, [branding.theme]);
+
+    useEffect(() => {
+        document.documentElement.classList.toggle('dark', isDarkMode);
+        localStorage.setItem('theme-mode', isDarkMode ? 'dark' : 'light');
+        try {
+            const rawPrefs = localStorage.getItem(UI_PREFS_STORAGE_KEY);
+            const parsedPrefs = rawPrefs ? JSON.parse(rawPrefs) : {};
+            localStorage.setItem(
+                UI_PREFS_STORAGE_KEY,
+                JSON.stringify({ ...parsedPrefs, mode: isDarkMode ? 'dark' : 'light' }),
+            );
+        } catch { }
+    }, [isDarkMode]);
+
+    useEffect(() => {
+        const syncPreferences = () => {
+            const parsed = applyUiPreferencesFromStorage();
+            if (parsed.mode === 'light') setIsDarkMode(false);
+            if (parsed.mode === 'dark') setIsDarkMode(true);
+        };
+
+        syncPreferences();
+        window.addEventListener('ui-preferences-updated', syncPreferences);
+        return () => window.removeEventListener('ui-preferences-updated', syncPreferences);
+    }, []);
+
+    const displayName = branding.userName || branding.companyName || 'there';
+
+    const getInitials = (name) => {
+        if (!name || name === 'there') return 'JD';
+        const parts = name.trim().split(/\s+/);
+        if (parts.length === 1) return parts[0][0].toUpperCase();
+        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    };
+
+    const initials = getInitials(branding.userName || branding.companyName);
+
+    // Determine the current page label for the header breadcrumb
+    const currentPage = navItems.reduce((found, item) => {
+        if (found) return found;
+        if (item.children) {
+            const child = item.children.find(c => location.pathname + location.search === c.path || location.pathname === c.path.split('?')[0]);
+            if (child) return { label: child.label, parent: item.label };
+        }
+        if (item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path)) return { label: item.label };
+        return null;
+    }, null);
+
+    return (
+        <TimeFilterProvider>
+            <div className="min-h-screen bg-background flex text-foreground" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+                {/* ── Aurora background ── */}
+                <div className="aurora-bg" aria-hidden="true" />
+                <div className="dot-grid fixed inset-0 -z-[1] pointer-events-none" aria-hidden="true" />
+
+                {/* ── Sidebar ── */}
+                <aside
+                    className={cn(
+                        "fixed h-full z-30 flex flex-col transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                        sidebarOpen ? "w-[240px]" : "w-[68px]"
+                    )}
+                >
+                    {/* Sidebar inner (glassmorphism applied via global CSS) */}
+                    <div className="flex flex-col h-full">
+
+                        {/* ── Logo area ── */}
+                        <div className={cn(
+                            "flex items-center border-b border-border/40 overflow-hidden transition-all duration-300",
+                            sidebarOpen ? "h-[64px] px-5 gap-3" : "h-[64px] px-0 justify-center"
+                        )}>
+                            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-lg shadow-primary/30 shrink-0 select-none border border-primary/20">
+                                <span className="font-extrabold text-primary-foreground text-sm tracking-tight">LF</span>
+                            </div>
+                            {sidebarOpen && (
+                                <div className="flex flex-col justify-center overflow-hidden select-none">
+                                    <div className="flex items-baseline gap-[2px]">
+                                        <span className="font-black text-[18px] tracking-tight text-foreground leading-none">
+                                            Lead
+                                        </span>
+                                        <span className="font-black text-[18px] text-primary tracking-tight leading-none bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/70">
+                                            Forge
+                                        </span>
+                                    </div>
+                                    <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground mt-[2px] ml-[1px]">
+                                        Workspace
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* ── Nav ── */}
+                        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-3">
+                            {sidebarOpen && (
+                                <div className="mb-4 rounded-2xl border border-border/40 bg-card/50 px-3 py-2.5 backdrop-blur-sm">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Navigation</p>
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                                            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                                            Live
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-1">
+                            {navItems.map((item) => {
+                                if (item.children) {
+                                    const isParentActive = location.pathname.startsWith(item.path);
+                                    const isExpanded = expandedItems[item.id] !== undefined ? expandedItems[item.id] : isParentActive;
+                                    const activeChildrenCount = item.children.filter((child) => {
+                                        const searchParams = new URLSearchParams(location.search);
+                                        const childPath = child.path.split('?')[0];
+                                        const childQuery = new URLSearchParams(child.path.split('?')[1] || '');
+                                        if (location.pathname !== childPath) return false;
+                                        const degree = childQuery.get('connection_degree');
+                                        const hasContactInfo = childQuery.get('has_contact_info');
+                                        if (degree) return searchParams.get('connection_degree') === degree;
+                                        if (hasContactInfo) return searchParams.get('has_contact_info') === hasContactInfo;
+                                        return true;
+                                    }).length;
+
+                                    return (
+                                        <div key={item.id} className="w-full flex flex-col">
+                                            <div
+                                                className={cn(
+                                                    "w-full flex items-center justify-between rounded-2xl transition-all duration-200 group relative overflow-hidden",
+                                                    sidebarOpen ? "px-3 py-2.5 gap-3" : "px-0 py-2.5 justify-center cursor-pointer",
+                                                    isParentActive
+                                                        ? "text-primary"
+                                                        : "text-muted-foreground hover:text-foreground"
+                                                )}
+                                                onClick={() => {
+                                                    navigate(item.path);
+                                                    setExpandedItems(prev => ({ ...prev, [item.id]: true }));
+                                                }}
+                                            >
+                                                <span
+                                                    className={cn(
+                                                        "absolute inset-0 transition-opacity duration-200",
+                                                        isParentActive
+                                                            ? "bg-gradient-to-r from-primary/18 via-primary/8 to-transparent opacity-100"
+                                                            : "bg-accent/60 opacity-0 group-hover:opacity-100"
+                                                    )}
+                                                />
+                                                {isParentActive && (
+                                                    <>
+                                                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 rounded-r-full bg-primary pointer-events-none" />
+                                                        <span className="absolute left-[6px] top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/90 pointer-events-none shadow-[0_0_10px_hsl(var(--primary)/0.7)]" />
+                                                    </>
+                                                )}
+                                                <div className="relative flex items-center gap-3 flex-1 flex-shrink-0 cursor-pointer">
+                                                    <div className={cn(
+                                                        "flex items-center justify-center w-7 h-7 rounded-xl transition-all border",
+                                                        isParentActive
+                                                            ? "bg-primary/20 border-primary/30 shadow-[0_0_0_1px_hsl(var(--primary)/0.15)]"
+                                                            : "border-border/40 bg-card/50 group-hover:bg-accent/80"
+                                                    )}>
+                                                        <item.icon className="w-4 h-4 min-w-[16px]" style={{ color: isParentActive ? item.color : undefined }} />
+                                                    </div>
+                                                    {sidebarOpen && (
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <span className="font-semibold text-sm select-none truncate">{item.label}</span>
+                                                            {isParentActive && activeChildrenCount > 0 && (
+                                                                <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/12 px-1.5 py-0.5 text-[10px] font-bold text-primary leading-none">
+                                                                    {activeChildrenCount}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {sidebarOpen && (
+                                                    <div
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setExpandedItems(prev => ({ ...prev, [item.id]: !isExpanded }));
+                                                        }}
+                                                        className="p-1 -mr-1 hover:bg-accent/50 rounded-md transition-colors cursor-pointer"
+                                                    >
+                                                        <ChevronDown className={cn("w-3.5 h-3.5 opacity-50 transition-transform duration-200 shrink-0", isExpanded && "rotate-180")} />
+                                                    </div>
+                                                )}
+                                                {!sidebarOpen && (
+                                                    <div className="absolute left-full ml-3 w-max px-2.5 py-1.5 bg-popover/95 backdrop-blur-xl text-popover-foreground text-xs font-medium rounded-lg shadow-xl border border-border/50 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 -translate-x-1 group-hover:translate-x-0">
+                                                        {item.label}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {sidebarOpen && isExpanded && (
+                                                <div className="relative flex flex-col gap-0.5 ml-5 pl-3 mt-1 mb-1 animate-slide-up">
+                                                    <span className="absolute left-0 top-1 bottom-1 w-px bg-gradient-to-b from-primary/35 via-border/70 to-transparent" />
+                                                    {item.children.map((child) => {
+                                                        const searchParams = new URLSearchParams(location.search);
+                                                        const childPath = child.path.split('?')[0];
+                                                        const childQuery = new URLSearchParams(child.path.split('?')[1] || '');
+                                                        let isActive = false;
+                                                        if (location.pathname === childPath) {
+                                                            const degree = childQuery.get('connection_degree');
+                                                            const hasContactInfo = childQuery.get('has_contact_info');
+                                                            if (degree) isActive = searchParams.get('connection_degree') === degree;
+                                                            else if (hasContactInfo) isActive = searchParams.get('has_contact_info') === hasContactInfo;
+                                                            else isActive = true;
+                                                        }
+                                                        return (
+                                                            <NavLink
+                                                                key={child.id}
+                                                                to={child.path}
+                                                                className={cn(
+                                                                    "w-full flex items-center px-3 py-2 text-[13px] rounded-xl transition-colors duration-150 font-medium relative overflow-hidden",
+                                                                    isActive
+                                                                        ? "text-primary bg-primary/12"
+                                                                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                                                                )}
+                                                            >
+                                                                {child.label}
+                                                            </NavLink>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                }
+
+                                // Standard item
+                                return (
+                                    <NavLink
+                                        key={item.id}
+                                        to={item.path}
+                                        end={item.path === '/'}
+                                        className={({ isActive }) => cn(
+                                            "w-full flex items-center rounded-2xl transition-all duration-200 group relative overflow-hidden",
+                                            sidebarOpen ? "px-3 py-2.5 gap-3" : "px-0 py-2.5 justify-center",
+                                            isActive
+                                                ? "text-primary"
+                                                : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >
+                                        {({ isActive }) => (
+                                            <>
+                                                <span
+                                                    className={cn(
+                                                        "absolute inset-0 transition-opacity duration-200",
+                                                        isActive
+                                                            ? "bg-gradient-to-r from-primary/18 via-primary/8 to-transparent opacity-100"
+                                                            : "bg-accent/60 opacity-0 group-hover:opacity-100"
+                                                    )}
+                                                />
+                                                {isActive && (
+                                                    <>
+                                                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 rounded-r-full bg-primary" />
+                                                        <span className="absolute left-[6px] top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/90 shadow-[0_0_10px_hsl(var(--primary)/0.7)]" />
+                                                    </>
+                                                )}
+                                                <div className={cn(
+                                                    "relative flex items-center justify-center w-7 h-7 rounded-xl transition-all border",
+                                                    isActive
+                                                        ? "bg-primary/20 border-primary/30 shadow-[0_0_0_1px_hsl(var(--primary)/0.15)]"
+                                                        : "border-border/40 bg-card/50 group-hover:bg-accent/80"
+                                                )}>
+                                                    <item.icon className="w-4 h-4 min-w-[16px]" style={{ color: isActive ? item.color : undefined }} />
+                                                </div>
+                                                {sidebarOpen && <span className="relative font-semibold text-sm">{item.label}</span>}
+                                                {!sidebarOpen && (
+                                                    <div className="absolute left-full ml-3 w-max px-2.5 py-1.5 bg-popover/95 backdrop-blur-xl text-popover-foreground text-xs font-medium rounded-lg shadow-xl border border-border/50 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 -translate-x-1 group-hover:translate-x-0">
+                                                        {item.label}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </NavLink>
+                                );
+                            })}
+                            </div>
+                        </nav>
+
+                        {/* ── Quick action card ── */}
+                        {sidebarOpen && (
+                            <div className="px-3 pb-2">
+                                <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/15 via-primary/8 to-transparent p-3.5 shadow-[0_8px_24px_-16px_hsl(var(--primary)/0.65)]">
+                                    <div className="flex items-start gap-2.5">
+                                        <div className="w-7 h-7 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
+                                            <Sparkles className="w-4 h-4 text-primary" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-semibold text-foreground">Try Smart Flow</p>
+                                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                                                Launch campaigns from search with one streamlined flow.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ── User Footer ── */}
+                        <div className={cn(
+                            "border-t border-border/40 transition-all duration-300",
+                            sidebarOpen ? "p-4" : "p-2 flex justify-center"
+                        )}>
+                            <div className={cn("flex items-center gap-3", !sidebarOpen && "justify-center")}>
+                                {branding.profileImageUrl ? (
+                                    <img src={branding.profileImageUrl} alt="" className="w-9 h-9 rounded-full object-cover ring-2 ring-border shrink-0" />
+                                ) : (
+                                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground font-bold text-xs shrink-0 ring-2 ring-primary/20 shadow-lg shadow-primary/20">
+                                        {initials}
+                                    </div>
+                                )}
+                                {sidebarOpen && (
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-semibold text-sm truncate">{displayName}</p>
+                                        <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">{branding.companyName || 'Scottish Chemical Industries'}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+                {/* ── Main Content ── */}
+                <main className={cn(
+                    "flex-1 flex flex-col min-h-screen transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                    sidebarOpen ? "ml-[240px]" : "ml-[68px]"
+                )}>
+                    {/* ── Top Header ── */}
+                    <header className="h-[64px] sticky top-0 z-20 px-6 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            {/* Sidebar toggle */}
+                            <button
+                                onClick={() => setSidebarOpen(!sidebarOpen)}
+                                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150"
+                                aria-label="Toggle sidebar"
+                            >
+                                <Menu className="w-4 h-4" />
+                            </button>
+
+                            {/* Breadcrumb */}
+                            {currentPage && (
+                                <div className="hidden sm:flex items-center gap-1.5 text-sm">
+                                    {currentPage.parent && (
+                                        <>
+                                            <span className="text-muted-foreground font-medium">{currentPage.parent}</span>
+                                            <span className="text-border">/</span>
+                                        </>
+                                    )}
+                                    <span className="font-semibold text-foreground">{currentPage.label}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => setIsDarkMode((prev) => !prev)}
+                                className="w-9 h-9 rounded-lg border border-border/40 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150"
+                                aria-label={isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+                                title={isDarkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+                            >
+                                {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                            </button>
+
+                            {/* Notifications */}
+                            <NotificationDropdown />
+
+                            {/* User chip */}
+                            <div className="hidden sm:flex items-center gap-2.5 pl-3 border-l border-border/40">
+                                {branding.profileImageUrl ? (
+                                    <img src={branding.profileImageUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-border" />
+                                ) : (
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground font-bold text-xs ring-2 ring-primary/20">
+                                        {initials}
+                                    </div>
+                                )}
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-semibold text-foreground leading-none">{displayName}</span>
+                                    {branding.linkedinAccountName ? (
+                                        <span className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                                            {branding.linkedinAccountName}
+                                        </span>
+                                    ) : (
+                                        <span className="text-[11px] text-muted-foreground mt-0.5">Analytics & Outreach</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* ── Page Content ── */}
+                    <div className="flex-1 p-6 md:p-8 max-w-[1440px] mx-auto w-full">
+                        <div className="page-enter">
+                            <Outlet />
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </TimeFilterProvider>
+    );
+}
