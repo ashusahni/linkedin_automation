@@ -212,7 +212,7 @@ export function calculateScore(lead, prefs) {
 }
 
 /** Assign a tier string based on score and thresholds. */
-export function assignTier(score, degree, prefs) {
+export function assignTier(score, degree, prefs, leadId = null) {
     const primaryThreshold = prefs?.primary_threshold ?? 120;
     const secondaryThreshold = prefs?.secondary_threshold ?? 60;
 
@@ -221,6 +221,21 @@ export function assignTier(score, degree, prefs) {
 
     if (score >= primaryThreshold) return 'primary';
     if (score >= secondaryThreshold) return 'secondary';
+
+    // Instead of sending all remaining low-scoring leads to tertiary,
+    // we randomly or deterministically (by ID) assign ~33% to secondary 
+    // to ensure they still get a chance to be prospected.
+    let pushToSecondary = false;
+    if (leadId && !isNaN(leadId)) {
+        pushToSecondary = Number(leadId) % 3 === 0;
+    } else {
+        pushToSecondary = Math.random() < 0.33;
+    }
+
+    if (pushToSecondary) {
+        return 'secondary';
+    }
+
     return 'tertiary';
 }
 
@@ -322,7 +337,7 @@ export async function recalculateAllScores() {
 
         for (const lead of rows) {
             const score = calculateScore(lead, prefs);
-            const tier = assignTier(score, lead.connection_degree, prefs);
+            const tier = assignTier(score, lead.connection_degree, prefs, lead.id);
 
             // Auto-approve if score meets threshold and not already approved/rejected
             const shouldAutoApprove =
@@ -357,7 +372,7 @@ export async function recalculateAllScores() {
 export async function scoreAndClassifyLead(lead) {
     const prefs = await loadPreferences();
     const score = prefs ? calculateScore(lead, prefs) : 0;
-    const tier = prefs ? assignTier(score, lead.connection_degree || lead.connectionDegree, prefs) : 'tertiary';
+    const tier = assignTier(score, lead.connection_degree || lead.connectionDegree, prefs, lead.id);
     const autoThreshold = prefs?.auto_approval_threshold ?? 150;
     const shouldAutoApprove = prefs?.preference_active && score >= autoThreshold;
     return { score, tier, shouldAutoApprove };

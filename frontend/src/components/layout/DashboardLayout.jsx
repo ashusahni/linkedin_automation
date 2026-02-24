@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { LayoutDashboard, Users, Megaphone, Settings, Menu, Newspaper, Search, ChevronDown, Sparkles, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Users, Megaphone, Settings, Menu, Newspaper, Search, ChevronDown, Sun, Moon } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import NotificationDropdown from '../NotificationDropdown';
 import { TimeFilterProvider } from '../../context/TimeFilterContext';
@@ -183,196 +183,176 @@ export default function DashboardLayout() {
                             )}
 
                             <div className="space-y-1">
-                            {navItems.map((item) => {
-                                if (item.children) {
-                                    const isParentActive = location.pathname.startsWith(item.path);
-                                    const isExpanded = expandedItems[item.id] !== undefined ? expandedItems[item.id] : isParentActive;
-                                    const activeChildrenCount = item.children.filter((child) => {
-                                        const searchParams = new URLSearchParams(location.search);
-                                        const childPath = child.path.split('?')[0];
-                                        const childQuery = new URLSearchParams(child.path.split('?')[1] || '');
-                                        if (location.pathname !== childPath) return false;
-                                        const degree = childQuery.get('connection_degree');
-                                        const hasContactInfo = childQuery.get('has_contact_info');
-                                        if (degree) return searchParams.get('connection_degree') === degree;
-                                        if (hasContactInfo) return searchParams.get('has_contact_info') === hasContactInfo;
-                                        return true;
-                                    }).length;
+                                {navItems.map((item) => {
+                                    if (item.children) {
+                                        const isParentActive = location.pathname.startsWith(item.path);
+                                        const isExpanded = expandedItems[item.id] !== undefined ? expandedItems[item.id] : isParentActive;
+                                        const activeChildrenCount = item.children.filter((child) => {
+                                            const searchParams = new URLSearchParams(location.search);
+                                            const childPath = child.path.split('?')[0];
+                                            const childQuery = new URLSearchParams(child.path.split('?')[1] || '');
+                                            if (location.pathname !== childPath) return false;
+                                            const degree = childQuery.get('connection_degree');
+                                            const hasContactInfo = childQuery.get('has_contact_info');
+                                            if (degree) return searchParams.get('connection_degree') === degree;
+                                            if (hasContactInfo) return searchParams.get('has_contact_info') === hasContactInfo;
+                                            return true;
+                                        }).length;
 
-                                    return (
-                                        <div key={item.id} className="w-full flex flex-col">
-                                            <div
-                                                className={cn(
-                                                    "w-full flex items-center justify-between rounded-2xl transition-all duration-200 group relative overflow-hidden",
-                                                    sidebarOpen ? "px-3 py-2.5 gap-3" : "px-0 py-2.5 justify-center cursor-pointer",
-                                                    isParentActive
-                                                        ? "text-primary"
-                                                        : "text-muted-foreground hover:text-foreground"
-                                                )}
-                                                onClick={() => {
-                                                    navigate(item.path);
-                                                    setExpandedItems(prev => ({ ...prev, [item.id]: true }));
-                                                }}
-                                            >
-                                                <span
+                                        return (
+                                            <div key={item.id} className="w-full flex flex-col">
+                                                <div
                                                     className={cn(
-                                                        "absolute inset-0 transition-opacity duration-200",
+                                                        "w-full flex items-center justify-between rounded-2xl transition-all duration-200 group relative overflow-hidden",
+                                                        sidebarOpen ? "px-3 py-2.5 gap-3" : "px-0 py-2.5 justify-center cursor-pointer",
                                                         isParentActive
-                                                            ? "bg-gradient-to-r from-primary/18 via-primary/8 to-transparent opacity-100"
-                                                            : "bg-accent/60 opacity-0 group-hover:opacity-100"
+                                                            ? "text-primary"
+                                                            : "text-muted-foreground hover:text-foreground"
                                                     )}
-                                                />
-                                                {isParentActive && (
-                                                    <>
-                                                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 rounded-r-full bg-primary pointer-events-none" />
-                                                        <span className="absolute left-[6px] top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/90 pointer-events-none shadow-[0_0_10px_hsl(var(--primary)/0.7)]" />
-                                                    </>
-                                                )}
-                                                <div className="relative flex items-center gap-3 flex-1 flex-shrink-0 cursor-pointer">
-                                                    <div className={cn(
-                                                        "flex items-center justify-center w-7 h-7 rounded-xl transition-all border",
-                                                        isParentActive
-                                                            ? "bg-primary/20 border-primary/30 shadow-[0_0_0_1px_hsl(var(--primary)/0.15)]"
-                                                            : "border-border/40 bg-card/50 group-hover:bg-accent/80"
-                                                    )}>
-                                                        <item.icon className="w-4 h-4 min-w-[16px]" style={{ color: isParentActive ? item.color : undefined }} />
+                                                    onClick={() => {
+                                                        navigate(item.path);
+                                                        setExpandedItems(prev => ({ ...prev, [item.id]: true }));
+                                                    }}
+                                                >
+                                                    <span
+                                                        className={cn(
+                                                            "absolute inset-0 transition-opacity duration-200",
+                                                            isParentActive
+                                                                ? "bg-gradient-to-r from-primary/18 via-primary/8 to-transparent opacity-100"
+                                                                : "bg-accent/60 opacity-0 group-hover:opacity-100"
+                                                        )}
+                                                    />
+                                                    {isParentActive && (
+                                                        <>
+                                                            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 rounded-r-full bg-primary pointer-events-none" />
+                                                            <span className="absolute left-[6px] top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/90 pointer-events-none shadow-[0_0_10px_hsl(var(--primary)/0.7)]" />
+                                                        </>
+                                                    )}
+                                                    <div className="relative flex items-center gap-3 flex-1 flex-shrink-0 cursor-pointer">
+                                                        <div className={cn(
+                                                            "flex items-center justify-center w-7 h-7 rounded-xl transition-all border",
+                                                            isParentActive
+                                                                ? "bg-primary/20 border-primary/30 shadow-[0_0_0_1px_hsl(var(--primary)/0.15)]"
+                                                                : "border-border/40 bg-card/50 group-hover:bg-accent/80"
+                                                        )}>
+                                                            <item.icon className="w-4 h-4 min-w-[16px]" style={{ color: isParentActive ? item.color : undefined }} />
+                                                        </div>
+                                                        {sidebarOpen && (
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <span className="font-semibold text-sm select-none truncate">{item.label}</span>
+                                                                {isParentActive && activeChildrenCount > 0 && (
+                                                                    <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/12 px-1.5 py-0.5 text-[10px] font-bold text-primary leading-none">
+                                                                        {activeChildrenCount}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     {sidebarOpen && (
-                                                        <div className="flex items-center gap-2 min-w-0">
-                                                            <span className="font-semibold text-sm select-none truncate">{item.label}</span>
-                                                            {isParentActive && activeChildrenCount > 0 && (
-                                                                <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/12 px-1.5 py-0.5 text-[10px] font-bold text-primary leading-none">
-                                                                    {activeChildrenCount}
-                                                                </span>
-                                                            )}
+                                                        <div
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setExpandedItems(prev => ({ ...prev, [item.id]: !isExpanded }));
+                                                            }}
+                                                            className="p-1 -mr-1 hover:bg-accent/50 rounded-md transition-colors cursor-pointer"
+                                                        >
+                                                            <ChevronDown className={cn("w-3.5 h-3.5 opacity-50 transition-transform duration-200 shrink-0", isExpanded && "rotate-180")} />
+                                                        </div>
+                                                    )}
+                                                    {!sidebarOpen && (
+                                                        <div className="absolute left-full ml-3 w-max px-2.5 py-1.5 bg-popover/95 backdrop-blur-xl text-popover-foreground text-xs font-medium rounded-lg shadow-xl border border-border/50 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 -translate-x-1 group-hover:translate-x-0">
+                                                            {item.label}
                                                         </div>
                                                     )}
                                                 </div>
-                                                {sidebarOpen && (
-                                                    <div
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setExpandedItems(prev => ({ ...prev, [item.id]: !isExpanded }));
-                                                        }}
-                                                        className="p-1 -mr-1 hover:bg-accent/50 rounded-md transition-colors cursor-pointer"
-                                                    >
-                                                        <ChevronDown className={cn("w-3.5 h-3.5 opacity-50 transition-transform duration-200 shrink-0", isExpanded && "rotate-180")} />
-                                                    </div>
-                                                )}
-                                                {!sidebarOpen && (
-                                                    <div className="absolute left-full ml-3 w-max px-2.5 py-1.5 bg-popover/95 backdrop-blur-xl text-popover-foreground text-xs font-medium rounded-lg shadow-xl border border-border/50 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 -translate-x-1 group-hover:translate-x-0">
-                                                        {item.label}
+
+                                                {sidebarOpen && isExpanded && (
+                                                    <div className="relative flex flex-col gap-0.5 ml-5 pl-3 mt-1 mb-1 animate-slide-up">
+                                                        <span className="absolute left-0 top-1 bottom-1 w-px bg-gradient-to-b from-primary/35 via-border/70 to-transparent" />
+                                                        {item.children.map((child) => {
+                                                            const searchParams = new URLSearchParams(location.search);
+                                                            const childPath = child.path.split('?')[0];
+                                                            const childQuery = new URLSearchParams(child.path.split('?')[1] || '');
+                                                            let isActive = false;
+                                                            if (location.pathname === childPath) {
+                                                                const degree = childQuery.get('connection_degree');
+                                                                const hasContactInfo = childQuery.get('has_contact_info');
+                                                                if (degree) isActive = searchParams.get('connection_degree') === degree;
+                                                                else if (hasContactInfo) isActive = searchParams.get('has_contact_info') === hasContactInfo;
+                                                                else isActive = true;
+                                                            }
+                                                            return (
+                                                                <NavLink
+                                                                    key={child.id}
+                                                                    to={child.path}
+                                                                    className={cn(
+                                                                        "w-full flex items-center px-3 py-2 text-[13px] rounded-xl transition-colors duration-150 font-medium relative overflow-hidden",
+                                                                        isActive
+                                                                            ? "text-primary bg-primary/12"
+                                                                            : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                                                                    )}
+                                                                >
+                                                                    {child.label}
+                                                                </NavLink>
+                                                            );
+                                                        })}
                                                     </div>
                                                 )}
                                             </div>
+                                        );
+                                    }
 
-                                            {sidebarOpen && isExpanded && (
-                                                <div className="relative flex flex-col gap-0.5 ml-5 pl-3 mt-1 mb-1 animate-slide-up">
-                                                    <span className="absolute left-0 top-1 bottom-1 w-px bg-gradient-to-b from-primary/35 via-border/70 to-transparent" />
-                                                    {item.children.map((child) => {
-                                                        const searchParams = new URLSearchParams(location.search);
-                                                        const childPath = child.path.split('?')[0];
-                                                        const childQuery = new URLSearchParams(child.path.split('?')[1] || '');
-                                                        let isActive = false;
-                                                        if (location.pathname === childPath) {
-                                                            const degree = childQuery.get('connection_degree');
-                                                            const hasContactInfo = childQuery.get('has_contact_info');
-                                                            if (degree) isActive = searchParams.get('connection_degree') === degree;
-                                                            else if (hasContactInfo) isActive = searchParams.get('has_contact_info') === hasContactInfo;
-                                                            else isActive = true;
-                                                        }
-                                                        return (
-                                                            <NavLink
-                                                                key={child.id}
-                                                                to={child.path}
-                                                                className={cn(
-                                                                    "w-full flex items-center px-3 py-2 text-[13px] rounded-xl transition-colors duration-150 font-medium relative overflow-hidden",
-                                                                    isActive
-                                                                        ? "text-primary bg-primary/12"
-                                                                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                                                                )}
-                                                            >
-                                                                {child.label}
-                                                            </NavLink>
-                                                        );
-                                                    })}
-                                                </div>
+                                    // Standard item
+                                    return (
+                                        <NavLink
+                                            key={item.id}
+                                            to={item.path}
+                                            end={item.path === '/'}
+                                            className={({ isActive }) => cn(
+                                                "w-full flex items-center rounded-2xl transition-all duration-200 group relative overflow-hidden",
+                                                sidebarOpen ? "px-3 py-2.5 gap-3" : "px-0 py-2.5 justify-center",
+                                                isActive
+                                                    ? "text-primary"
+                                                    : "text-muted-foreground hover:text-foreground"
                                             )}
-                                        </div>
-                                    );
-                                }
-
-                                // Standard item
-                                return (
-                                    <NavLink
-                                        key={item.id}
-                                        to={item.path}
-                                        end={item.path === '/'}
-                                        className={({ isActive }) => cn(
-                                            "w-full flex items-center rounded-2xl transition-all duration-200 group relative overflow-hidden",
-                                            sidebarOpen ? "px-3 py-2.5 gap-3" : "px-0 py-2.5 justify-center",
-                                            isActive
-                                                ? "text-primary"
-                                                : "text-muted-foreground hover:text-foreground"
-                                        )}
-                                    >
-                                        {({ isActive }) => (
-                                            <>
-                                                <span
-                                                    className={cn(
-                                                        "absolute inset-0 transition-opacity duration-200",
-                                                        isActive
-                                                            ? "bg-gradient-to-r from-primary/18 via-primary/8 to-transparent opacity-100"
-                                                            : "bg-accent/60 opacity-0 group-hover:opacity-100"
+                                        >
+                                            {({ isActive }) => (
+                                                <>
+                                                    <span
+                                                        className={cn(
+                                                            "absolute inset-0 transition-opacity duration-200",
+                                                            isActive
+                                                                ? "bg-gradient-to-r from-primary/18 via-primary/8 to-transparent opacity-100"
+                                                                : "bg-accent/60 opacity-0 group-hover:opacity-100"
+                                                        )}
+                                                    />
+                                                    {isActive && (
+                                                        <>
+                                                            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 rounded-r-full bg-primary" />
+                                                            <span className="absolute left-[6px] top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/90 shadow-[0_0_10px_hsl(var(--primary)/0.7)]" />
+                                                        </>
                                                     )}
-                                                />
-                                                {isActive && (
-                                                    <>
-                                                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-7 rounded-r-full bg-primary" />
-                                                        <span className="absolute left-[6px] top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/90 shadow-[0_0_10px_hsl(var(--primary)/0.7)]" />
-                                                    </>
-                                                )}
-                                                <div className={cn(
-                                                    "relative flex items-center justify-center w-7 h-7 rounded-xl transition-all border",
-                                                    isActive
-                                                        ? "bg-primary/20 border-primary/30 shadow-[0_0_0_1px_hsl(var(--primary)/0.15)]"
-                                                        : "border-border/40 bg-card/50 group-hover:bg-accent/80"
-                                                )}>
-                                                    <item.icon className="w-4 h-4 min-w-[16px]" style={{ color: isActive ? item.color : undefined }} />
-                                                </div>
-                                                {sidebarOpen && <span className="relative font-semibold text-sm">{item.label}</span>}
-                                                {!sidebarOpen && (
-                                                    <div className="absolute left-full ml-3 w-max px-2.5 py-1.5 bg-popover/95 backdrop-blur-xl text-popover-foreground text-xs font-medium rounded-lg shadow-xl border border-border/50 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 -translate-x-1 group-hover:translate-x-0">
-                                                        {item.label}
+                                                    <div className={cn(
+                                                        "relative flex items-center justify-center w-7 h-7 rounded-xl transition-all border",
+                                                        isActive
+                                                            ? "bg-primary/20 border-primary/30 shadow-[0_0_0_1px_hsl(var(--primary)/0.15)]"
+                                                            : "border-border/40 bg-card/50 group-hover:bg-accent/80"
+                                                    )}>
+                                                        <item.icon className="w-4 h-4 min-w-[16px]" style={{ color: isActive ? item.color : undefined }} />
                                                     </div>
-                                                )}
-                                            </>
-                                        )}
-                                    </NavLink>
-                                );
-                            })}
+                                                    {sidebarOpen && <span className="relative font-semibold text-sm">{item.label}</span>}
+                                                    {!sidebarOpen && (
+                                                        <div className="absolute left-full ml-3 w-max px-2.5 py-1.5 bg-popover/95 backdrop-blur-xl text-popover-foreground text-xs font-medium rounded-lg shadow-xl border border-border/50 opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 -translate-x-1 group-hover:translate-x-0">
+                                                            {item.label}
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
+                                        </NavLink>
+                                    );
+                                })}
                             </div>
                         </nav>
-
-                        {/* ── Quick action card ── */}
-                        {sidebarOpen && (
-                            <div className="px-3 pb-2">
-                                <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/15 via-primary/8 to-transparent p-3.5 shadow-[0_8px_24px_-16px_hsl(var(--primary)/0.65)]">
-                                    <div className="flex items-start gap-2.5">
-                                        <div className="w-7 h-7 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
-                                            <Sparkles className="w-4 h-4 text-primary" />
-                                        </div>
-                                        <div className="min-w-0">
-                                            <p className="text-xs font-semibold text-foreground">Try Smart Flow</p>
-                                            <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                                                Launch campaigns from search with one streamlined flow.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
                         {/* ── User Footer ── */}
                         <div className={cn(
                             "border-t border-border/40 transition-all duration-300",
