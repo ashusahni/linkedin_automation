@@ -713,6 +713,17 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
 
                 {/* Action buttons (always visible) */}
                 <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
+                    {['IDEA', 'DRAFT', 'REVIEW'].includes((item.status || '').toUpperCase()) && (
+                        <Button
+                            size="sm"
+                            onClick={() => transition('APPROVED')}
+                            disabled={transitioning || sending}
+                            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                            <CheckCircle2 className="w-3 h-3" />
+                            Approve
+                        </Button>
+                    )}
                     {nextStates.map(s => {
                         const ns = stageFor(s);
                         const Icon = ns.icon;
