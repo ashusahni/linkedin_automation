@@ -423,15 +423,6 @@ export default function LeadsTable() {
     };
 
     const handleAddToCampaign = async () => {
-        // PHASE 4: Gating - Check if leads are approved
-        const selectedLeadObjects = leads.filter(l => selectedLeads.has(l.id));
-        const unapprovedCount = selectedLeadObjects.filter(l => (l.review_status || 'approved') !== 'approved').length;
-
-        if (unapprovedCount > 0) {
-            addToast(`⚠️ ${unapprovedCount} selected leads are not qualified. Only qualified leads can be added to campaigns.`, 'error');
-            return;
-        }
-
         if (!selectedCampaignId) {
             addToast('Please select a campaign', 'warning');
             return;
@@ -443,13 +434,25 @@ export default function LeadsTable() {
         }
 
         try {
+            // Auto-qualify any selected leads that are in 'to_be_reviewed' or 'imported' status
+            const selectedLeadIds = Array.from(selectedLeads);
+            const needsApproval = leads
+                .filter(l => selectedLeads.has(l.id) && l.review_status !== 'approved')
+                .map(l => l.id);
+
+            if (needsApproval.length > 0) {
+                await axios.post('/api/leads/bulk-approve', { leadIds: needsApproval });
+            }
+
             await axios.post(`/api/campaigns/${selectedCampaignId}/leads`, {
-                leadIds: Array.from(selectedLeads)
+                leadIds: selectedLeadIds
             });
-            addToast(`Successfully added ${selectedLeads.size} leads to campaign`, 'success');
+
+            addToast(`Successfully added ${selectedLeads.size} leads to campaign${needsApproval.length > 0 ? ' (and marked as qualified)' : ''}`, 'success');
             setSelectedLeads(new Set());
             setShowCampaignModal(false);
             fetchLeads();
+            fetchStats();
         } catch (error) {
             console.error('Failed to add leads to campaign:', error);
             const errorMsg = error.response?.data?.error || error.message || 'Failed to add leads to campaign';
@@ -1670,155 +1673,128 @@ export default function LeadsTable() {
                     </div>
                 </CardHeader >
                 <CardContent className="pt-0">
-                    {/* PHASE 4: Review Status Tabs */}
-                    <div className="flex gap-2 mb-4 border-b items-center">
-                        <div className="flex gap-2 flex-1">
-                            <button
-                                onClick={() => setReviewStatusTab('approved')}
-                                className={cn(
-                                    "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
-                                    reviewStatusTab === 'approved'
-                                        ? "border-green-500 text-green-600"
-                                        : "border-transparent text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                🟢 Qualified Leads ({reviewStats.approved})
-                            </button>
-                            <button
-                                onClick={() => setReviewStatusTab('to_be_reviewed')}
-                                className={cn(
-                                    "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
-                                    reviewStatusTab === 'to_be_reviewed'
-                                        ? "border-yellow-500 text-yellow-600"
-                                        : "border-transparent text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                🟡 Review ({reviewStats.to_be_reviewed})
-                            </button>
-                            <button
-                                onClick={() => setReviewStatusTab('rejected')}
-                                className={cn(
-                                    "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
-                                    reviewStatusTab === 'rejected'
-                                        ? "border-red-500 text-red-600"
-                                        : "border-transparent text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                🔴 Rejected ({reviewStats.rejected})
-                            </button>
-                            {/* Hidden as per user request */}
-                            {/* <button
-                                onClick={() => setReviewStatusTab('imported')}
-                                className={cn(
-                                    "px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-[2px]",
-                                    reviewStatusTab === 'imported'
-                                        ? "border-blue-500 text-blue-600"
-                                        : "border-transparent text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                📥 Imported Leads ({reviewStats.imported || 0})
-                            </button> */}
-                        </div>
-                        {/* Qualify by Niche Button */}
-                        {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && (
-                            <Button
-                                size="sm"
-                                variant="outline"
-                                className="gap-2 border-primary/50 text-primary hover:bg-primary/10"
-                                onClick={handleQualifyByNiche}
-                                title="Qualify all leads matching your profile niche (preferred keywords, industry, etc.)"
-                            >
-                                <Sparkles className="h-4 w-4" />
-                                Qualify by Niche
-                            </Button>
-                        )}
-                    </div>
-
-                    {/* Selection Toolbar */}
-                    {selectedLeads.size > 0 && (
-                        <div className="bg-primary/10 border border-primary/20 text-primary p-3 rounded-lg flex justify-between items-center mb-4 text-sm animate-in fade-in">
-                            <span className="font-medium">{selectedLeads.size} leads selected</span>
-                            <div className="flex gap-2">
-                                {/* PHASE 4: Bulk Actions */}
-                                {reviewStatusTab === 'to_be_reviewed' && (
-                                    <>
-                                        <Button size="sm" variant="default" className="bg-green-600 hover:bg-green-700 text-white border-none" onClick={handleBulkApprove}>
-                                            ✅ Qualify
-                                        </Button>
-                                        <Button size="sm" variant="destructive" onClick={() => setShowRejectModal(true)}>
-                                            ❌ Reject
-                                        </Button>
-                                    </>
-                                )}
-                                {(reviewStatusTab === 'approved' || reviewStatusTab === 'rejected' || reviewStatusTab === 'imported') && (
-                                    <Button size="sm" variant="outline" onClick={handleMoveToReview}>
-                                        ↩ Move to Review
-                                    </Button>
-                                )}
-
-                                {reviewStatusTab === 'rejected' && (
-                                    <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        onClick={handleBulkDeleteRejected}
-                                        disabled={deleting}
-                                    >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        {deleting ? 'Deleting...' : (selectedLeads.size === leads.length ? 'Delete All Rejected' : `Delete (${selectedLeads.size})`)}
-                                    </Button>
-                                )}
-                                {reviewStatusTab === 'imported' && (
-                                    <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        onClick={handleBulkDeleteImported}
-                                        disabled={deleting}
-                                    >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        {deleting ? 'Deleting...' : (selectedLeads.size === leads.length ? 'Delete All Imported' : `Delete (${selectedLeads.size})`)}
-                                    </Button>
-                                )}
-
-                                <div className="w-px h-6 bg-primary/20 mx-1" />
-
-                                <Button variant="ghost" size="sm" onClick={() => setSelectedLeads(new Set())} >
-                                    Cancel
-                                </Button>
-                                {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
-                                    <>
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="gap-2 border-primary/50 text-primary hover:bg-primary/10"
-                                            onClick={() => {
-                                                setIsBulkEnrich(true);
-                                                setShowCampaignModal(true);
-                                            }}
-                                            disabled={enriching}
-                                        >
-                                            <Sparkles className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                            {enriching ? 'Enriching...' : 'Bulk Enrich & Personalize'}
-                                        </Button>
-                                        {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                className="gap-2 border-primary/50 text-primary hover:bg-primary/10"
-                                                onClick={handleManualScrape}
-                                                disabled={enriching}
-                                            >
-                                                <Database className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                                Enrich Contact Info
-                                            </Button>
+                    {/* Sticky Control Header: Tabs and Selection Toolbar */}
+                    <div className="sticky top-[64px] z-30 bg-background/95 backdrop-blur-md -mx-6 px-6 py-3 border-b border-border/60 transition-all duration-300">
+                        <div className="flex flex-col gap-3">
+                            {/* Review Status Tabs */}
+                            <div className="flex gap-2 items-center">
+                                <div className="flex gap-2 flex-1">
+                                    <button
+                                        onClick={() => setReviewStatusTab('approved')}
+                                        className={cn(
+                                            "px-4 py-2 text-sm font-medium transition-all rounded-lg",
+                                            reviewStatusTab === 'approved'
+                                                ? "bg-green-100 text-green-700 shadow-sm"
+                                                : "text-muted-foreground hover:text-foreground hover:bg-accent"
                                         )}
+                                    >
+                                        🟢 Qualified Leads ({reviewStats.approved})
+                                    </button>
+                                    <button
+                                        onClick={() => setReviewStatusTab('to_be_reviewed')}
+                                        className={cn(
+                                            "px-4 py-2 text-sm font-medium transition-all rounded-lg",
+                                            reviewStatusTab === 'to_be_reviewed'
+                                                ? "bg-yellow-100 text-yellow-700 shadow-sm"
+                                                : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                        )}
+                                    >
+                                        🟡 Review ({reviewStats.to_be_reviewed})
+                                    </button>
+                                    <button
+                                        onClick={() => setReviewStatusTab('rejected')}
+                                        className={cn(
+                                            "px-4 py-2 text-sm font-medium transition-all rounded-lg",
+                                            reviewStatusTab === 'rejected'
+                                                ? "bg-red-100 text-red-700 shadow-sm"
+                                                : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                        )}
+                                    >
+                                        🔴 Rejected ({reviewStats.rejected})
+                                    </button>
+                                </div>
+                                {/* Qualify by Niche Button */}
+                                {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && (
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="gap-2 border-primary/50 text-primary hover:bg-primary/10"
+                                        onClick={handleQualifyByNiche}
+                                        title="Qualify all leads matching your profile niche"
+                                    >
+                                        <Sparkles className="h-4 w-4" />
+                                        Qualify by Niche
+                                    </Button>
+                                )}
+                            </div>
+
+                            {/* Selection Toolbar (Conditional but takes no space when empty) */}
+                            {selectedLeads.size > 0 && (
+                                <div className="bg-primary/10 border border-primary/20 text-primary p-3 rounded-xl flex justify-between items-center text-sm animate-in slide-in-from-top-2 shadow-sm">
+                                    <span className="font-semibold flex items-center gap-2">
+                                        <Check className="h-4 w-4" />
+                                        {selectedLeads.size} leads selected
+                                    </span>
+                                    <div className="flex gap-2">
+                                        {/* Bulk Actions available in all tabs for efficiency */}
                                         <Button size="sm" variant="default" onClick={() => {
                                             setIsBulkEnrich(false);
                                             setShowCampaignModal(true);
                                         }}>
                                             Add to Campaign
                                         </Button>
-                                    </>
-                                )}
+
+                                        {reviewStatusTab === 'to_be_reviewed' && (
+                                            <>
+                                                <Button size="sm" variant="outline" className="bg-background" onClick={handleBulkApprove}>
+                                                    ✅ Single Qualify
+                                                </Button>
+                                                <Button size="sm" variant="destructive" onClick={() => setShowRejectModal(true)}>
+                                                    ❌ Reject
+                                                </Button>
+                                            </>
+                                        )}
+
+                                        {reviewStatusTab !== 'rejected' && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="bg-background gap-2"
+                                                onClick={() => {
+                                                    setIsBulkEnrich(true);
+                                                    setShowCampaignModal(true);
+                                                }}
+                                                disabled={enriching}
+                                            >
+                                                <Sparkles className={cn("h-4 w-4", enriching && "animate-spin")} />
+                                                Enrich & Personalize
+                                            </Button>
+                                        )}
+
+                                        {reviewStatusTab === 'rejected' && (
+                                            <Button size="sm" variant="destructive" onClick={handleBulkDeleteRejected} disabled={deleting}>
+                                                <Trash2 className="h-4 w-4 mr-2" />
+                                                Delete Permanent
+                                            </Button>
+                                        )}
+
+                                        <div className="w-px h-6 bg-primary/20 mx-1" />
+                                        <Button variant="ghost" size="sm" onClick={() => setSelectedLeads(new Set())} >
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {enriching && (
+                        <div className="mt-4 p-4 bg-primary/10 border border-primary/20 rounded-lg animate-pulse">
+                            <div className="flex items-center gap-3">
+                                <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                                <p className="text-sm font-medium text-primary">
+                                    Enriching leads via Data Source and generating AI messages... This may take a few minutes.
+                                </p>
                             </div>
                         </div>
                     )}
@@ -2056,8 +2032,8 @@ export default function LeadsTable() {
             {/* Add to Campaign Modal */}
             {
                 showCampaignModal && (
-                    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <Card className="w-full max-w-md shadow-2xl border-primary/20">
+                    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-20 overflow-y-auto">
+                        <Card className="w-full max-w-md shadow-2xl border-primary/20 animate-in zoom-in-95 duration-200">
                             <CardHeader>
                                 <CardTitle>{isBulkEnrich ? 'Bulk Enrich & Personalize' : 'Add Leads to Campaign'}</CardTitle>
                                 <CardDescription>
