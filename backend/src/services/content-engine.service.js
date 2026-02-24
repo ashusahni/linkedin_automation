@@ -15,8 +15,8 @@ import AIService from './ai.service.js';
 
 // ─── VALID STATE TRANSITIONS ─────────────────────────────────────────────────
 const VALID_TRANSITIONS = {
-    IDEA: ['DRAFT'],
-    DRAFT: ['REVIEW', 'IDEA'],
+    IDEA: ['DRAFT', 'APPROVED'],   // APPROVED = direct approve from modal
+    DRAFT: ['REVIEW', 'IDEA', 'APPROVED'],
     REVIEW: ['APPROVED', 'DRAFT'],
     APPROVED: ['SCHEDULED', 'REVIEW'],
     SCHEDULED: ['POSTED', 'APPROVED'],  // APPROVED allows retry re-schedule
