@@ -18,7 +18,7 @@ const navItems = [
         children: [
             { id: 'my-contacts-new', label: 'My Contacts', path: '/leads?has_contact_info=true' },
             { id: 'my-contacts', label: 'Connections', path: '/leads?connection_degree=1st' },
-            { id: 'prospects', label: 'Prospects', path: '/leads?connection_degree=2nd' },
+            { id: 'prospects', label: 'Prospects', path: '/leads?connection_degree=2nd,3rd' },
         ]
     },
     { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns', color: '#f59e0b' },

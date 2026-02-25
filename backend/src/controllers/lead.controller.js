@@ -295,11 +295,12 @@ export async function getLeads(req, res) {
         params.push(`%${company.trim()}%`);
       }
       if (connection_degree && connection_degree.trim()) {
-        const degree = connection_degree.trim().toLowerCase();
-        // Handle "1st", "2nd", "3rd" vs "1", "2", "3" flexibility if needed
-        // For now, strict contains match is reasonable 
-        conditionClauses.push(`connection_degree ILIKE $${params.length + 1}`);
-        params.push(`%${degree}%`);
+        const degrees = connection_degree.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+        if (degrees.length > 0) {
+          const degreeClauses = degrees.map((_, i) => `connection_degree ILIKE $${params.length + i + 1}`);
+          conditionClauses.push(`(${degreeClauses.join(' OR ')})`);
+          degrees.forEach(d => params.push(`%${d}%`));
+        }
       }
 
       // Complex Industry Logic (preserved for Simple Mode)
@@ -685,8 +686,12 @@ export async function getStats(req, res) {
       params.push(`%${company.trim()}%`);
     }
     if (connection_degree && connection_degree.trim()) {
-      whereConditions.push(`connection_degree ILIKE $${params.length + 1}`);
-      params.push(`%${connection_degree.trim().toLowerCase()}%`);
+      const degrees = connection_degree.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+      if (degrees.length > 0) {
+        const degreeClauses = degrees.map((_, i) => `connection_degree ILIKE $${params.length + i + 1}`);
+        whereConditions.push(`(${degreeClauses.join(' OR ')})`);
+        degrees.forEach(d => params.push(`%${d}%`));
+      }
     }
 
     if (createdFrom) {
@@ -1978,10 +1983,14 @@ export async function getReviewStats(req, res) {
     const params = [];
     let whereConditions = [];
 
-    // Connection Degree Filter
+    // Connection Degree Filter (Support comma-separated e.g. "2nd,3rd")
     if (connection_degree && connection_degree.trim()) {
-      whereConditions.push(`connection_degree ILIKE $${params.length + 1}`);
-      params.push(`%${connection_degree.trim()}%`);
+      const degrees = connection_degree.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+      if (degrees.length > 0) {
+        const degreeClauses = degrees.map((_, i) => `connection_degree ILIKE $${params.length + i + 1}`);
+        whereConditions.push(`(${degreeClauses.join(' OR ')})`);
+        degrees.forEach(d => params.push(`%${d}%`));
+      }
     }
 
     // Industry Filter

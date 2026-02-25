@@ -279,12 +279,12 @@ export default function LeadsTable() {
         // Check if URL params differ from current state to determine if we need to update/fetch
         const stateDiffers =
             connectionDegree !== metaFilters.connectionDegree ||
-            quality !== metaFilters.quality ||
-            industry !== metaFilters.industry ||
+            quality !== (metaFilters.quality || '') ||
+            industry !== (metaFilters.industry || '') ||
             hasContactInfo !== metaFilters.hasContactInfo ||
-            createdFrom !== metaFilters.createdFrom ||
-            createdTo !== metaFilters.createdTo ||
-            (source && source !== metaFilters.source);
+            createdFrom !== (metaFilters.createdFrom || '') ||
+            createdTo !== (metaFilters.createdTo || '') ||
+            (source || 'all') !== metaFilters.source;
 
         if (stateDiffers) {
             const newFilters = {
@@ -295,7 +295,7 @@ export default function LeadsTable() {
                 hasContactInfo: hasContactInfo,
                 createdFrom: createdFrom,
                 createdTo: createdTo,
-                ...(source ? { source } : {}),
+                source: source || 'all', // Reset source to 'all' if empty/missing in URL
             };
 
             setMetaFilters(newFilters);
@@ -498,11 +498,21 @@ export default function LeadsTable() {
         }
     };
 
-    const fetchLeads = async (append = false, overrideFilters = null) => {
+    const fetchLeads = async (append = false, overrideFilters = null, silent = false) => {
         const filtersToUse = overrideFilters ?? metaFilters;
+
+        // My Contacts (has_contact_info=true) should display no leads for now as per request
+        if (filtersToUse.hasContactInfo) {
+            setLeads([]);
+            setPagination({ page: 1, limit: 50, total: 0 });
+            setLoading(false);
+            setLoadingMore(false);
+            return;
+        }
+
         if (append) {
             setLoadingMore(true);
-        } else {
+        } else if (!silent) {
             setLoading(true);
             setPagination((p) => ({ ...p, page: 1, total: 0 }));
         }
@@ -678,6 +688,14 @@ export default function LeadsTable() {
     };
 
     const fetchStats = async (overrides = {}) => {
+        const currentMetaFilters = overrides.metaFilters || metaFilters;
+
+        // My Contacts (has_contact_info=true) stats should be empty/zero
+        if (currentMetaFilters.hasContactInfo) {
+            setReviewStats({ to_be_reviewed: 0, approved: 0, rejected: 0, imported: 0, total: 0 });
+            return;
+        }
+
         try {
             const params = {};
 
@@ -1030,24 +1048,52 @@ export default function LeadsTable() {
         const leadIds = Array.from(selectedLeads);
         if (leadIds.length === 0) return;
 
+        // Optimistic Update: Update stats immediately to feel snappy
+        const previousStats = { ...reviewStats };
+        const previousLeads = [...leads];
+
+        if (reviewStatusTab === 'to_be_reviewed') {
+            setLeads(prev => prev.filter(l => !leadIds.includes(l.id)));
+            setReviewStats(prev => ({
+                ...prev,
+                to_be_reviewed: Math.max(0, prev.to_be_reviewed - leadIds.length),
+                approved: prev.approved + leadIds.length
+            }));
+        }
+
         try {
             await axios.post('/api/leads/bulk-approve', { leadIds });
             addToast(`✅ Qualified ${leadIds.length} lead(s)`, 'success');
             setSelectedLeads(new Set());
 
-            // Keep current filters (quality, connection_degree) so counts and list stay in sync:
-            // e.g. Secondary Review 60 → qualify 20 → Review 40, Qualified +20, same view
-            fetchLeads();
+            // Reconciliation fetch (silent to avoid skeleton flicker during optimistic update)
+            fetchLeads(false, null, true);
             fetchStats();
         } catch (error) {
             console.error('Approve failed:', error);
             addToast('Failed to approve leads', 'error');
+            // Rollback if needed, though usually just re-fetch
+            setReviewStats(previousStats);
+            setLeads(previousLeads);
         }
     };
 
     const handleConfirmReject = async () => {
         const leadIds = Array.from(selectedLeads);
         if (leadIds.length === 0) return;
+
+        // Optimistic Update
+        const previousStats = { ...reviewStats };
+        const previousLeads = [...leads];
+
+        if (reviewStatusTab === 'to_be_reviewed') {
+            setLeads(prev => prev.filter(l => !leadIds.includes(l.id)));
+            setReviewStats(prev => ({
+                ...prev,
+                to_be_reviewed: Math.max(0, prev.to_be_reviewed - leadIds.length),
+                rejected: prev.rejected + leadIds.length
+            }));
+        }
 
         try {
             await axios.post('/api/leads/bulk-reject', {
@@ -1058,11 +1104,14 @@ export default function LeadsTable() {
             setSelectedLeads(new Set());
             setShowRejectModal(false);
             setRejectReason('');
-            fetchLeads();
+            // Reconciliation fetch (silent)
+            fetchLeads(false, null, true);
             fetchStats();
         } catch (error) {
             console.error('Reject failed:', error);
             addToast('Failed to reject leads', 'error');
+            setReviewStats(previousStats);
+            setLeads(previousLeads);
         }
     };
 
@@ -1070,15 +1119,32 @@ export default function LeadsTable() {
         const leadIds = Array.from(selectedLeads);
         if (leadIds.length === 0) return;
 
+        // Optimistic Update
+        const previousStats = { ...reviewStats };
+        const previousLeads = [...leads];
+
+        if (reviewStatusTab === 'approved' || reviewStatusTab === 'rejected') {
+            setLeads(prev => prev.filter(l => !leadIds.includes(l.id)));
+            const fromField = reviewStatusTab === 'approved' ? 'approved' : 'rejected';
+            setReviewStats(prev => ({
+                ...prev,
+                [fromField]: Math.max(0, prev[fromField] - leadIds.length),
+                to_be_reviewed: prev.to_be_reviewed + leadIds.length
+            }));
+        }
+
         try {
             await axios.post('/api/leads/move-to-review', { leadIds });
             addToast(`↩ Moved ${leadIds.length} lead(s) back to review`, 'info');
             setSelectedLeads(new Set());
-            fetchLeads();
+            // Reconciliation fetch (silent)
+            fetchLeads(false, null, true);
             fetchStats();
         } catch (error) {
             console.error('Move to review failed:', error);
             addToast('Failed to move leads', 'error');
+            setReviewStats(previousStats);
+            setLeads(previousLeads);
         }
     };
 
@@ -1095,7 +1161,7 @@ export default function LeadsTable() {
                 qualified > 0 ? 'success' : 'info'
             );
             setSelectedLeads(new Set());
-            fetchLeads();
+            fetchLeads(false, null, true);
             fetchStats();
         } catch (error) {
             console.error('Qualify by niche failed:', error);
@@ -1106,12 +1172,26 @@ export default function LeadsTable() {
 
     // Single item handlers (wrappers for convenience)
     const handleApproveSingle = async (id) => {
+        // Optimistic Update
+        if (reviewStatusTab === 'to_be_reviewed') {
+            setLeads(prev => prev.filter(l => l.id !== id));
+            setReviewStats(prev => ({
+                ...prev,
+                to_be_reviewed: Math.max(0, prev.to_be_reviewed - 1),
+                approved: prev.approved + 1
+            }));
+        }
+
         try {
             await axios.post('/api/leads/bulk-approve', { leadIds: [id] });
             addToast('Lead qualified', 'success');
+            fetchLeads(false, null, true);
+            fetchStats();
+        } catch (error) {
+            addToast('Failed to approve', 'error');
             fetchLeads();
             fetchStats();
-        } catch (error) { addToast('Failed to approve', 'error'); }
+        }
     };
 
     const handleRejectSingle = async (id) => {
@@ -1123,13 +1203,26 @@ export default function LeadsTable() {
     };
 
     const handleMoveToReviewSingle = async (id) => {
+        // Optimistic Update
+        if (reviewStatusTab === 'approved' || reviewStatusTab === 'rejected') {
+            setLeads(prev => prev.filter(l => l.id !== id));
+            const fromField = reviewStatusTab === 'approved' ? 'approved' : 'rejected';
+            setReviewStats(prev => ({
+                ...prev,
+                [fromField]: Math.max(0, prev[fromField] - 1),
+                to_be_reviewed: prev.to_be_reviewed + 1
+            }));
+        }
+
         try {
             await axios.post('/api/leads/move-to-review', { leadIds: [id] });
             addToast('Moved to review', 'info');
-            fetchLeads();
+            fetchLeads(false, null, true);
             fetchStats();
         } catch (error) {
             addToast('Failed to move', 'error');
+            fetchLeads();
+            fetchStats();
         }
     };
     const handleManualScrape = async () => {
