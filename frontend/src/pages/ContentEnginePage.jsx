@@ -186,14 +186,14 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
             <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                     <Field label="Persona *">
-                        <Input placeholder="e.g. SaaS Founder, HR Manager" value={form.persona} onChange={e => set('persona', e.target.value)} className="border-border/60" />
+                        <Input placeholder="e.g. B2B Agency Owner, Sales Leader" value={form.persona} onChange={e => set('persona', e.target.value)} className="border-border/60" />
                     </Field>
                     <Field label="Industry *">
-                        <Input placeholder="e.g. Technology, Healthcare" value={form.industry} onChange={e => set('industry', e.target.value)} className="border-border/60" />
+                        <Input placeholder="e.g. B2B Software, Marketing & Advertising" value={form.industry} onChange={e => set('industry', e.target.value)} className="border-border/60" />
                     </Field>
                 </div>
                 <Field label="Topic / Seed Idea">
-                    <Input placeholder="e.g. Remote work productivity trends" value={form.topic} onChange={e => set('topic', e.target.value)} className="border-border/60" />
+                    <Input placeholder="e.g. Cold email VS LinkedIn for B2B lead generation" value={form.topic} onChange={e => set('topic', e.target.value)} className="border-border/60" />
                 </Field>
                 <div className="grid grid-cols-2 gap-4">
                     <Field label="Objective">
@@ -269,10 +269,10 @@ function AddSourceModal({ onClose, onCreated }) {
                 )}
                 <div className="grid grid-cols-2 gap-4">
                     <Field label="Industry Tag">
-                        <Input value={form.industry_tag} onChange={e => set('industry_tag', e.target.value)} placeholder="Technology" className="border-border/60" />
+                        <Input value={form.industry_tag} onChange={e => set('industry_tag', e.target.value)} placeholder="Marketing & Advertising" className="border-border/60" />
                     </Field>
                     <Field label="Persona Tag">
-                        <Input value={form.persona_tag} onChange={e => set('persona_tag', e.target.value)} placeholder="SaaS Founder" className="border-border/60" />
+                        <Input value={form.persona_tag} onChange={e => set('persona_tag', e.target.value)} placeholder="B2B Agency Owner" className="border-border/60" />
                     </Field>
                 </div>
                 <Button className="w-full h-10" onClick={submit} disabled={loading}>
@@ -327,10 +327,10 @@ function ManualCreateModal({ onClose, onCreated }) {
                 </Field>
                 <div className="grid grid-cols-2 gap-4">
                     <Field label="Persona">
-                        <Input placeholder="SaaS Founder" value={form.persona} onChange={e => set('persona', e.target.value)} className="border-border/60" />
+                        <Input placeholder="B2B Agency Owner" value={form.persona} onChange={e => set('persona', e.target.value)} className="border-border/60" />
                     </Field>
                     <Field label="Industry">
-                        <Input placeholder="Technology" value={form.industry} onChange={e => set('industry', e.target.value)} className="border-border/60" />
+                        <Input placeholder="Marketing & Advertising" value={form.industry} onChange={e => set('industry', e.target.value)} className="border-border/60" />
                     </Field>
                 </div>
                 <Field label="Objective">

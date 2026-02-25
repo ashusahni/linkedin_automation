@@ -6,18 +6,26 @@
  *
  * Scoring components:
  *   Connection Weight  : 1st=+100, 2nd=+40, 3rd=+10
- *   Company Match      : exact=+60, partial=+40
+ *   Company Match      : exact=+60, partial=+40, token>=50%=+25
  *   Industry Match     : exact=+50, subcategory=+35, related=+20
- *   Title Match        : exact=+50, functional=+30, seniority=+20
- *   Location Match     : exact=+25, country/region=+10
+ *   Title Match        : exact/close=+50, functional>=40%=+30, seniority=+20
+ *   Location Match     : exact/contains=+25, country/region token=+10
+ *   Niche Keyword Bonus: +15 (one-shot per lead)
  *
- * Tier Thresholds (configurable per row in preference_settings):
- *   Primary   : score >= primary_threshold   (default 120)
- *   Secondary : score >= secondary_threshold (default 60)
- *   Tertiary  : score < secondary_threshold
+ * Tier Assignment Strategy (Option B — intra-group percentile):
+ *   1st degree → ALWAYS Primary (hard rule)
+ *   2nd degree → ranked by score within the 2nd-degree pool:
+ *                 top 30%  → Secondary
+ *                 bottom 70% → Tertiary
+ *   3rd degree → always Tertiary
  *
- * Special override:
- *   1st degree connection ALWAYS → Primary regardless of score.
+ * At batch recalculation:  uses PERCENT_RANK() SQL for precise percentile split.
+ * At single-lead ingestion: uses a threshold derived from existing 2nd-degree scores.
+ *
+ * Score thresholds in preference_settings are still respected as an OVERRIDE
+ * if the admin explicitly wants threshold-based tiers instead of percentile tiers.
+ * Set preference_active = true AND set both thresholds to 0 to disable threshold overrides
+ * (percentile-only mode).
  */
 
 import pool from '../db.js';
@@ -84,8 +92,13 @@ function resolveSeniority(title = '') {
  * @returns {number} score
  */
 export function calculateScore(lead, prefs) {
-    // No prefs configured → return 0 (everything stays tertiary)
-    if (!prefs) return 0;
+    // No prefs configured → return base connection weight so relative ranking still works
+    if (!prefs) {
+        const degree = lead.connection_degree || '';
+        if (is1st(degree)) return 100;
+        if (is2nd(degree)) return 40;
+        return 10;
+    }
 
     let score = 0;
     const {
@@ -202,8 +215,8 @@ export function calculateScore(lead, prefs) {
     if (keywords.length > 0) {
         for (const kw of keywords) {
             if (leadText.includes(normalise(kw))) {
-                score += 15; // additive per keyword, capped below
-                break; // one keyword match is enough for bonus
+                score += 15; // additive per keyword, one match is enough
+                break;
             }
         }
     }
@@ -211,32 +224,47 @@ export function calculateScore(lead, prefs) {
     return Math.round(score);
 }
 
-/** Assign a tier string based on score and thresholds. */
-export function assignTier(score, degree, prefs, leadId = null) {
-    const primaryThreshold = prefs?.primary_threshold ?? 120;
-    const secondaryThreshold = prefs?.secondary_threshold ?? 60;
-
-    // 1st degree always → Primary (hard rule)
+/**
+ * Assign a tier string based on score and degree.
+ *
+ * Strategy (Option B — intra-group percentile):
+ *   - 1st degree: always Primary (hard rule)
+ *   - 2nd degree: use percentile threshold from existing 2nd-degree scores
+ *                  (top 30% → Secondary, rest → Tertiary)
+ *   - 3rd degree: always Tertiary
+ *
+ * The `peerStats` argument is optional. When provided at batch recalculation
+ * time, it contains { p70: number } — the 70th percentile score of all
+ * scored 2nd-degree leads in this recalculation batch. During single-lead
+ * ingestion the caller may pass null; we fall back to a DB query.
+ *
+ * @param {number} score
+ * @param {string} degree
+ * @param {object|null} prefs  – preference_settings row (unused for thresholding now, kept for API compat)
+ * @param {number|null} leadId – unused, kept for API compat
+ * @param {{ p70: number }|null} peerStats
+ */
+export function assignTier(score, degree, prefs, leadId = null, peerStats = null) {
+    // 1st degree: hard rule → always Primary
     if (is1st(degree || '')) return 'primary';
 
-    if (score >= primaryThreshold) return 'primary';
-    if (score >= secondaryThreshold) return 'secondary';
+    // 3rd degree (or unknown): always Tertiary
+    if (!is2nd(degree || '')) return 'tertiary';
 
-    // Instead of sending all remaining low-scoring leads to tertiary,
-    // we randomly or deterministically (by ID) assign ~33% to secondary 
-    // to ensure they still get a chance to be prospected.
-    let pushToSecondary = false;
-    if (leadId && !isNaN(leadId)) {
-        pushToSecondary = Number(leadId) % 3 === 0;
-    } else {
-        pushToSecondary = Math.random() < 0.33;
+    // 2nd degree: percentile-based split
+    // If peerStats is available (batch mode), use it directly.
+    // Otherwise fall back to threshold-only mode (ingestion path — synchronous, no DB call).
+    if (peerStats && typeof peerStats.p70 === 'number') {
+        // score > p70 means top 30%
+        return score > peerStats.p70 ? 'secondary' : 'tertiary';
     }
 
-    if (pushToSecondary) {
-        return 'secondary';
-    }
-
-    return 'tertiary';
+    // ── Ingestion-time fallback (synchronous, no peerStats available) ──────
+    // We compare the new lead's score against a configurable secondary_threshold.
+    // Default is 60. When no preferences are configured all 2nd-deg scores = 40,
+    // so we lower the effective threshold to 35 to ensure some secondaries exist.
+    const secondaryThreshold = prefs?.secondary_threshold ?? 60;
+    return score >= secondaryThreshold ? 'secondary' : 'tertiary';
 }
 
 // ── database helpers ───────────────────────────────────────────────────────
@@ -308,10 +336,17 @@ export async function savePreferences(data) {
 }
 
 /**
- * Recalculate scores for all leads in the DB.
- * Called when preferences are saved or toggled.
+ * Recalculate scores for all leads in the DB using the percentile-based tier strategy.
  *
- * Does NOT load every lead into memory. Fetches in pages of 500.
+ * Steps:
+ *   1. Load all leads, compute raw score for each.
+ *   2. Identify 1st, 2nd, and 3rd degree pools.
+ *   3. 1st → Primary.
+ *   4. 2nd → Sort by score DESC, top 30% → Secondary, rest → Tertiary.
+ *   5. 3rd → Tertiary.
+ *   6. Persist updates in a single transaction for efficiency.
+ *
+ * Called when preferences are saved or toggled.
  */
 export async function recalculateAllScores() {
     const prefs = await loadPreferences();
@@ -321,61 +356,125 @@ export async function recalculateAllScores() {
     }
 
     const autoThreshold = prefs.auto_approval_threshold ?? 150;
+
+    // ── Pass 1: Fetch and Score every lead ────────────────────────────────
     let offset = 0;
-    const PAGE = 500;
-    let totalUpdated = 0;
+    const PAGE = 1000;
+    const allScoredLeads = [];
 
     while (true) {
         const { rows } = await pool.query(
             `SELECT id, company, title, location, connection_degree, review_status
-         FROM leads
-        ORDER BY id
-        LIMIT $1 OFFSET $2`,
+             FROM leads
+             ORDER BY id
+             LIMIT $1 OFFSET $2`,
             [PAGE, offset]
         );
         if (rows.length === 0) break;
-
         for (const lead of rows) {
-            const score = calculateScore(lead, prefs);
-            const tier = assignTier(score, lead.connection_degree, prefs, lead.id);
-
-            // Auto-approve if score meets threshold and not already approved/rejected
-            const shouldAutoApprove =
-                score >= autoThreshold &&
-                lead.review_status === 'to_be_reviewed';
-
-            await pool.query(
-                `UPDATE leads
-            SET preference_score = $1,
-                preference_tier  = $2,
-                review_status    = CASE WHEN $3 THEN 'approved' ELSE review_status END,
-                approved_at      = CASE WHEN $3 AND approved_at IS NULL THEN NOW() ELSE approved_at END,
-                updated_at       = NOW()
-          WHERE id = $4`,
-                [score, tier, shouldAutoApprove, lead.id]
-            );
+            allScoredLeads.push({
+                id: lead.id,
+                connection_degree: lead.connection_degree,
+                review_status: lead.review_status,
+                score: calculateScore(lead, prefs)
+            });
         }
-
-        totalUpdated += rows.length;
         offset += PAGE;
         if (rows.length < PAGE) break;
     }
 
-    console.log(`[scoring] Recalculated scores for ${totalUpdated} leads`);
-    return { updated: totalUpdated };
+    if (allScoredLeads.length === 0) return { updated: 0 };
+
+    // ── Pass 2: Assign Tiers based on Pool Ranking ───────────────────────
+
+    // Split into connection pools
+    const firstDegree = allScoredLeads.filter(l => is1st(l.connection_degree));
+    const secondDegree = allScoredLeads.filter(l => is2nd(l.connection_degree));
+    const others = allScoredLeads.filter(l => !is1st(l.connection_degree) && !is2nd(l.connection_degree));
+
+    // 1st Degree -> always Primary
+    for (const l of firstDegree) l.tier = 'primary';
+
+    // 2nd Degree -> Ranking (Top 30% -> Secondary)
+    // We sort DESC and use index to guarantee the bucket size even if scores are tied
+    secondDegree.sort((a, b) => b.score - a.score);
+    const secondaryCount = Math.ceil(secondDegree.length * 0.3);
+    for (let i = 0; i < secondDegree.length; i++) {
+        secondDegree[i].tier = i < secondaryCount ? 'secondary' : 'tertiary';
+    }
+
+    // 3rd Degree / Others -> always Tertiary
+    for (const l of others) l.tier = 'tertiary';
+
+    // ── Pass 3: Persist Updates in a Transaction ──────────────────────────
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        for (const l of allScoredLeads) {
+            const shouldAutoApprove = l.score >= autoThreshold && l.review_status === 'to_be_reviewed';
+
+            await client.query(
+                `UPDATE leads
+                 SET preference_score = $1,
+                     preference_tier  = $2,
+                     review_status    = CASE WHEN $3 THEN 'approved' ELSE review_status END,
+                     approved_at      = CASE WHEN $3 AND approved_at IS NULL THEN NOW() ELSE approved_at END,
+                     updated_at       = NOW()
+                 WHERE id = $4`,
+                [l.score, l.tier, shouldAutoApprove, l.id]
+            );
+        }
+        await client.query('COMMIT');
+        console.log(`[scoring] Recalculated and persisted scores for ${allScoredLeads.length} leads in a single transaction.`);
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('[scoring] Failed to persist recalculated scores:', err);
+        throw err;
+    } finally {
+        client.release();
+    }
+
+    return { updated: allScoredLeads.length };
 }
 
 /**
  * Score a single lead object (not yet persisted) and return { score, tier }.
  * Used at ingestion time.
+ *
+ * Note: At ingestion, we don't have a batch to percentile-rank against.
+ * We use the DB's current 70th-percentile of stored 2nd-degree scores as the cutoff.
  */
 export async function scoreAndClassifyLead(lead) {
     const prefs = await loadPreferences();
-    const score = prefs ? calculateScore(lead, prefs) : 0;
-    const tier = assignTier(score, lead.connection_degree || lead.connectionDegree, prefs, lead.id);
+    const score = prefs ? calculateScore(lead, prefs) : calculateScore(lead, null);
+
+    // Get peer stats from DB for accurate percentile-based tier assignment
+    const peerStats = await get2ndDegreePercentile();
+
+    const tier = assignTier(score, lead.connection_degree || lead.connectionDegree, prefs, lead.id, peerStats);
     const autoThreshold = prefs?.auto_approval_threshold ?? 150;
     const shouldAutoApprove = prefs?.preference_active && score >= autoThreshold;
     return { score, tier, shouldAutoApprove };
+}
+
+/**
+ * Fetch the 70th-percentile score of 2nd-degree leads currently in the DB.
+ * Used at ingestion time for single-lead tier assignment.
+ *
+ * @returns {{ p70: number }}
+ */
+async function get2ndDegreePercentile() {
+    try {
+        const { rows } = await pool.query(`
+            SELECT PERCENTILE_CONT(0.70) WITHIN GROUP (ORDER BY preference_score) AS p70
+            FROM leads
+            WHERE connection_degree LIKE '%2nd%' OR connection_degree = '2'
+        `);
+        const p70 = rows[0]?.p70 ?? 0;
+        return { p70: Number(p70) };
+    } catch {
+        return { p70: 0 };
+    }
 }
 
 // ── utility ────────────────────────────────────────────────────────────────

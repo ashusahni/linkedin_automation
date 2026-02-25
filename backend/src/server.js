@@ -51,6 +51,7 @@ async function init() {
     res.send("never ends");
   });
 
+
   // Start the Automation Scheduler only if enabled (set SCHEDULER_ENABLED=false to disable)
   if (config.features.scheduler.enabled) {
     initScheduler();

@@ -14,7 +14,10 @@ const pool = new Pool({
   ssl: db.ssl,
   max: db.max,
   idleTimeoutMillis: db.idleTimeoutMillis,
-  connectionTimeoutMillis: db.connectionTimeoutMillis
+  connectionTimeoutMillis: db.connectionTimeoutMillis,
+  allowExitOnIdle: false,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000
 });
 
 pool.on("connect", () => {
