@@ -81,9 +81,7 @@ const SettingsPage = () => {
   });
   const [preferencesSaving, setPreferencesSaving] = useState(false);
 
-  // 🆕 Contact scraping progress state
-  const [scrapingProgress, setScrapingProgress] = useState(null);
-  const [isScrapingActive, setIsScrapingActive] = useState(false);
+
 
   // 🆕 Phantom sync status state
   const [phantomStatuses, setPhantomStatuses] = useState({
@@ -234,29 +232,7 @@ const SettingsPage = () => {
     fetchPreferences();
   }, [addToast]);
 
-  // 🆕 Poll scraping progress every 5 seconds
-  useEffect(() => {
-    const fetchProgress = async () => {
-      try {
-        const res = await axios.get("/api/scraper/global-progress");
-        if (res.data.success) {
-          setScrapingProgress(res.data.progress);
-          setIsScrapingActive(res.data.progress.isActive);
-        }
-      } catch (error) {
-        // Silently fail - don't spam errors
-        setIsScrapingActive(false);
-      }
-    };
 
-    // Fetch immediately
-    fetchProgress();
-
-    // Then poll every 5 seconds - TEMPORARILY DISABLED
-    // const interval = setInterval(fetchProgress, 5000);
-    // return () => clearInterval(interval);
-    return () => { };
-  }, []);
 
   // 🆕 Poll phantom status every 5 seconds
   useEffect(() => {
@@ -366,29 +342,7 @@ const SettingsPage = () => {
     }
   };
 
-  const handleStopScraping = async () => {
-    try {
-      const res = await axios.post("/api/scraper/stop-scraping");
-      addToast(res.data.message, "info");
-    } catch (error) {
-      addToast("Failed to stop process", "error");
-    }
-  };
 
-  const [isTriggering, setIsTriggering] = useState(false);
-  const handleManualTrigger = async () => {
-    setIsTriggering(true);
-    try {
-      const res = await axios.post("/api/scraper/scrape-contacts");
-      if (res.data.success) {
-        addToast(res.data.message, "success");
-      }
-    } catch (error) {
-      addToast("Failed to start process", "error");
-    } finally {
-      setIsTriggering(false);
-    }
-  };
 
   const toggleAutoRunEnabled = () => {
     setAutoSyncState((prev) => ({
@@ -761,65 +715,7 @@ const SettingsPage = () => {
         </p>
       </div>
 
-      {/* 🆕 Contact Scraping Progress Bar - HIDDEN */}
-      {false && isScrapingActive && scrapingProgress && (
-        <Card className="border-blue-500/50 bg-blue-500/5 backdrop-blur-sm">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
-                <span className="text-sm font-medium">
-                  Enriching Contacts in Background
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs border-red-500/50 text-red-500 hover:bg-red-500/10"
-                  onClick={handleStopScraping}
-                >
-                  Stop
-                </Button>
-                <div className="flex items-center gap-4 text-xs text-muted-foreground ml-2">
-                  <div className="flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5" />
-                    <span>
-                      {scrapingProgress.processedProfiles} /{" "}
-                      {scrapingProgress.totalProfiles}
-                    </span>
-                  </div>
-                  <span className="font-semibold text-blue-600">
-                    {scrapingProgress.progressPercentage}%
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-              <div
-                className="bg-blue-500 h-full transition-all duration-500 ease-out"
-                style={{ width: `${scrapingProgress.progressPercentage}%` }}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground mt-2 flex justify-between">
-              <span>
-                {scrapingProgress.activeJobsCount} active task
-                {scrapingProgress.activeJobsCount !== 1 ? "s" : ""} running
-              </span>
-              <span>
-                ETA:{" "}
-                {Math.ceil(
-                  ((scrapingProgress.totalProfiles -
-                    scrapingProgress.processedProfiles) *
-                    5) /
-                  60,
-                )}{" "}
-                mins
-              </span>
-            </p>
-          </CardContent>
-        </Card>
-      )}
+
 
       {/* 🆕 Automated Contact Sync Section - HIDDEN */}
       {false && (

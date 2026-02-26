@@ -1231,18 +1231,21 @@ export default function LeadsTable() {
             setEnriching(true);
             addToast(`🚀 Starting to enrich contact info for ${leadIds.length > 0 ? leadIds.length : 'all missing'} leads...`, 'info');
 
-            const res = await axios.post('/api/scraper/scrape-contacts', { leadIds });
+            const res = await axios.post('/api/leads/enrich-batch', { leadIds });
 
-            if (res.data.success) {
-                if (res.data.count === 0) {
-                    addToast('No leads found that need enrichment.', 'warning');
-                } else {
-                    addToast(res.data.message || 'Started enrichment', 'success');
-                    setSelectedLeads(new Set());
-                }
+            if (res.data.status === 'enrichment_started') {
+                addToast(res.data.message || 'Started enrichment in background', 'success');
+                setSelectedLeads(new Set());
+                // Refresh to see 'processing' status if implemented in list
+                setTimeout(fetchLeads, 1500);
+            } else if (res.data.success) {
+                addToast('Enrichment batch completed', 'success');
+                setSelectedLeads(new Set());
+                fetchLeads();
             }
         } catch (error) {
             console.error('Scrape failed:', error);
+            const errorMsg = error.response?.data?.error || error.message || 'Enrichment failed';
             addToast(`Error: ${errorMsg}`, 'error');
         } finally {
             setEnriching(false);
@@ -1363,8 +1366,14 @@ export default function LeadsTable() {
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                             <div>
                                 <CardTitle className="text-xl">Lead Management</CardTitle>
-                                <CardDescription className="mt-1">
+                                <CardDescription className="mt-1 flex items-center gap-2">
                                     Manage and track your potential clients here.
+                                    {enriching && (
+                                        <span className="inline-flex items-center gap-1.5 text-xs text-primary font-medium animate-pulse">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            Enrichment in progress...
+                                        </span>
+                                    )}
                                     {usePreferences && (
                                         <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary ring-1 ring-inset ring-primary/20">
                                             <Target className="h-3 w-3" />
@@ -1375,16 +1384,30 @@ export default function LeadsTable() {
                             </div>
                             <div className="flex gap-2">
                                 {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
-                                    <Button
-                                        variant="outline"
-                                        size="icon"
-                                        className="h-10 w-10 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
-                                        onClick={handleManualScrape}
-                                        disabled={enriching}
-                                        title="Enrich Contact Info"
-                                    >
-                                        <Contact className={cn("h-4 w-4", enriching && "animate-spin")} />
-                                    </Button>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className="h-10 w-10 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
+                                            onClick={handleManualScrape}
+                                            disabled={enriching}
+                                            title="Enrich Contact Info (Hunter.io)"
+                                        >
+                                            <Contact className={cn("h-4 w-4", enriching && "animate-spin")} />
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="icon"
+                                            className={cn(
+                                                "h-10 w-10 shadow-sm transition-all",
+                                                metaFilters.hasEmail && "bg-primary/10 border-primary text-primary"
+                                            )}
+                                            onClick={() => setMetaFilters(f => ({ ...f, hasEmail: !f.hasEmail }))}
+                                            title="Filter: Leads with Email"
+                                        >
+                                            <Mail className="h-4 w-4" />
+                                        </Button>
+                                    </div>
                                 )}
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
@@ -1919,8 +1942,8 @@ export default function LeadsTable() {
                                     <TableHead>Company</TableHead>
                                     <TableHead>Title</TableHead>
 
-                                    {/* Contact column visible in Approved and Imported tabs */}
-                                    {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
+                                    {/* Contact column visible in Approved, Review and Imported tabs */}
+                                    {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported' || reviewStatusTab === 'to_be_reviewed') && (
                                         <TableHead className="min-w-[180px]">Contact</TableHead>
                                     )}
                                     <TableHead className="text-center">Profile</TableHead>
@@ -1991,15 +2014,45 @@ export default function LeadsTable() {
                                                 </span>
                                             </TableCell>
 
-                                            {/* Contact column visible in Approved and Imported tabs */}
-                                            {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') && (
+                                            {/* Contact column visible in Approved, Review and Imported tabs */}
+                                            {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported' || reviewStatusTab === 'to_be_reviewed') && (
                                                 <TableCell className="min-w-[180px]">
                                                     <div className="flex flex-col gap-1.5">
+                                                        {/* Enrichment Status Indicator */}
+                                                        {lead.enrichment_status && lead.enrichment_status !== 'pending' && (
+                                                            <div className="mb-0.5">
+                                                                {lead.enrichment_status === 'processing' && (
+                                                                    <div className="flex items-center gap-1.5 text-[10px] text-blue-500 font-semibold animate-pulse">
+                                                                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                                                        Finding Email...
+                                                                    </div>
+                                                                )}
+                                                                {lead.enrichment_status === 'failed' && (
+                                                                    <div className="flex items-center gap-1.5 text-[10px] text-red-500 font-medium">
+                                                                        <X className="h-2.5 w-2.5" />
+                                                                        Hunter Failed
+                                                                    </div>
+                                                                )}
+                                                                {lead.enrichment_status === 'not_found' && (
+                                                                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium">
+                                                                        <Database className="h-2.5 w-2.5" />
+                                                                        Email Not Found
+                                                                    </div>
+                                                                )}
+                                                                {lead.enrichment_status === 'completed' && lead.email && (
+                                                                    <div className="flex items-center gap-1.5 text-[10px] text-green-600 font-bold">
+                                                                        <Check className="h-2.5 w-2.5" />
+                                                                        Hunter Enriched
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+
                                                         {/* Email */}
                                                         {lead.email ? (
                                                             <div className="flex items-center gap-1.5 text-xs">
                                                                 <Mail className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                                                                <span className="truncate" title={lead.email}>{lead.email}</span>
+                                                                <span className="truncate font-medium" title={lead.email}>{lead.email}</span>
                                                             </div>
                                                         ) : (
                                                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

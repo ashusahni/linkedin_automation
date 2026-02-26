@@ -11,7 +11,7 @@ import emailRoutes from "./routes/email.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
 import outreachRoutes from "./routes/outreach.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
-import scraperRoutes from "./routes/scraper.routes.js";
+
 import industryRoutes from "./routes/industry.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import preferencesRoutes from "./routes/preferences.routes.js";
@@ -52,7 +52,7 @@ app.use("/api/webhooks", webhookRoutes);
 app.use("/api/email", emailRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/analytics", analyticsRoutes);
-app.use("/api/scraper", scraperRoutes); // Contact scraper progress
+
 app.use("/api/industry", industryRoutes); // Industry hierarchy and prioritization
 app.use("/api/notifications", notificationRoutes); // Notifications feed
 app.use("/api/preferences", preferencesRoutes);    // Preference scoring settings

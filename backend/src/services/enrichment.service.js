@@ -1,5 +1,7 @@
 import pool from '../db.js';
 import * as phantomService from './phantombuster.service.js';
+import hunterService from './hunter.service.js';
+import logger from '../utils/logger.js';
 
 /**
  * Enrichment Service
@@ -62,7 +64,7 @@ class EnrichmentService {
                 const recentPostsJson = JSON.stringify(enrichmentData.recent_posts || []);
                 const companyNewsJson =
                     enrichmentData.company_news !== undefined &&
-                    enrichmentData.company_news !== null
+                        enrichmentData.company_news !== null
                         ? JSON.stringify(enrichmentData.company_news)
                         : null;
 
@@ -89,28 +91,36 @@ class EnrichmentService {
 
                 console.log(`      ✅ PhantomBuster enrichment complete`);
 
-                return {
-                    success: true,
-                    leadId,
-                    enrichmentData,
-                    source: 'phantombuster'
-                };
+
 
             } catch (phantomError) {
                 console.log(`      ⚠️  PhantomBuster failed: ${phantomError.message}`);
                 console.log(`      📝 Falling back to mock enrichment`);
                 // Always fall back to mock - never throw error
-                return await this.mockEnrichment(leadId, lead);
+                await this.mockEnrichment(leadId, lead);
             }
+
+            // 4. Hunter.io Email Enrichment (New) - Runs even if PhantomBuster failed/skipped
+            try {
+                await this.enrichWithHunter(leadId);
+            } catch (hunterErr) {
+                logger.error(`      ⚠️ Hunter enrichment skipped: ${hunterErr.message}`);
+            }
+
+            return {
+                success: true,
+                leadId,
+                source: phantomId ? 'phantombuster' : 'mock'
+            };
 
         } catch (error) {
             console.error(`      ❌ Enrichment error: ${error.message}`);
-            
+
             // If it's a "no LinkedIn URL" error, throw it
             if (error.message.includes('no LinkedIn URL') || error.message.includes('Lead not found')) {
                 throw error;
             }
-            
+
             // For any other error, try mock enrichment as last resort
             try {
                 const leadResult = await pool.query('SELECT * FROM leads WHERE id = $1', [leadId]);
@@ -121,7 +131,7 @@ class EnrichmentService {
             } catch (fallbackError) {
                 console.error(`      ❌ Mock enrichment also failed: ${fallbackError.message}`);
             }
-            
+
             throw error;
         }
     }
@@ -204,7 +214,7 @@ class EnrichmentService {
         // Convert interests array to text[] format (PostgreSQL array)
         const interestsArray = Array.isArray(mockInterests) ? mockInterests : [];
         const recentPostsJson = JSON.stringify(mockRecentPosts);
-        
+
         await pool.query(
             `INSERT INTO lead_enrichment (lead_id, bio, interests, recent_posts)
              VALUES ($1, $2, $3::text[], $4::jsonb)
@@ -227,6 +237,121 @@ class EnrichmentService {
             },
             source: 'mock'
         };
+    }
+
+    /**
+     * Hunter.io Email Enrichment Flow
+     */
+    async enrichWithHunter(leadId) {
+        try {
+            // 1. Get lead details
+            const leadResult = await pool.query(
+                'SELECT * FROM leads WHERE id = $1',
+                [leadId]
+            );
+
+            if (leadResult.rows.length === 0) return null;
+            const lead = leadResult.rows[0];
+
+            // Prevent duplicate calls
+            if (lead.hunter_attempted) {
+                logger.info(`      ⏭️ Hunter: Already attempted for lead ${leadId}`);
+                return null;
+            }
+
+            let hunterResults = {
+                email: lead.email,
+                email_score: lead.email_score,
+                email_verification_status: lead.email_verification_status,
+                hunter_confidence: lead.hunter_confidence,
+                email_source: lead.email_source,
+                hunter_attempted: true
+            };
+
+            if (!lead.email) {
+                // Try to find email
+                const domain = await this._inferDomain(lead.company);
+                if (domain && lead.first_name && lead.last_name) {
+                    logger.info(`      🔍 Hunter: Attempting to find email for ${lead.first_name} ${lead.last_name} at ${domain}`);
+                    const finderRes = await hunterService.findEmail(lead.first_name, lead.last_name, domain);
+
+                    if (finderRes.success && finderRes.data && finderRes.data.email) {
+                        const email = finderRes.data.email;
+                        const score = finderRes.data.score;
+
+                        // Verify found email
+                        const verifyRes = await hunterService.verifyEmail(email);
+                        const status = verifyRes.success && verifyRes.data ? verifyRes.data.result : 'unknown';
+                        const verifyScore = verifyRes.success && verifyRes.data ? verifyRes.data.score : 0;
+
+                        // Only save if result is valid or score is high
+                        if (status === 'valid' || verifyScore > 70) {
+                            hunterResults.email = email;
+                            hunterResults.email_score = verifyScore;
+                            hunterResults.email_verification_status = status;
+                            hunterResults.hunter_confidence = score;
+                            hunterResults.email_source = 'hunter';
+                        }
+                    }
+                }
+            } else {
+                // Verify existing email
+                logger.info(`      🔍 Hunter: Verifying existing email ${lead.email}`);
+                const verifyRes = await hunterService.verifyEmail(lead.email);
+                if (verifyRes.success && verifyRes.data) {
+                    hunterResults.email_verification_status = verifyRes.data.result;
+                    hunterResults.email_score = verifyRes.data.score;
+                    hunterResults.email_source = lead.email_source || 'existing';
+                }
+            }
+
+            // Update lead record
+            await pool.query(
+                `UPDATE leads SET 
+                    email = $1,
+                    email_score = $2,
+                    email_verification_status = $3,
+                    hunter_confidence = $4,
+                    email_source = $5,
+                    hunter_attempted = $6,
+                    updated_at = NOW()
+                WHERE id = $7`,
+                [
+                    hunterResults.email,
+                    hunterResults.email_score,
+                    hunterResults.email_verification_status,
+                    hunterResults.hunter_confidence,
+                    hunterResults.email_source,
+                    hunterResults.hunter_attempted,
+                    leadId
+                ]
+            );
+
+            logger.info(`      ✅ Hunter enrichment complete for lead ${leadId}`);
+            return hunterResults;
+
+        } catch (error) {
+            logger.error(`      ❌ Hunter enrichment error: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Naive domain inference from company name
+     */
+    async _inferDomain(companyName) {
+        if (!companyName) return null;
+
+        // Clean company name
+        let name = companyName.toLowerCase()
+            .replace(/,?\s+(inc|llc|ltd|corp|corporation|group|pvt|private|pllc|consortium|solutions|technologies|systems)\.?$/g, '')
+            .replace(/\s+/g, '')
+            .replace(/[^a-z0-9]/g, '');
+
+        if (name.length < 2) return null;
+
+        // In a real production system, this would use a Search API or Clearbit Discovery
+        return `${name}.com`;
     }
 
     /**

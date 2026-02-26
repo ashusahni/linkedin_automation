@@ -50,6 +50,11 @@ const config = {
     sessionCookie: process.env.LINKEDIN_SESSION_COOKIE
   },
 
+  // Hunter.io Configuration
+  hunter: {
+    apiKey: process.env.HUNTER_API_KEY
+  },
+
   // AI Configuration
   ai: {
     provider: 'openai',

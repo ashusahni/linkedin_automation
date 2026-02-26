@@ -2,7 +2,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import contactScraperService from '../services/contact-scraper.service.js';
+
 import profileEnrichmentService from '../services/profileEnrichment.service.js';
 
 const router = express.Router();
@@ -187,14 +187,7 @@ router.put('/', async (req, res) => {
         // Write updated .env file
         fs.writeFileSync(envPath, envContent.trim() + '\n');
 
-        // 🆕 Re-initialize contact scraper with new cookie if updated
-        if (phantombuster?.linkedinSessionCookie) {
-            console.log('🔄 Re-initializing contact scraper with updated session cookie...');
-            // Don't await this to keep response fast, but handle errors
-            contactScraperService.initialize(phantombuster.linkedinSessionCookie).catch(err => {
-                console.error('⚠️ Failed to re-initialize contact scraper:', err.message);
-            });
-        }
+
 
         res.json({
             success: true,

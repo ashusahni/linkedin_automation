@@ -1,8 +1,5 @@
-# Use the official Puppeteer image which includes Chrome and all dependencies
-FROM ghcr.io/puppeteer/puppeteer:latest
-
-# Switch to root to install dependencies
-USER root
+# Use a standard Node.js light image now that Puppeteer is removed
+FROM node:20.12.2-slim
 
 # Create app directory
 WORKDIR /usr/src/app
@@ -16,12 +13,6 @@ RUN npm ci
 
 # Copy the rest of the backend code
 COPY backend/ .
-
-# Ensure pptruser owns the app directory
-RUN chown -R pptruser:pptruser /usr/src/app
-
-# Switch back to the non-root user provided by the base image
-USER pptruser
 
 # Expose port
 EXPOSE 5000

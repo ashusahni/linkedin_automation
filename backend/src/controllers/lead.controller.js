@@ -10,52 +10,7 @@ import { NotificationService } from '../services/notification.service.js';
 // CONTACT SCRAPING INTEGRATION (PHASE 6)
 // ============================================================================
 
-/**
- * Trigger contact scraping for newly approved leads
- * Runs asynchronously in the background - does NOT block approval
- */
-async function triggerContactScrapingForApprovedLeads(leadIds) {
-  // Completely disabled as requested
-  return;
-  if (!leadIds || leadIds.length === 0) {
-    return;
-  }
 
-  console.log(`\n🔍 ============================================`);
-  console.log(`🔍 AUTO-SCRAPING CONTACTS FOR APPROVED LEADS`);
-  console.log(`🔍 Leads: ${leadIds.length}`);
-  console.log(`🔍 ============================================\n`);
-
-  try {
-    // Check if LinkedIn session cookie is configured
-    const sessionCookie = process.env.LINKEDIN_SESSION_COOKIE;
-    if (!sessionCookie) {
-      console.warn('⚠️  LINKEDIN_SESSION_COOKIE not configured - skipping contact scraping');
-      return;
-    }
-
-    // Dynamic import to avoid loading puppeteer at startup
-    const { default: contactScraperService } = await import('../services/contact-scraper.service.js');
-
-    // Initialize scraper if needed
-    await contactScraperService.initialize(sessionCookie);
-
-    // Trigger scraping (this runs in background)
-    const result = await contactScraperService.scrapeApprovedLeads(leadIds);
-
-    console.log(`✅ Contact scraping initiated: ${result.jobId || 'unknown'}`);
-    if (result.alreadyComplete) {
-      console.log(`   All ${leadIds.length} leads already have contact info`);
-    } else {
-      console.log(`   Scraping ${result.needsScraping || 0} new profiles`);
-      console.log(`   Already cached: ${result.alreadyCached || 0}`);
-    }
-
-  } catch (error) {
-    console.error('❌ Failed to trigger contact scraping:', error.message);
-    // Don't throw - we don't want to fail the approval if scraping fails
-  }
-}
 
 
 // ============================================================================
@@ -860,9 +815,21 @@ export async function enrichLeadsBatch(req, res) {
   try {
     const { leadIds } = req.body || {};
 
-    if (!Array.isArray(leadIds) || leadIds.length === 0) {
+    if (!leadIds || (Array.isArray(leadIds) && leadIds.length === 0)) {
+      // PROGRESIVE BATCH LOGIC
+      // Start background batch if no specific leads provided
+      const { default: hunterProgressiveService } = await import("../services/hunter-progressive.service.js");
+      try {
+        const result = await hunterProgressiveService.startBatch();
+        return res.json(result);
+      } catch (err) {
+        return res.status(500).json({ error: "Failed to start progressive enrichment batch" });
+      }
+    }
+
+    if (!Array.isArray(leadIds)) {
       return res.status(400).json({
-        error: "leadIds must be a non-empty array of lead IDs",
+        error: "leadIds must be an array of lead IDs",
       });
     }
 
@@ -1719,14 +1686,7 @@ export async function bulkApproveLeads(req, res) {
       data: { leadIds, count: result.rowCount, link: `/leads?highlight=${leadIds.join(',')}` },
     });
 
-    // 🆕 PHASE 6: Trigger contact scraping asynchronously (non-blocking)
-    // DISABLED: User wants manual control via button
-    /*
-    triggerContactScrapingForApprovedLeads(leadIds).catch(err => {
-      console.error('⚠️  Background contact scraping error:', err.message);
-      // Don't fail the approval if scraping fails
-    });
-    */
+
 
     res.json({
       success: true,

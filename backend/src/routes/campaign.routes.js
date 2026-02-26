@@ -17,8 +17,7 @@ import {
     pauseCampaign,
     resumeCampaign,
     getCampaignTemplates,
-    scrapeContacts,
-    getScrapeStatus,
+
     autoConnectCampaign,
     estimateAudience
 } from '../controllers/campaign.controller.js';
@@ -39,12 +38,10 @@ router.put('/:id/pause', pauseCampaign);
 router.put('/:id/resume', resumeCampaign);
 router.post('/:id/bulk-enrich-generate', bulkEnrichAndGenerate);
 router.post('/:id/generate-gmail-drafts', generateGmailDrafts);
-router.post('/:id/scrape-contacts', scrapeContacts);
 router.post('/:id/auto-connect', autoConnectCampaign);
 router.delete('/:id', deleteCampaign);
 
-// Contact Scraper Status Route (must be before /:id routes)
-router.get('/scrape-status/:jobId', getScrapeStatus);
+
 
 // Sequence Routes
 router.post('/:id/sequences', addSequenceStep);

@@ -6,7 +6,7 @@ import {
     XCircle, Clock, Edit2, Save, Plus, Trash2, Download,
     MessageSquare, Mail, Link as LinkIcon, ChevronRight, BarChart3, Settings as SettingsIcon,
     AlertCircle, AlertTriangle, Zap, Sparkles, Send, Eye, CheckCheck, Copy, Target, Tag, Flag,
-    Phone, Search, Smartphone, RefreshCw, Loader2, Info, Contact, Upload
+    Phone, Search, Smartphone, RefreshCw, Loader2, Info, Upload
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -97,14 +97,8 @@ export default function CampaignDetailPage() {
     // Approval Gate Modal State
     const [showApprovalGateModal, setShowApprovalGateModal] = useState(false);
 
-    // Contact Scraper State
-    const [scraping, setScraping] = useState(false);
-    const [scrapeProgress, setScrapeProgress] = useState(null);
-    const [scrapeJobId, setScrapeJobId] = useState(null);
 
-    // Multi-channel Outreach State
-    const [sendingSMS, setSendingSMS] = useState(false);
-    const [showOutreachModal, setShowOutreachModal] = useState(false);
+
     const [outreachChannel, setOutreachChannel] = useState(null); // 'email' or 'sms'
 
     useEffect(() => {
@@ -300,193 +294,9 @@ export default function CampaignDetailPage() {
         }
     };
 
-    // Contact Scraper Handler
-    const handleScrapeContacts = async () => {
-        // If already scraping, cancel it
-        if (scraping && scrapeJobId) {
-            const confirmed = confirm('Stop the current enrichment process?');
-            if (!confirmed) return;
 
-            try {
-                console.log('🛑 Cancelling enrichment...');
-                const res = await axios.post(`/api/campaigns/${id}/scrape-contacts`, {
-                    cancel: true
-                });
 
-                if (res.data.success) {
-                    addToast('✅ Enrichment cancelled', 'info');
-                    setScraping(false);
-                    setScrapeProgress(null);
-                    setScrapeJobId(null);
-                    fetchCampaignDetails(); // Refresh to show partial results
-                } else {
-                    addToast('No active enrichment to cancel', 'info');
-                }
-            } catch (error) {
-                console.error('Cancel error:', error);
-                addToast('Failed to cancel enrichment', 'error');
-            }
-            return;
-        }
 
-        // Start new scraping
-        const leadsToProcess = selectedLeads.length > 0 ? selectedLeads : null;
-
-        if (leads.length === 0) {
-            addToast('No leads in campaign to enrich', 'error');
-            return;
-        }
-
-        const confirmMsg = leadsToProcess
-            ? `Enrich contact info (email/phone) for ${leadsToProcess.length} selected leads?`
-            : `Enrich contact info (email/phone) for leads missing contact info?`;
-
-        if (!confirm(`${confirmMsg}\n\n✅ Smart enrichment: Only enriches leads without contact info\n🛑 Click button again to stop while running\n\nContinue?`)) {
-            return;
-        }
-
-        try {
-            setScraping(true);
-            setScrapeProgress({ status: 'Checking...', processed: 0, total: 0 });
-
-            console.log('🔍 Starting to enrich contacts...');
-            const res = await axios.post(`/api/campaigns/${id}/scrape-contacts`, {
-                leadIds: leadsToProcess
-            });
-
-            if (res.data.error) {
-                throw new Error(res.data.error);
-            }
-
-            // Check if all leads already have contact info
-            if (res.data.alreadyComplete) {
-                addToast(`✅ ${res.data.message}`, 'success');
-                setScraping(false);
-                setScrapeProgress(null);
-                return;
-            }
-
-            const jobId = res.data.jobId;
-            setScrapeJobId(jobId);
-
-            const needsScraping = res.data.needsScraping;
-            addToast(`🔍 Enriching contact info for ${needsScraping} leads... (Click button to stop)`, 'info');
-
-            // Poll for status
-            const pollInterval = setInterval(async () => {
-                try {
-                    const statusRes = await axios.get(`/api/campaigns/scrape-status/${jobId}`);
-                    const status = statusRes.data;
-
-                    setScrapeProgress({
-                        status: status.status,
-                        processed: status.processed || 0,
-                        total: status.total || 0,
-                        found: status.found || 0,
-                        skipped: status.skipped || 0,
-                        alreadyHadContacts: status.alreadyHadContacts || 0,
-                        progress: status.progress || 0,
-                        cancelled: status.cancelled
-                    });
-
-                    if (status.status === 'completed') {
-                        clearInterval(pollInterval);
-                        setScraping(false);
-                        setScrapeJobId(null);
-                        addToast(`✅ Process complete! Found ${status.found} contacts from ${status.processed} leads. ${status.alreadyHadContacts || 0} already had info.`, 'success');
-                        fetchCampaignDetails(); // Refresh to show new contact info
-                        setTimeout(() => setScrapeProgress(null), 3000);
-                    } else if (status.status === 'cancelled') {
-                        clearInterval(pollInterval);
-                        setScraping(false);
-                        setScrapeJobId(null);
-                        addToast(`🛑 Process cancelled at ${status.processed}/${status.total} leads. Found ${status.found} contacts.`, 'info');
-                        fetchCampaignDetails(); // Refresh to show partial results
-                        setTimeout(() => setScrapeProgress(null), 2000);
-                    } else if (status.status === 'error') {
-                        clearInterval(pollInterval);
-                        setScraping(false);
-                        setScrapeJobId(null);
-                        addToast(`❌ Error: ${status.error}`, 'error');
-                        setTimeout(() => setScrapeProgress(null), 3000);
-                    }
-                } catch (pollError) {
-                    console.error('Polling error:', pollError);
-                }
-            }, 3000); // Poll every 3 seconds
-
-            // Stop polling after 10 minutes
-            setTimeout(() => {
-                clearInterval(pollInterval);
-                if (scraping) {
-                    setScraping(false);
-                    setScrapeJobId(null);
-                    addToast('Enrichment is taking longer than expected. Check backend logs.', 'warning');
-                }
-            }, 600000);
-
-        } catch (error) {
-            console.error('❌ Contact enrichment failed:', error);
-            const errorMessage = error.response?.data?.error || error.response?.data?.details || error.message || 'Failed to start contact enrichment';
-            addToast(`Error: ${errorMessage}`, 'error');
-            setScraping(false);
-            setScrapeProgress(null);
-            setScrapeJobId(null);
-        }
-    };
-
-    // Multi-channel Outreach Handlers
-    const handleSMSOutreach = async () => {
-        const leadsToContact = selectedLeads.length > 0 ? selectedLeads : leads.map(l => l.lead_id || l.id);
-
-        if (leadsToContact.length === 0) {
-            addToast('No leads to contact', 'error');
-            return;
-        }
-
-        // Count leads with phone
-        const leadsWithPhone = leads.filter(l =>
-            (selectedLeads.length === 0 || selectedLeads.includes(l.lead_id || l.id)) && l.phone
-        );
-
-        if (leadsWithPhone.length === 0) {
-            addToast('No leads have phone numbers. Please Enrich Contact Info first!', 'error');
-            return;
-        }
-
-        const confirmed = confirm(
-            `Send AI-generated SMS to ${leadsWithPhone.length} leads?\n\n` +
-            `Note: SMS requires Twilio integration (currently logs only).\n\n` +
-            `Continue?`
-        );
-
-        if (!confirmed) return;
-
-        try {
-            setSendingSMS(true);
-            addToast(`Processing SMS for ${leadsWithPhone.length} leads...`, 'info');
-
-            const res = await axios.post(`/api/campaigns/${id}/outreach/sms`, {
-                leadIds: leadsToContact,
-                options: {
-                    useAI: true
-                }
-            });
-
-            if (res.data.success) {
-                addToast(`${res.data.message}`, 'info');
-                if (res.data.note) {
-                    addToast(`ℹ️ ${res.data.note}`, 'info');
-                }
-            }
-        } catch (error) {
-            console.error('SMS outreach error:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Failed to send SMS';
-            addToast(`Error: ${errorMsg}`, 'error');
-        } finally {
-            setSendingSMS(false);
-        }
-    };
 
     // NOTE: Per-lead Auto Connect has been removed.
     // Connection requests are handled automatically by the scheduler
@@ -1247,29 +1057,7 @@ export default function CampaignDetailPage() {
                             </div>
                             <div className="flex gap-2 flex-wrap">
 
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button
-                                            size="icon"
-                                            className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 shadow-lg shadow-blue-500/20 h-9 w-9"
-                                            title="Get Contact Info"
-                                        >
-                                            <Contact className="w-4 h-4" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-56 bg-card border-white/10">
-                                        <DropdownMenuLabel>Contact Actions</DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem
-                                            onClick={handleSMSOutreach}
-                                            disabled={sendingSMS || leads.length === 0}
-                                            className="gap-2 cursor-pointer"
-                                        >
-                                            <Smartphone className={cn("w-4 h-4", sendingSMS && "animate-bounce")} />
-                                            {sendingSMS ? 'Sending SMS...' : 'Contact Phone'}
-                                        </DropdownMenuItem>
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+
                                 <div className="h-6 w-px bg-white/10" />
                                 <Button
                                     size="sm"
@@ -1290,48 +1078,7 @@ export default function CampaignDetailPage() {
                             </div>
                         </CardHeader>
 
-                        {/* Contact Enrichment Progress */}
-                        {scrapeProgress && (
-                            <div className="px-6 pb-4">
-                                <div className={cn(
-                                    "border rounded-lg p-4",
-                                    scrapeProgress.cancelled ? "bg-orange-500/10 border-orange-500/20" : "bg-green-500/10 border-green-500/20"
-                                )}>
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className={cn(
-                                            "text-sm font-medium flex items-center gap-2",
-                                            scrapeProgress.cancelled ? "text-orange-400" : "text-green-400"
-                                        )}>
-                                            <Search className={cn("w-4 h-4", scraping && "animate-pulse")} />
-                                            Enriching Contacts: {scrapeProgress.status}
-                                            {scraping && (
-                                                <span className="text-xs text-muted-foreground">(Click button to stop)</span>
-                                            )}
-                                        </span>
-                                        <div className="text-xs text-muted-foreground text-right">
-                                            <div>{scrapeProgress.processed} / {scrapeProgress.total} enriched</div>
-                                            {scrapeProgress.found > 0 && (
-                                                <div className="text-green-400">✓ {scrapeProgress.found} contacts found</div>
-                                            )}
-                                            {scrapeProgress.alreadyHadContacts > 0 && (
-                                                <div className="text-blue-400">⚡ {scrapeProgress.alreadyHadContacts} already had info</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                                        <div
-                                            className={cn(
-                                                "h-full transition-all duration-500",
-                                                scrapeProgress.cancelled
-                                                    ? "bg-gradient-to-r from-orange-500 to-red-500"
-                                                    : "bg-gradient-to-r from-green-500 to-teal-500"
-                                            )}
-                                            style={{ width: `${scrapeProgress.progress || 0}%` }}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+
 
                         {/* AI Generation Progress */}
                         {enrichProgress && (
