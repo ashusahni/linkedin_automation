@@ -333,15 +333,15 @@ export async function getLeads(req, res) {
       );
       if (prefRow.rows[0]?.preference_active) {
         orderClause = `ORDER BY
-          CASE preference_tier WHEN 'primary' THEN 1 WHEN 'secondary' THEN 2 ELSE 3 END ASC,
+          CASE COALESCE(manual_tier, preference_tier) WHEN 'primary' THEN 1 WHEN 'secondary' THEN 2 ELSE 3 END ASC,
           preference_score DESC,
           created_at DESC`;
       }
     } catch { /* preference_settings table may not exist yet — fall back gracefully */ }
 
-    // Quality/tier filter — use stored preference_tier column (fast, no PERCENT_RANK CTE)
+    // Quality/tier filter — use stored effective tier column
     if (quality) {
-      const tierConditions = [...conditionClauses, `preference_tier = $${params.length + 1}`];
+      const tierConditions = [...conditionClauses, `COALESCE(manual_tier, preference_tier) = $${params.length + 1}`];
       const rsFilter = review_status && review_status !== 'all'
         ? `review_status = $${params.length + 2}` : null;
       if (rsFilter) tierConditions.push(rsFilter);
@@ -456,7 +456,8 @@ export async function updateLead(req, res) {
       profile_image,
       connection_degree,
       review_status,
-      rejected_reason
+      rejected_reason,
+      manual_tier
     } = req.body;
 
     // Handle loose mapping
@@ -480,8 +481,9 @@ export async function updateLead(req, res) {
            connection_degree = COALESCE($13, connection_degree),
            review_status = COALESCE($14, review_status),
            rejected_reason = COALESCE($15, rejected_reason),
+           manual_tier = CASE WHEN $16::varchar = 'clear' THEN NULL WHEN $16 IS NOT NULL THEN $16 ELSE manual_tier END,
            updated_at = NOW()
-       WHERE id = $16
+       WHERE id = $17
        RETURNING *`,
       [
         status,
@@ -499,6 +501,7 @@ export async function updateLead(req, res) {
         connection_degree,
         review_status,
         rejected_reason,
+        manual_tier !== undefined ? manual_tier : null,
         id
       ]
     );
@@ -2087,7 +2090,7 @@ export async function getReviewStats(req, res) {
       ? 'WHERE ' + whereConditions.join(' AND ')
       : '';
 
-    // Quality filter — uses stored preference_tier column (fast, no CTE calculation)
+    // Quality filter — uses effective tier logic
     const qScore = quality_score || quality;
     let result;
 
@@ -2095,7 +2098,7 @@ export async function getReviewStats(req, res) {
       // Support comma-separated tier list e.g. "primary,secondary"
       const tiers = qScore.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
       const tierPlaceholders = tiers.map((_, i) => `$${params.length + 1 + i}`).join(', ');
-      const tierConditions = [...whereConditions, `preference_tier IN (${tierPlaceholders})`];
+      const tierConditions = [...whereConditions, `COALESCE(manual_tier, preference_tier) IN (${tierPlaceholders})`];
       const tierWhere = tierConditions.length > 0 ? 'WHERE ' + tierConditions.join(' AND ') : '';
 
       result = await pool.query(`

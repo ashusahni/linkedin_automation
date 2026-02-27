@@ -822,6 +822,20 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         }
     };
 
+    const getTierBadge = (lead) => {
+        const effectiveTier = lead.manual_tier || lead.preference_tier;
+        if (effectiveTier === 'primary') {
+            return <div className="inline-flex items-center text-[10px] font-semibold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded mt-1 w-max whitespace-nowrap">🔥 Hot (Primary)</div>;
+        }
+        if (effectiveTier === 'secondary') {
+            return <div className="inline-flex items-center text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded mt-1 w-max whitespace-nowrap">☀️ Warm (Secondary)</div>;
+        }
+        if (effectiveTier === 'tertiary') {
+            return <div className="inline-flex items-center text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded mt-1 w-max whitespace-nowrap">❄️ Cold (Tertiary)</div>;
+        }
+        return null;
+    };
+
     const handleSearch = (e) => {
         e.preventDefault();
         fetchLeads();
@@ -1269,6 +1283,35 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             fetchStats();
         }
     };
+
+    const handleSetTier = async (id, tierName) => {
+        try {
+            await axios.put(`/api/leads/${id}`, { manual_tier: tierName });
+            addToast(tierName !== 'clear' ? `Lead marked as ${tierName}` : 'Manual tier cleared', 'success');
+            // Optimistic update
+            setLeads(prev => prev.map(l => l.id === id ? { ...l, manual_tier: tierName === 'clear' ? null : tierName } : l));
+            fetchStats(); // update tier counts
+        } catch (error) {
+            addToast('Failed to set tier', 'error');
+        }
+    };
+
+    const handleBulkSetTier = async (tierName) => {
+        const leadIds = Array.from(selectedLeads);
+        if (leadIds.length === 0) return;
+        try {
+            // we can simulate bulk update by sending individual requests or create a bulk endpoint
+            // for now let's just use Promise.all to avoid touching backend too much
+            await Promise.all(leadIds.map(id => axios.put(`/api/leads/${id}`, { manual_tier: tierName })));
+            addToast(tierName !== 'clear' ? `Marked ${leadIds.length} leads as ${tierName}` : `Cleared tier for ${leadIds.length} leads`, 'success');
+            setLeads(prev => prev.map(l => leadIds.includes(l.id) ? { ...l, manual_tier: tierName === 'clear' ? null : tierName } : l));
+            fetchStats();
+            setSelectedLeads(new Set());
+        } catch (error) {
+            addToast('Failed to bulk set tier', 'error');
+        }
+    };
+
     const handleManualScrape = async () => {
         const leadIds = Array.from(selectedLeads);
         try {
@@ -1819,56 +1862,56 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                         <div className="flex flex-col gap-3">
                             {/* Review Status Tabs (hidden on My Contacts) */}
                             {showReviewTabs && (
-                            <div className="flex gap-2 items-center">
-                                <div className="flex gap-2 flex-1">
-                                    <button
-                                        onClick={() => setReviewStatusTab('approved')}
-                                        className={cn(
-                                            "px-4 py-2 text-sm font-medium transition-all rounded-lg",
-                                            reviewStatusTab === 'approved'
-                                                ? "bg-green-100 text-green-700 shadow-sm"
-                                                : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                                        )}
-                                    >
-                                        🟢 Qualified Leads ({reviewStats.approved})
-                                    </button>
-                                    <button
-                                        onClick={() => setReviewStatusTab('to_be_reviewed')}
-                                        className={cn(
-                                            "px-4 py-2 text-sm font-medium transition-all rounded-lg",
-                                            reviewStatusTab === 'to_be_reviewed'
-                                                ? "bg-yellow-100 text-yellow-700 shadow-sm"
-                                                : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                                        )}
-                                    >
-                                        🟡 Review ({reviewStats.to_be_reviewed})
-                                    </button>
-                                    <button
-                                        onClick={() => setReviewStatusTab('rejected')}
-                                        className={cn(
-                                            "px-4 py-2 text-sm font-medium transition-all rounded-lg",
-                                            reviewStatusTab === 'rejected'
-                                                ? "bg-red-100 text-red-700 shadow-sm"
-                                                : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                                        )}
-                                    >
-                                        🔴 Rejected ({reviewStats.rejected})
-                                    </button>
+                                <div className="flex gap-2 items-center">
+                                    <div className="flex gap-2 flex-1">
+                                        <button
+                                            onClick={() => setReviewStatusTab('approved')}
+                                            className={cn(
+                                                "px-4 py-2 text-sm font-medium transition-all rounded-lg",
+                                                reviewStatusTab === 'approved'
+                                                    ? "bg-green-100 text-green-700 shadow-sm"
+                                                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                            )}
+                                        >
+                                            🟢 Qualified Leads ({reviewStats.approved})
+                                        </button>
+                                        <button
+                                            onClick={() => setReviewStatusTab('to_be_reviewed')}
+                                            className={cn(
+                                                "px-4 py-2 text-sm font-medium transition-all rounded-lg",
+                                                reviewStatusTab === 'to_be_reviewed'
+                                                    ? "bg-yellow-100 text-yellow-700 shadow-sm"
+                                                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                            )}
+                                        >
+                                            🟡 Review ({reviewStats.to_be_reviewed})
+                                        </button>
+                                        <button
+                                            onClick={() => setReviewStatusTab('rejected')}
+                                            className={cn(
+                                                "px-4 py-2 text-sm font-medium transition-all rounded-lg",
+                                                reviewStatusTab === 'rejected'
+                                                    ? "bg-red-100 text-red-700 shadow-sm"
+                                                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                            )}
+                                        >
+                                            🔴 Rejected ({reviewStats.rejected})
+                                        </button>
+                                    </div>
+                                    {/* Qualify by Niche Button */}
+                                    {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="gap-2 border-primary/50 text-primary hover:bg-primary/10"
+                                            onClick={handleQualifyByNiche}
+                                            title="Qualify all leads matching your profile niche"
+                                        >
+                                            <Sparkles className="h-4 w-4" />
+                                            Qualify by Niche
+                                        </Button>
+                                    )}
                                 </div>
-                                {/* Qualify by Niche Button */}
-                                {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && (
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="gap-2 border-primary/50 text-primary hover:bg-primary/10"
-                                        onClick={handleQualifyByNiche}
-                                        title="Qualify all leads matching your profile niche"
-                                    >
-                                        <Sparkles className="h-4 w-4" />
-                                        Qualify by Niche
-                                    </Button>
-                                )}
-                            </div>
                             )}
 
                             {/* Selection Toolbar (Conditional but takes no space when empty) */}
@@ -1896,6 +1939,31 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                     ❌ Reject
                                                 </Button>
                                             </>
+                                        )}
+
+                                        {reviewStatusTab !== 'rejected' && (
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button size="sm" variant="outline" className="bg-background">
+                                                        Set Tier
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent>
+                                                    <DropdownMenuItem onClick={() => handleBulkSetTier('primary')}>
+                                                        Primary (Hot)
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleBulkSetTier('secondary')}>
+                                                        Secondary (Warm)
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleBulkSetTier('tertiary')}>
+                                                        Tertiary (Cold)
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem onClick={() => handleBulkSetTier('clear')} className="text-muted-foreground">
+                                                        Clear Manual Tier
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
                                         )}
 
                                         {reviewStatusTab !== 'rejected' && (
@@ -2021,6 +2089,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                         {lead.email && (
                                                             <span className="text-xs text-muted-foreground truncate">{lead.email}</span>
                                                         )}
+                                                        {getTierBadge(lead)}
                                                     </div>
                                                 </div>
                                             </TableCell>
@@ -2151,7 +2220,6 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                             <Eye className="mr-2 h-4 w-4" /> View Details
                                                         </DropdownMenuItem>
 
-                                                        {/* Campaign/Enrichment Actions (Gated) */}
                                                         {lead.review_status === 'approved' && (
                                                             <DropdownMenuItem onClick={() => {
                                                                 setSelectedLeads(new Set([lead.id]));
@@ -2161,6 +2229,20 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                                 <Target className="mr-2 h-4 w-4" /> Add to Campaign
                                                             </DropdownMenuItem>
                                                         )}
+
+                                                        <DropdownMenuSeparator />
+                                                        <DropdownMenuItem onClick={() => handleSetTier(lead.id, 'primary')}>
+                                                            Set as Primary (Hot)
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleSetTier(lead.id, 'secondary')}>
+                                                            Set as Secondary (Warm)
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleSetTier(lead.id, 'tertiary')}>
+                                                            Set as Tertiary (Cold)
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleSetTier(lead.id, 'clear')} className="text-muted-foreground">
+                                                            Clear Manual Tier
+                                                        </DropdownMenuItem>
 
                                                         <DropdownMenuSeparator />
                                                         <DropdownMenuItem className="text-destructive">Delete Lead</DropdownMenuItem>

@@ -181,14 +181,15 @@ export function calculateScore(lead, prefs) {
 }
 
 /**
- * AI High Priority rule:
- * is_priority = true and review_status = 'approved' when:
- *   tier === 'primary' OR (tier === 'secondary' AND score >= secondary_priority_threshold)
- * Otherwise is_priority = false, review_status = 'to_be_reviewed'.
+ * My Contacts (is_priority): tier-based only — no fixed score threshold.
+ * Primary = high quality, Secondary = warm → both count as My Contacts.
+ * Tertiary = less warm → not in My Contacts by default.
  */
-export function applyPriorityRule(score, tier, prefs) {
-  const threshold = prefs?.secondary_priority_threshold ?? 70;
-  const isPriority = tier === 'primary' || (tier === 'secondary' && score >= threshold);
+export function applyPriorityRule(score, tier, prefs, overrideIsPriority = null) {
+  let isPriority = tier === 'primary' || tier === 'secondary';
+  if (overrideIsPriority !== null) {
+    isPriority = overrideIsPriority;
+  }
   const reviewStatus = isPriority ? 'approved' : 'to_be_reviewed';
   return { isPriority, reviewStatus };
 }
@@ -209,10 +210,11 @@ export async function savePreferences(data) {
   const {
     linkedin_profile_url,
     preference_tiers,
+    contacts_min_score,
     secondary_priority_threshold,
     profile_meta,
     preference_active,
-    // Legacy (kept for backward compat; can be ignored when preference_tiers is used)
+    // Legacy
     preferred_companies,
     preferred_industries,
     preferred_titles,
@@ -230,20 +232,21 @@ export async function savePreferences(data) {
   await pool.query(`
     INSERT INTO preference_settings (
       id, linkedin_profile_url,
-      preference_tiers, secondary_priority_threshold,
+      preference_tiers, secondary_priority_threshold, contacts_min_score,
       profile_meta, preference_active,
       preferred_companies, preferred_industries, preferred_titles,
       preferred_locations, niche_keywords,
       primary_threshold, secondary_threshold, auto_approval_threshold,
       updated_at
     ) VALUES (
-      1, $1, $2::jsonb, $3, $4::jsonb, $5,
-      $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, NOW()
+      1, $1, $2::jsonb, $3, $4, $5::jsonb, $6,
+      $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13, $14, NOW()
     )
     ON CONFLICT (id) DO UPDATE SET
       linkedin_profile_url         = COALESCE(EXCLUDED.linkedin_profile_url, preference_settings.linkedin_profile_url),
       preference_tiers              = COALESCE(EXCLUDED.preference_tiers, preference_settings.preference_tiers),
       secondary_priority_threshold   = COALESCE(EXCLUDED.secondary_priority_threshold, preference_settings.secondary_priority_threshold),
+      contacts_min_score             = COALESCE(EXCLUDED.contacts_min_score, preference_settings.contacts_min_score),
       profile_meta                  = COALESCE(EXCLUDED.profile_meta, preference_settings.profile_meta),
       preference_active              = COALESCE(EXCLUDED.preference_active, preference_settings.preference_active),
       preferred_companies           = COALESCE(EXCLUDED.preferred_companies, preference_settings.preferred_companies),
@@ -259,6 +262,7 @@ export async function savePreferences(data) {
     linkedin_profile_url ?? null,
     tiersJson,
     secondary_priority_threshold ?? 70,
+    contacts_min_score ?? 70,
     JSON.stringify(profile_meta || {}),
     preference_active ?? false,
     preferred_companies ?? null,
@@ -273,22 +277,48 @@ export async function savePreferences(data) {
 }
 
 /**
- * Recalculate scores for all leads using the weighted partial scoring model.
- * Updates preference_score, preference_tier, is_priority, review_status (when driven by priority rule).
- * Uses background-friendly batching; do not run on page load.
+ * Dynamic tier bands: primary 20–40%, secondary 30–50%, tertiary 40–50%.
+ * Picks random valid percentages each rescore so counts vary (not fixed 33/33/33).
+ */
+function getDynamicTierPercentages() {
+  const primaryPct = 0.20 + Math.random() * 0.20;
+  const secondaryMax = Math.min(0.50, 0.60 - primaryPct);
+  const secondaryMin = Math.max(0.30, 0.50 - primaryPct);
+  const secondaryPct = secondaryMin + Math.random() * Math.max(0, secondaryMax - secondaryMin);
+  return { pctPrimary: primaryPct, pctSecondary: secondaryPct };
+}
+
+/**
+ * Default quality score for a lead when no preference_tiers are set.
+ * Based only on profile completeness (title, company, email, phone). Connection degree is NOT used.
+ */
+function defaultQualityScore(lead) {
+  let s = 0;
+  if (lead.title && String(lead.title).trim()) s += 30;
+  if (lead.company && String(lead.company).trim()) s += 30;
+  if (lead.email && String(lead.email).trim()) s += 20;
+  if (lead.phone && String(lead.phone).trim()) s += 20;
+  return s;
+}
+
+/**
+ * Recalculate scores for all leads.
+ * - Connection degree is NEVER used for tier — only profile/preference-based scoring and rank.
+ * - Default (no saved preferences): score = profile completeness (title, company, email, phone), then
+ *   rank all leads and assign top 33% primary, next 33% secondary, rest tertiary.
+ * - With Save Preferences: score from profile/tiers, then same 33/33/34 assignment.
+ * - manual_tier is cleared so dashboard hierarchy reflects this logic only.
  */
 export async function recalculateAllScores() {
   const prefs = await loadPreferences();
-  if (!prefs) {
-    console.warn('[scoring] No preferences found — skipping recalculation');
-    return { updated: 0 };
-  }
 
-  const tiers = prefs.preference_tiers;
-  if (!tiers || (typeof tiers !== 'object')) {
-    console.warn('[scoring] No preference_tiers — skipping recalculation');
-    return { updated: 0 };
-  }
+  const tiers = prefs?.preference_tiers && typeof prefs.preference_tiers === 'object' ? prefs.preference_tiers : null;
+  const hasTierCriteria = tiers && (
+    (tiers.primary && (tiers.primary.titles?.length || tiers.primary.industries?.length || tiers.primary.company_sizes?.length)) ||
+    (tiers.secondary && (tiers.secondary.titles?.length || tiers.secondary.industries?.length || tiers.secondary.company_sizes?.length)) ||
+    (tiers.tertiary && (tiers.tertiary.titles?.length || tiers.tertiary.industries?.length || tiers.tertiary.company_sizes?.length))
+  );
+  const useProfileScoring = Boolean(prefs?.preference_active && hasTierCriteria);
 
   let offset = 0;
   const PAGE = 1000;
@@ -296,7 +326,7 @@ export async function recalculateAllScores() {
 
   while (true) {
     const { rows } = await pool.query(
-      `SELECT id, company, title, location, connection_degree
+      `SELECT id, company, title, location, connection_degree, email
        FROM leads
        ORDER BY id
        LIMIT $1 OFFSET $2`,
@@ -304,14 +334,19 @@ export async function recalculateAllScores() {
     );
     if (rows.length === 0) break;
     for (const lead of rows) {
-      const { score, tier } = calculateScore(lead, prefs);
-      const { isPriority, reviewStatus } = applyPriorityRule(score, tier, prefs);
+      let score, tier;
+      if (useProfileScoring) {
+        const out = calculateScore(lead, prefs);
+        score = out.score;
+        tier = out.tier;
+      } else {
+        score = defaultQualityScore(lead);
+        tier = null;
+      }
       allUpdates.push({
         id: lead.id,
         preference_score: score,
         preference_tier: tier,
-        is_priority: isPriority,
-        review_status: reviewStatus,
       });
     }
     offset += PAGE;
@@ -320,24 +355,54 @@ export async function recalculateAllScores() {
 
   if (allUpdates.length === 0) return { updated: 0 };
 
+  // Sort by score desc (then id). Tiers assigned by score rank with dynamic bands.
+  // Primary = top 20–40%, Secondary = next 30–50%, Tertiary = rest 40–50%. Picked at random each rescore so counts vary.
+  allUpdates.sort((a, b) => {
+    if (b.preference_score !== a.preference_score) return b.preference_score - a.preference_score;
+    return a.id - b.id;
+  });
+  const total = allUpdates.length;
+  const { pctPrimary, pctSecondary } = getDynamicTierPercentages();
+  const primaryCount = Math.max(1, Math.floor(total * pctPrimary));
+  const secondaryCount = Math.max(1, Math.floor(total * pctSecondary));
+  allUpdates.forEach((u, idx) => {
+    if (idx < primaryCount) u.preference_tier = 'primary';
+    else if (idx < primaryCount + secondaryCount) u.preference_tier = 'secondary';
+    else u.preference_tier = 'tertiary';
+  });
+
+  allUpdates.forEach(u => {
+    const { isPriority, reviewStatus } = applyPriorityRule(u.preference_score, u.preference_tier, prefs ?? null, null);
+    u.is_priority = isPriority;
+    u.review_status = reviewStatus;
+  });
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     for (const u of allUpdates) {
+      const reviewStatus = String(u.review_status || '');
       await client.query(
         `UPDATE leads
          SET preference_score = $1,
              preference_tier   = $2,
              is_priority       = $3,
              review_status    = $4,
-             approved_at      = CASE WHEN $4 = 'approved' AND approved_at IS NULL THEN NOW() ELSE approved_at END,
+             approved_at      = CASE WHEN $5 = 'approved' AND approved_at IS NULL THEN NOW() ELSE approved_at END,
              updated_at       = NOW()
-         WHERE id = $5`,
-        [u.preference_score, u.preference_tier, u.is_priority, u.review_status, u.id]
+         WHERE id = $6`,
+        [u.preference_score, u.preference_tier, u.is_priority, reviewStatus, reviewStatus, u.id]
       );
     }
     await client.query('COMMIT');
-    console.log(`[scoring] Recalculated ${allUpdates.length} leads (tiered model).`);
+    const mode = useProfileScoring ? 'saved profile (preference active)' : 'default quality score';
+    const pctTertiary = (100 - Math.round(pctPrimary * 100) - Math.round(pctSecondary * 100));
+    console.log(`[scoring] Recalculated ${allUpdates.length} leads: tiers by score (dynamic ${Math.round(pctPrimary * 100)}% / ${Math.round(pctSecondary * 100)}% / ${pctTertiary}%). Mode: ${mode}.`);
+    try {
+      await pool.query('UPDATE leads SET manual_tier = NULL WHERE manual_tier IS NOT NULL');
+    } catch (_) {
+      // manual_tier column may not exist on older DBs; tier update already committed
+    }
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[scoring] Recalculate failed:', err);

@@ -4,6 +4,7 @@ import config from "./config/index.js";
 import { initScheduler } from "./services/scheduler.service.js";
 import { initContentSheetSync } from "./services/contentSheetSync.service.js";
 import { runMigrations } from "./db/migrations.js";
+import { recalculateAllScores } from "./services/preferenceScoring.service.js";
 import logger from "./utils/logger.js";
 import industryHierarchyService from "./services/industryHierarchy.service.js";
 import { ensureNotificationsTable } from "./db/ensure_notifications.js"; // 👈 Explicit fix for notifications
@@ -62,6 +63,11 @@ async function init() {
   // Start the Content Engine → Google Sheets sync cron
   // Respects GOOGLE_SHEETS_ENABLED=false flag to disable without code changes
   initContentSheetSync();
+
+  // Default lead distribution: apply primary/secondary/tertiary without requiring Save Preferences
+  recalculateAllScores()
+    .then((r) => { if (r.updated > 0) logger.info(`📊 Default tiers applied to ${r.updated} leads`); })
+    .catch((err) => logger.warn("Default tier run failed (non-fatal):", err.message));
 
   app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);

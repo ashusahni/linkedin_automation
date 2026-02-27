@@ -6,9 +6,9 @@ import './index.css'
 import axios from 'axios'
 
 // Set base URL for API requests
-// In development, this falls back to localhost (or Vite proxy handles it)
-// In production, VITE_API_URL must be set (e.g., https://backend-service.onrender.com)
-axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+// In development, this falls back to localhost (match backend PORT; backend default is 3000)
+// Set VITE_API_URL to override (e.g. http://localhost:5000 if backend runs on 5000)
+axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 import { ToastProvider, useToast } from './components/ui/toast.jsx'
 

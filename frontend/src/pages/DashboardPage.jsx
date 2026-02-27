@@ -737,10 +737,10 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-foreground">{totalQualityLeads}</span>
-                  <span className="text-sm font-medium text-muted-foreground">Total Leads Analyzed</span>
+                  <span className="text-3xl font-bold text-foreground">{ls.totalLeads ?? totalQualityLeads}</span>
+                  <span className="text-sm font-medium text-muted-foreground">Total Leads</span>
                 </div>
-                <p className="text-[11px] text-muted-foreground/70">Percentages based on total leads in current view.</p>
+                <p className="text-[11px] text-muted-foreground/70">Primary = high quality, Secondary = warm, Tertiary = less warm. Based on LinkedIn Preferences when set.</p>
               </div>
 
               {loading ? (
@@ -985,10 +985,10 @@ export default function DashboardPage() {
                       </span>
                     </div>
                     <div className="w-full h-8 bg-muted/50 rounded-full overflow-hidden relative flex shadow-inner">
-                      {/* Primary segment - Green */}
+                      {/* Primary segment - Hot/Orange */}
                       {lq.primary > 0 && (
                         <div
-                          className="h-full bg-[#10b981] transition-all duration-1000 ease-out flex items-center justify-center relative group"
+                          className="h-full bg-[#f97316] transition-all duration-1000 ease-out flex items-center justify-center relative group"
                           style={{
                             width: `${ls.totalLeads > 0 ? (lq.primary / ls.totalLeads) * 100 : 0}%`,
                           }}
@@ -997,14 +997,14 @@ export default function DashboardPage() {
                             {ls.totalLeads > 0 ? Math.round((lq.primary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Primary: {ls.totalLeads > 0 ? Math.round((lq.primary / ls.totalLeads) * 100) : 0}%
+                            Hot (Primary): {ls.totalLeads > 0 ? Math.round((lq.primary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}
-                      {/* Secondary segment - Blue */}
+                      {/* Secondary segment - Warm/Amber */}
                       {lq.secondary > 0 && (
                         <div
-                          className="h-full bg-[#3b82f6] transition-all duration-1000 ease-out flex items-center justify-center relative group"
+                          className="h-full bg-[#f59e0b] transition-all duration-1000 ease-out flex items-center justify-center relative group"
                           style={{
                             width: `${ls.totalLeads > 0 ? (lq.secondary / ls.totalLeads) * 100 : 0}%`,
                           }}
@@ -1013,14 +1013,14 @@ export default function DashboardPage() {
                             {ls.totalLeads > 0 ? Math.round((lq.secondary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Secondary: {ls.totalLeads > 0 ? Math.round((lq.secondary / ls.totalLeads) * 100) : 0}%
+                            Warm (Secondary): {ls.totalLeads > 0 ? Math.round((lq.secondary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}
-                      {/* Tertiary segment - Slate (Matching Quality Score) */}
+                      {/* Tertiary segment - Cold/Blue */}
                       {lq.tertiary > 0 && (
                         <div
-                          className="h-full bg-[#94a3b8] transition-all duration-1000 ease-out flex items-center justify-center relative group"
+                          className="h-full bg-[#3b82f6] transition-all duration-1000 ease-out flex items-center justify-center relative group"
                           style={{
                             width: `${ls.totalLeads > 0 ? (lq.tertiary / ls.totalLeads) * 100 : 0}%`,
                           }}
@@ -1029,23 +1029,23 @@ export default function DashboardPage() {
                             {ls.totalLeads > 0 ? Math.round((lq.tertiary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Tertiary: {ls.totalLeads > 0 ? Math.round((lq.tertiary / ls.totalLeads) * 100) : 0}%
+                            Cold (Tertiary): {ls.totalLeads > 0 ? Math.round((lq.tertiary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}
                     </div>
                     <div className="flex justify-between text-[10px] text-muted-foreground px-1">
                       <div className="flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#10b981]" />{" "}
-                        Primary
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#f97316]" />{" "}
+                        🔥 Hot (Primary)
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />{" "}
+                        ☀️ Warm (Secondary)
                       </div>
                       <div className="flex items-center gap-1">
                         <div className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />{" "}
-                        Secondary
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#94a3b8]" />{" "}
-                        Tertiary
+                        ❄️ Cold (Tertiary)
                       </div>
                     </div>
                   </div>

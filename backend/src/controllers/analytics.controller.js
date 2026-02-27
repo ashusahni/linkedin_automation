@@ -238,12 +238,13 @@ export async function getDashboardAnalytics(req, res) {
       }
     }
 
-    // ── Lead Quality Distribution (from stored preference_tier column) ──────
+    // ── Lead Quality Distribution (all leads; primary = high quality, secondary = warm, tertiary = less warm) ──────
+    // Count by COALESCE(manual_tier, preference_tier); treat null as tertiary so totals match totalLeads
     const tierResult = await pool.query(
-      `SELECT preference_tier, COUNT(*) AS cnt
+      `SELECT COALESCE(manual_tier, preference_tier, 'tertiary') AS effective_tier, COUNT(*) AS cnt
          FROM leads
         WHERE ${dateFilter}${connFilter}
-        GROUP BY preference_tier`,
+        GROUP BY COALESCE(manual_tier, preference_tier, 'tertiary')`,
       effectiveLeadParam
     );
 
@@ -253,8 +254,9 @@ export async function getDashboardAnalytics(req, res) {
 
     for (const row of tierResult.rows) {
       const c = parseInt(row.cnt, 10);
-      if (row.preference_tier === 'primary') primaryCount = c;
-      else if (row.preference_tier === 'secondary') secondaryCount = c;
+      const tier = (row.effective_tier || '').toLowerCase();
+      if (tier === 'primary') primaryCount = c;
+      else if (tier === 'secondary') secondaryCount = c;
       else tertiaryCount += c;
     }
 

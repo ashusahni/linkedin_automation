@@ -90,7 +90,7 @@ const SettingsPage = () => {
     pbApiKey: "",
     liCookie: "",
     maxDailyInvites: 20,
-    webhookUrl: `${window.location.origin.replace("5173", "5000")}/api/webhooks/phantombuster`,
+    webhookUrl: `${(import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/$/, "")}/api/webhooks/phantombuster`,
   });
 
   const defaultTiers = {
@@ -101,7 +101,6 @@ const SettingsPage = () => {
   const [preferences, setPreferences] = useState({
     linkedin_profile_url: "",
     preference_tiers: defaultTiers,
-    secondary_priority_threshold: 70,
     preference_active: false,
   });
   const [preferencesSaving, setPreferencesSaving] = useState(false);
@@ -272,7 +271,7 @@ const SettingsPage = () => {
               secondary: { ...defaultTiers.secondary, ...(tiers.secondary || {}) },
               tertiary: { ...defaultTiers.tertiary, ...(tiers.tertiary || {}) },
             },
-            secondary_priority_threshold: res.data.secondary_priority_threshold ?? 70,
+            contacts_min_score: res.data.contacts_min_score ?? 70,
             preference_active: res.data.preference_active || false,
           }));
         }
@@ -373,7 +372,6 @@ const SettingsPage = () => {
       await axios.put("/api/preferences", {
         linkedin_profile_url: preferences.linkedin_profile_url,
         preference_tiers: preferences.preference_tiers,
-        secondary_priority_threshold: preferences.secondary_priority_threshold,
         preference_active: preferences.preference_active,
       });
       addToast("Preferences saved. Leads are being rescored.", "success");
@@ -1223,7 +1221,7 @@ const SettingsPage = () => {
                   LinkedIn Preferences
                 </CardTitle>
                 <CardDescription className="mt-1.5">
-                  Store your profile URL and preferred targets so leads can be automatically scored and tiered.
+                  Default lead tiers (primary/secondary/tertiary) are set automatically. Save here to use a specific profile: enter your LinkedIn profile URL (required), click Analyze, then Save — AI will arrange leads by that profile. Titles, industries, and size are optional.
                 </CardDescription>
               </div>
               <div
@@ -1264,7 +1262,7 @@ const SettingsPage = () => {
                   Analyze
                 </Button>
               </div>
-              <p className="text-[10px] text-muted-foreground">Analyze fills Primary tier from your profile.</p>
+              <p className="text-[10px] text-muted-foreground">Profile URL is required for Save. Analyze fills Primary tier from your profile; other fields are optional.</p>
             </div>
             {(() => {
               const TITLE_OPTIONS = ["CEO", "CTO", "CFO", "Director", "Manager", "VP", "Founder", "Head of", "Lead", "Engineer", "Analyst", "Consultant", "Specialist"];
@@ -1381,18 +1379,7 @@ const SettingsPage = () => {
                 );
               });
             })()}
-            <div className="flex items-center gap-2">
-              <Label className="text-[11px] text-muted-foreground shrink-0">My Contacts min score</Label>
-              <Input
-                type="number"
-                min={0}
-                max={200}
-                value={preferences.secondary_priority_threshold ?? 70}
-                onChange={(e) => setPreferences({ ...preferences, secondary_priority_threshold: parseInt(e.target.value, 10) || 70 })}
-                className="w-14 h-8 text-xs"
-              />
-            </div>
-            <p className="text-[10px] text-muted-foreground">Rescore runs on save.</p>
+            <p className="text-[10px] text-muted-foreground">Rescore runs on save. My Contacts = Primary + Secondary tiers.</p>
           </CardContent>
           <CardFooter>
             <Button onClick={savePreferences} disabled={preferencesSaving} className="gap-2">
