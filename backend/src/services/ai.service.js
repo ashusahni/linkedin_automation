@@ -61,6 +61,9 @@ CRITICAL — SOUND EFFORTLESS AND NATURAL:
 - Sound like you're dropping them a note, not "reaching out" or "hoping to connect." Short sentences. Occasional fragment. No buildup, no formal outreach tone.
 - NEVER use: "I recently came across", "Given your interest in", "Would you be interested in learning more", "It's impressive to see", "could provide valuable insights", "Your expertise would be a tremendous addition", "I'd love to connect" without a concrete reason first, "I hope this message finds you well", "I'd love to hear your thoughts" as a standalone closer.
 
+TALK TO EACH PERSON DIFFERENTLY (like a human would):
+- When you write to multiple people, each message must feel like it was written for that person only. Use a different THEME (e.g. one message leans on their company, another on a post, another on their role), a different WAY of addressing them (question vs observation vs fragment), and different WORDING—never the same opener, angle, or closer. No two messages should sound like the same template. Imagine you're texting five different people: you naturally vary how you start, what you focus on, and how you end.
+
 STRUCTURE VARIETY (every message must be different):
 - BANNED OPENINGS — do not start with: "That latest product update you shared", "The latest product update you shared", "That post you shared", "The post you shared", "Your recent post", "That [X] you shared", "The [X] you shared". Each message must have a UNIQUE first sentence—never reuse the same opener pattern.
 - Vary your FIRST sentence: use a question, or a short observation (different wording every time), or a contrast, or a single detail that's specific to them. Invent a fresh opener for this person only.
@@ -166,6 +169,21 @@ class AIService {
         const focus = options.focus || 'general';
         const campaign = options.campaign || null;
 
+        // When generating for multiple leads, force each message to feel unique (different theme, wording, address).
+        const batchContext = options.batchContext || null;
+        const batchUniquenessBlock = batchContext && batchContext.total > 1
+            ? `\n\nBATCH CONTEXT — YOU ARE WRITING MESSAGE ${batchContext.index} OF ${batchContext.total} FOR DIFFERENT PEOPLE. This message must be clearly different from any other: use a different opening style, a different theme or angle (e.g. focus on their company for one, their post for another, their role for another), and a different closing. Address THIS person in a way that could only be for them—like a human would naturally write differently to each recipient. Do not reuse the same sentence patterns or wording you might use for others.\n`
+            : '';
+        const angleHints = [
+            'Open with a question (about their work, company, or something from their profile).',
+            'Open with a one-line observation—phrase it in a fresh way (their role, a line from bio, or company).',
+            'Open with a short fragment or contrast (e.g. their industry or a specific detail).',
+            'Dive straight into one specific detail with unexpected wording—no generic lead-in.'
+        ];
+        const uniquenessAngle = batchContext && batchContext.total > 1 && batchContext.index != null
+            ? `\nFor THIS message only, prefer: ${angleHints[batchContext.index % angleHints.length]}\n`
+            : '';
+
         try {
             if (!this.isConfigured()) {
                 console.warn('⚠️ AI not configured, using personalized template. Edit and send.');
@@ -235,7 +253,7 @@ class AIService {
 
             const prompt = `You're a real person sending a LinkedIn connection note. You know this profile—write something that could only be for THIS person. Sound natural. Not like a template or "outreach."
 
-Lead: ${lead.full_name} | ${lead.title || 'N/A'} | ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+Lead: ${lead.full_name} | ${lead.title || 'N/A'} | ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}${batchUniquenessBlock}${uniquenessAngle}
 ${HUMAN_WRITER_BLOCK}
 
 OPENING (important): Do NOT start with "Hi [Name],". Do NOT start with "That/the latest product update you shared" or "That/the post you shared" or any "[That/The] [thing] you shared"—those make every message look the same. For THIS person only, pick ONE opening style and make the first sentence unique:
@@ -310,6 +328,21 @@ RULES:
         const length = options.length || 'medium';
         const focus = options.focus || 'general';
         const campaign = options.campaign || null;
+
+        // When generating for multiple leads, force each message to feel unique.
+        const batchContext = options.batchContext || null;
+        const batchUniquenessBlock = batchContext && batchContext.total > 1
+            ? `\n\nBATCH CONTEXT — YOU ARE WRITING MESSAGE ${batchContext.index} OF ${batchContext.total} FOR DIFFERENT PEOPLE. This follow-up must be clearly different from any other: different opening, different theme or angle, different closing. Address THIS person in a way that could only be for them.\n`
+            : '';
+        const followUpAngleHints = [
+            'Open with a question (about something they did or posted).',
+            'Open with a one-line observation phrased in a completely different way (their role, company, or a specific line from their bio).',
+            'Open with a short fragment or a new angle on their work.',
+            'Dive into one specific detail with unexpected wording.'
+        ];
+        const uniquenessAngle = batchContext && batchContext.total > 1 && batchContext.index != null
+            ? `\nFor THIS message only, prefer: ${followUpAngleHints[batchContext.index % followUpAngleHints.length]}\n`
+            : '';
 
         try {
             if (!this.isConfigured()) {
@@ -391,7 +424,7 @@ RULES:
 
             const prompt = `You're a real person writing a LinkedIn follow-up. You know this lead and what you said before. Write something that could only be for THIS person. Natural. Not "following up" in a formal way.
 
-Lead: ${lead.full_name} | ${lead.title || 'N/A'} | ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}
+Lead: ${lead.full_name} | ${lead.title || 'N/A'} | ${lead.company || 'N/A'}${enrichmentContext}${campaignContext}${batchUniquenessBlock}${uniquenessAngle}
 
 ${previousMessages.length > 0 ? `What you already sent:\n${previousMessages.join('\n---\n')}\n\nBuild on it naturally—don't repeat it.` : ''}
 ${HUMAN_WRITER_BLOCK}
@@ -511,8 +544,9 @@ Output ONLY the post text. No quotes or extra formatting.`;
      * @param {string} template - Template string (optional)
      * @param {string} stepType - Step type (connection_request, message, follow_up)
      * @param {Object} campaignContext - Campaign context (optional)
+     * @param {Object} extraOptions - Optional options (e.g. batchContext for bulk generation)
      */
-    static async generatePersonalizedMessage(leadId, template, stepType = 'message', campaignContext = null) {
+    static async generatePersonalizedMessage(leadId, template, stepType = 'message', campaignContext = null, extraOptions = {}) {
         try {
             // 1. Fetch Lead & Enrichment Data
             const leadResult = await pool.query("SELECT * FROM leads WHERE id = $1", [leadId]);
@@ -533,7 +567,8 @@ Output ONLY the post text. No quotes or extra formatting.`;
             // 2. Use AI based on step type
             let message = '';
             try {
-                const options = campaignContext ? { campaign: campaignContext } : {};
+                const options = { ...extraOptions };
+                if (campaignContext) options.campaign = campaignContext;
                 if (stepType === 'connection_request') {
                     message = await this.generateConnectionRequest(lead, enrichment, options);
                 } else if (stepType === 'message' || stepType === 'follow_up') {

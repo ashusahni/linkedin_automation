@@ -1148,6 +1148,7 @@ export async function bulkEnrichAndPersonalize(req, res) {
         let personalizedMessage;
         try {
           const options = campaignContext ? { campaign: campaignContext } : {};
+          options.batchContext = { index: index + 1, total: leads.length };
           if (enrichmentData) {
             if (stepType === 'connection_request') {
               personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, options);
@@ -1158,7 +1159,9 @@ export async function bulkEnrichAndPersonalize(req, res) {
             personalizedMessage = await AIService.generatePersonalizedMessage(
               lead.id,
               '',
-              stepType
+              stepType,
+              campaignContext,
+              { batchContext: options.batchContext }
             );
           }
         } catch (aiError) {

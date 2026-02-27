@@ -1151,20 +1151,20 @@ export async function bulkEnrichAndGenerate(req, res) {
                     console.log(`   Using campaign context: Yes (${campaign.goal || 'N/A'} - ${campaign.type || 'N/A'})`);
                     let personalizedMessage;
                     try {
-                        // Pass enrichment data and campaign context directly if available
+                        const batchContext = { index: index + 1, total: leadsWithLinkedIn.length };
                         if (enrichmentData) {
                             if (stepType === 'connection_request') {
-                                personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, { campaign: campaignContext });
+                                personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, { campaign: campaignContext, batchContext });
                             } else {
-                                personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], { campaign: campaignContext });
+                                personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], { campaign: campaignContext, batchContext });
                             }
                         } else {
-                            // Fallback to standard method (still pass campaign context)
                             personalizedMessage = await AIService.generatePersonalizedMessage(
                                 lead.id,
-                                '', // No template, let AI generate from scratch
+                                '',
                                 stepType,
-                                campaignContext
+                                campaignContext,
+                                { batchContext }
                             );
                         }
                     } catch (aiError) {
@@ -1437,16 +1437,17 @@ export async function generateGmailDrafts(req, res) {
                     let personalizedMessage;
                     if (enrichmentData) {
                         if (linkedinStepType === 'connection_request') {
-                            personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, { campaign: campaignContext });
+                            personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, { campaign: campaignContext, batchContext });
                         } else {
-                            personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], { campaign: campaignContext });
+                            personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], { campaign: campaignContext, batchContext });
                         }
                     } else {
                         personalizedMessage = await AIService.generatePersonalizedMessage(
                             lead.id,
                             '',
                             linkedinStepType,
-                            campaignContext
+                            campaignContext,
+                            { batchContext }
                         );
                     }
                     if (!personalizedMessage || personalizedMessage.trim().length === 0) {
