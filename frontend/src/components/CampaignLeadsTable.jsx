@@ -7,7 +7,8 @@ import {
     TableHeader,
     TableRow,
 } from "./ui/table";
-import { Mail, Phone, Clock, CheckCircle2, AlertCircle, XCircle, Loader2 } from 'lucide-react';
+import { Button } from './ui/button';
+import { Mail, Phone, Clock, CheckCircle2, AlertCircle, XCircle, Loader2, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 // Map campaign_leads.status → user-friendly label + color
@@ -80,6 +81,7 @@ export default function CampaignLeadsTable({
     selectedLeads = [],
     onToggleLead,
     onToggleAll,
+    onRemoveLead,
 }) {
     const isSelected = (id) => selectedLeads.includes(id);
     const allSelected = leads.length > 0 && leads.every(l => isSelected(l.id));
@@ -106,12 +108,15 @@ export default function CampaignLeadsTable({
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Current Step</TableHead>
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approval Status</TableHead>
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Email</TableHead>
+                        {onRemoveLead && (
+                            <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[100px]">Actions</TableHead>
+                        )}
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     {leads.length === 0 ? (
                         <TableRow>
-                            <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                            <TableCell colSpan={onRemoveLead ? 7 : 6} className="h-32 text-center text-muted-foreground">
                                 <div className="flex flex-col items-center gap-2">
                                     <Clock className="w-8 h-8 opacity-30" />
                                     <p className="text-sm">No leads in this campaign yet.</p>
@@ -209,6 +214,21 @@ export default function CampaignLeadsTable({
                                             <span className="text-xs text-muted-foreground/50">—</span>
                                         )}
                                     </TableCell>
+
+                                    {/* Actions: Remove from campaign */}
+                                    {onRemoveLead && (
+                                        <TableCell className="text-right">
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                onClick={() => onRemoveLead(lead.id)}
+                                                title="Remove from campaign"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </Button>
+                                        </TableCell>
+                                    )}
                                 </TableRow>
                             );
                         })

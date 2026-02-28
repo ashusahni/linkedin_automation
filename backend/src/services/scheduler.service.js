@@ -53,7 +53,8 @@ async function processNextLead() {
         const dueLeadsResult = await pool.query(`
             SELECT cl.*, s.type as step_type, sv.content as step_content, s.delay_days
             FROM campaign_leads cl
-            JOIN sequences s ON cl.campaign_id = s.campaign_id AND cl.current_step = s.step_order
+            JOIN campaigns c ON c.id = cl.campaign_id AND c.status = 'active'
+            JOIN sequences s ON s.campaign_id = cl.campaign_id AND cl.current_step = s.step_order
             LEFT JOIN sequence_variants sv ON s.id = sv.sequence_id AND sv.is_active = true
             WHERE (cl.next_action_due <= NOW() OR cl.next_action_due IS NULL)
             AND cl.status NOT IN ('failed', 'completed', 'processing', 'needs_approval')

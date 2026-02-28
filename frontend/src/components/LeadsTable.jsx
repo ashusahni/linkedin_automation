@@ -441,7 +441,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                 leadIds: selectedLeadIds
             });
 
-            addToast(`Successfully added ${selectedLeads.size} leads to campaign${needsApproval.length > 0 ? ' (and marked as qualified)' : ''}`, 'success');
+            addToast(`Successfully added ${selectedLeads.size} lead${selectedLeads.size !== 1 ? 's' : ''} to campaign`, 'success');
             setSelectedLeads(new Set());
             setShowCampaignModal(false);
             fetchLeads();

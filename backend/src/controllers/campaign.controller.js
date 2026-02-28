@@ -314,6 +314,7 @@ export async function addLeadsToCampaign(req, res) {
             }
         }
 
+        const campaignStatus = campaignCheck.rows[0]?.status;
         const response = {
             success: true,
             message: `Added ${addedCount} leads to campaign`,
@@ -324,9 +325,43 @@ export async function addLeadsToCampaign(req, res) {
         if (sequenceCount === 0) {
             response.warning = "Campaign has no sequences defined. Leads will not be processed until sequences are added.";
         }
+        if (campaignStatus === 'active' && addedCount > 0) {
+            response.note = "Campaign is active. The scheduler will process these new leads automatically until you pause the campaign.";
+        }
 
         return res.json(response);
 
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+}
+
+// DELETE /api/campaigns/:id/leads — remove one or more leads from the campaign
+export async function removeLeadsFromCampaign(req, res) {
+    try {
+        const { id } = req.params;
+        const { leadIds } = req.body || {};
+
+        if (!Array.isArray(leadIds) || leadIds.length === 0) {
+            return res.status(400).json({ error: "leadIds array is required and must not be empty" });
+        }
+
+        const campaignCheck = await pool.query("SELECT id FROM campaigns WHERE id = $1", [id]);
+        if (campaignCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Campaign not found" });
+        }
+
+        const deleteResult = await pool.query(
+            "DELETE FROM campaign_leads WHERE campaign_id = $1 AND lead_id = ANY($2::int[]) RETURNING lead_id",
+            [id, leadIds]
+        );
+        const removedCount = deleteResult.rowCount ?? 0;
+
+        return res.json({
+            success: true,
+            message: `Removed ${removedCount} lead(s) from campaign`,
+            removedCount,
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -466,12 +501,51 @@ export async function getLaunchesToday(req, res) {
     }
 }
 
+// GET /api/campaigns/:id/launch-logs — temporary launch flow logs
+export async function getLaunchLogs(req, res) {
+    try {
+        const { id } = req.params;
+        const result = await pool.query(
+            `SELECT id, campaign_id, lead_id, action, status, details, created_at
+             FROM automation_logs
+             WHERE campaign_id = $1 AND action = 'launch_step'
+             ORDER BY created_at ASC`,
+            [id]
+        );
+        return res.json(result.rows.map((r) => ({
+            id: r.id,
+            leadId: r.lead_id,
+            step: r.details?.step ?? "",
+            message: r.details?.message ?? "",
+            ts: r.details?.ts ?? r.created_at,
+            created_at: r.created_at,
+        })));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+}
+
+// Temporary launch logs: write to console + automation_logs for traceability
+async function addLaunchLog(campaignId, step, message, leadId = null) {
+    const msg = `[LAUNCH] ${step}: ${message}`;
+    console.log(msg);
+    try {
+        await pool.query(
+            `INSERT INTO automation_logs (campaign_id, lead_id, action, status, details)
+             VALUES ($1, $2, 'launch_step', 'info', $3::jsonb)`,
+            [campaignId, leadId, JSON.stringify({ step, message, ts: new Date().toISOString() })]
+        );
+    } catch (e) {
+        console.warn("[LAUNCH] Failed to persist log:", e.message);
+    }
+}
+
 // POST /api/campaigns/:id/launch
 export async function launchCampaign(req, res) {
     try {
         const { id } = req.params;
         const bypassLimit = req.headers['x-bypass-limit'] === 'true' || req.body?.bypassLimit === true;
-        console.log(`🚀 Request to launch campaign ${id}`);
+        await addLaunchLog(id, "start", "Campaign launch requested");
 
         // 1. Get Campaign to verify it exists
         const campaignRes = await pool.query("SELECT * FROM campaigns WHERE id = $1", [id]);
@@ -483,6 +557,7 @@ export async function launchCampaign(req, res) {
             [id]
         );
         if (activeOther.rows.length > 0) {
+            await addLaunchLog(id, "blocked", "Another campaign is running; queued");
             return res.status(409).json({
                 error: "Another campaign is currently running. Please wait—this campaign has been queued.",
                 code: 'CAMPAIGN_ALREADY_RUNNING',
@@ -504,6 +579,7 @@ export async function launchCampaign(req, res) {
             const launchesToday = dayRes.rows[0]?.count ?? 0;
             const launchesWeek = weekRes.rows[0]?.count ?? 0;
             if (launchesToday >= DAILY_LAUNCH_LIMIT) {
+                await addLaunchLog(id, "blocked", `Daily launch limit reached (${launchesToday}/${DAILY_LAUNCH_LIMIT})`);
                 return res.status(403).json({
                     error: `Daily launch limit reached (${DAILY_LAUNCH_LIMIT} campaigns per day). You can still create and edit campaigns.`,
                     code: 'LAUNCH_LIMIT_REACHED',
@@ -514,6 +590,7 @@ export async function launchCampaign(req, res) {
                 });
             }
             if (launchesWeek >= WEEKLY_LAUNCH_LIMIT) {
+                await addLaunchLog(id, "blocked", `Weekly launch limit reached (${launchesWeek}/${WEEKLY_LAUNCH_LIMIT})`);
                 return res.status(403).json({
                     error: `Weekly launch limit reached (${WEEKLY_LAUNCH_LIMIT} campaigns per week). You can still create and edit campaigns.`,
                     code: 'LAUNCH_LIMIT_WEEK_REACHED',
@@ -525,10 +602,9 @@ export async function launchCampaign(req, res) {
             }
         }
 
-        // 2. Fetch Pending Leads
-        // Join with leads table to get linkedin_url
+        // 2. Fetch Pending Leads (with connection_degree for 1st-degree skip)
         const pendingLeads = await pool.query(
-            `SELECT l.id, l.linkedin_url, l.first_name, l.last_name 
+            `SELECT l.id, l.linkedin_url, l.first_name, l.last_name, l.full_name, l.connection_degree
              FROM campaign_leads cl
              JOIN leads l ON cl.lead_id = l.id
              WHERE cl.campaign_id = $1 AND cl.status = 'pending'`,
@@ -536,73 +612,179 @@ export async function launchCampaign(req, res) {
         );
 
         if (pendingLeads.rows.length === 0) {
+            await addLaunchLog(id, "error", "No pending leads found");
             return res.status(400).json({ error: "No pending leads found in this campaign." });
         }
 
-        console.log(`found ${pendingLeads.rows.length} pending leads`);
+        await addLaunchLog(id, "leads_fetched", `Found ${pendingLeads.rows.length} pending lead(s)`);
 
-        const leadIds = pendingLeads.rows.map(l => l.id);
+        const leadIds = pendingLeads.rows.map((l) => l.id);
 
-        // 3. Fetch approved custom messages for connection requests (one per lead)
-        const approvedMessagesRes = await pool.query(
-            `SELECT DISTINCT ON (lead_id) lead_id, generated_content 
-             FROM approval_queue 
-             WHERE campaign_id = $1 
-             AND lead_id = ANY($2::int[]) 
-             AND step_type = 'connection_request' 
+        // 3. Fetch approved content for BOTH connection_request and message (so we have note + follow-up per lead)
+        const approvedRes = await pool.query(
+            `SELECT lead_id, step_type, generated_content
+             FROM approval_queue
+             WHERE campaign_id = $1
+             AND lead_id = ANY($2::int[])
+             AND step_type IN ('connection_request', 'message')
              AND status = 'approved'
-             ORDER BY lead_id, created_at DESC`,
+             ORDER BY lead_id, step_type`,
             [id, leadIds]
         );
-        const messageByLeadId = Object.fromEntries(
-            approvedMessagesRes.rows.map((r) => [r.lead_id, r.generated_content])
-        );
-        // One message per lead (empty string if no approved message)
-        const messages = pendingLeads.rows.map((p) => (messageByLeadId[p.id] || "").trim());
-        const hasMessages = messages.some((m) => m.length > 0);
-        if (hasMessages) {
-            const count = messages.filter((m) => m.length > 0).length;
-            console.log(`📝 Using ${count} approved custom message(s) for connection requests`);
-        } else {
-            console.log(`⚠️  No approved messages found - connection requests will be sent without notes`);
+
+        const approvalByLeadId = {};
+        for (const r of approvedRes.rows) {
+            if (!approvalByLeadId[r.lead_id]) approvalByLeadId[r.lead_id] = { connection_request: "", message: "" };
+            const content = (r.generated_content || "").trim();
+            if (r.step_type === "connection_request") approvalByLeadId[r.lead_id].connection_request = content;
+            if (r.step_type === "message") approvalByLeadId[r.lead_id].message = content;
         }
 
-        // 4. Trigger PhantomBuster to send connection requests (with custom messages when available)
-        const { autoConnect } = await import("../services/phantombuster.service.js");
-        const result = await autoConnect(pendingLeads.rows, hasMessages ? messages : null);
+        const is1stDegree = (deg) => (deg || "").toLowerCase().replace(/\s/g, "").includes("1st");
 
-        // 5. Mark campaign as active and set launched_at (for daily limit tracking)
+        const connReqLeads = [];
+        const connReqMessages = [];
+        const msgLeads = [];
+        const msgContents = [];
+
+        for (let i = 0; i < pendingLeads.rows.length; i++) {
+            const p = pendingLeads.rows[i];
+            const approval = approvalByLeadId[p.id] || { connection_request: "", message: "" };
+            const connNote = approval.connection_request || "";
+            const followUpMessage = approval.message || connNote;
+            const deg = p.connection_degree || "";
+
+            await addLaunchLog(id, `lead_${i + 1}_check`, `Lead ${i + 1} (${p.full_name || p.first_name || "?"}): connection_degree=${deg || "unknown"}`, p.id);
+
+            if (is1stDegree(deg)) {
+                await addLaunchLog(id, `lead_${i + 1}_skip_autoconnect`, "1st degree connection — no Auto Connect needed", p.id);
+                if (followUpMessage) {
+                    msgLeads.push(p);
+                    msgContents.push(followUpMessage);
+                }
+            } else {
+                connReqLeads.push(p);
+                connReqMessages.push(connNote);
+                if (followUpMessage) {
+                    msgLeads.push(p);
+                    msgContents.push(followUpMessage);
+                }
+            }
+        }
+
+        const phantomService = (await import("../services/phantombuster.service.js")).default;
+        const { buildSpreadsheetOptions } = await import("../services/messageCsvStore.js");
+
+        let connResult = null;
+        let msgSent = 0;
+
+        // 4a. Auto Connect for 2nd/3rd degree (connection request first). Wait for it to finish so Message Sender never runs in parallel.
+        if (connReqLeads.length > 0) {
+            await addLaunchLog(id, "autoconnect_start", `Launching Auto Connect for ${connReqLeads.length} lead(s) (non-1st degree)`);
+            const hasConnMessages = connReqMessages.some((m) => m.length > 0);
+            connResult = await phantomService.autoConnect(connReqLeads, hasConnMessages ? connReqMessages : null);
+            await addLaunchLog(id, "autoconnect_wait", `Waiting for Auto Connect to complete (no other phantom will run until done)`);
+            if (connResult?.containerId && connResult?.phantomId) {
+                try {
+                    await phantomService.waitForCompletion(connResult.containerId, connResult.phantomId, 10);
+                    await addLaunchLog(id, "autoconnect_done", `Auto Connect finished; starting Message Sender next`);
+                } catch (waitErr) {
+                    await addLaunchLog(id, "autoconnect_wait_error", `Auto Connect wait failed: ${waitErr.message}`);
+                    throw waitErr;
+                }
+            }
+            const containerId = connResult?.containerId || null;
+            for (const lead of connReqLeads) {
+                await pool.query(
+                    `INSERT INTO automation_logs (campaign_id, lead_id, action, status, details)
+                     VALUES ($1, $2, 'send_connection_request', 'sent', $3::jsonb)`,
+                    [id, lead.id, JSON.stringify({ container_id: containerId, sent_at: new Date().toISOString(), triggered_by: "launch" })]
+                );
+            }
+            console.log(`✅ Auto Connect: ${connReqLeads.length} connection request(s) sent`);
+        }
+
+        // 4b. Message Sender: 1st-degree now, then 2nd/3rd degree follow-up (after connection sent). If LinkedIn doesn't allow (e.g. not connected yet), CRM shows connection sent + message failed with reason.
+        if (msgLeads.length > 0) {
+            await addLaunchLog(id, "message_sender_start", `Launching Message Sender for ${msgLeads.length} lead(s) (1st degree + follow-up for 2nd/3rd)`);
+            for (let i = 0; i < msgLeads.length; i++) {
+                const profile = msgLeads[i];
+                const content = msgContents[i];
+                if (!content || !profile.linkedin_url) continue;
+                try {
+                    const opts = buildSpreadsheetOptions(profile.linkedin_url, content);
+                    const res = await phantomService.sendMessage(profile, content, opts);
+                    if (res?.success) {
+                        msgSent++;
+                        await addLaunchLog(id, "message_sent", `Message sent to lead ${profile.id}`, profile.id);
+                        await pool.query(
+                            `INSERT INTO automation_logs (campaign_id, lead_id, action, status, details)
+                             VALUES ($1, $2, 'send_message', 'sent', $3::jsonb)`,
+                            [id, profile.id, JSON.stringify({ container_id: res.containerId, message_length: content.length, sent_at: new Date().toISOString(), triggered_by: "launch" })]
+                        );
+                    }
+                } catch (err) {
+                    const reason = err.message || "Unknown error";
+                    console.error(`Message Sender failed for lead ${profile.id}:`, reason);
+                    await addLaunchLog(id, "message_failed", `Message failed for lead ${profile.id}: ${reason}`, profile.id);
+                    await pool.query(
+                        `INSERT INTO automation_logs (campaign_id, lead_id, action, status, details)
+                         VALUES ($1, $2, 'send_message', 'failed', $3::jsonb)`,
+                        [id, profile.id, JSON.stringify({ reason, sent_at: new Date().toISOString(), triggered_by: "launch", connection_sent: connReqLeads.some((l) => l.id === profile.id) })]
+                    );
+                }
+            }
+            await addLaunchLog(id, "message_sender_done", `Message Sender completed: ${msgSent}/${msgLeads.length} sent`);
+        }
+
+        // 5. Gmail: if approved, send mail or complete
+        const gmailApproved = await pool.query(
+            `SELECT 1 FROM approval_queue WHERE campaign_id = $1 AND step_type IN ('email','gmail_outreach') AND status = 'approved' LIMIT 1`,
+            [id]
+        );
+        if (gmailApproved.rows.length > 0) {
+            await addLaunchLog(id, "gmail_approved", "Gmail approved — sending mail or completing");
+        }
+
+        const totalProcessed = connReqLeads.length + msgLeads.length;
+
+        // 6. Mark campaign as active (or completed when all done) and set launched_at
         await pool.query("UPDATE campaigns SET status = 'active', launched_at = COALESCE(launched_at, NOW()) WHERE id = $1", [id]);
 
-        // 6. Mark campaign leads as completed so the scheduler will not pick them up
+        // 7. Mark campaign leads as completed
         if (leadIds.length > 0) {
             await pool.query(
-                `
-                UPDATE campaign_leads 
-                SET status = 'completed', last_activity_at = NOW(), next_action_due = NULL 
-                WHERE campaign_id = $1 AND lead_id = ANY($2::int[])
-                `,
+                `UPDATE campaign_leads
+                 SET status = 'completed', last_activity_at = NOW(), next_action_due = NULL
+                 WHERE campaign_id = $1 AND lead_id = ANY($2::int[])`,
                 [id, leadIds]
             );
         }
 
-        const campaignName = campaignRes.rows[0]?.name || 'Campaign';
+        await addLaunchLog(id, "complete", `Campaign completed; Pause button hidden`);
+
+        const campaignName = campaignRes.rows[0]?.name || "Campaign";
         await NotificationService.create({
-            type: 'campaign_launched',
-            title: 'Campaign launched',
-            message: `${campaignName}: ${pendingLeads.rows.length} connection requests sent`,
-            data: { campaignId: parseInt(id, 10), leadsProcessed: pendingLeads.rows.length, link: `/campaigns/${id}` },
+            type: "campaign_launched",
+            title: "Campaign launched",
+            message: `${campaignName}: ${totalProcessed} lead(s) processed (connections + messages)`,
+            data: { campaignId: parseInt(id, 10), leadsProcessed: totalProcessed, link: `/campaigns/${id}` },
         });
 
         return res.json({
             success: true,
-            message: "Campaign launched successfully (connections sent, no automation flow).",
-            leadsProcessed: pendingLeads.rows.length,
-            phantomResult: result
+            message: `Campaign launched. ${connReqLeads.length} connection request(s), ${msgSent} message(s) sent via Message Sender.`,
+            leadsProcessed: totalProcessed,
+            connectionRequests: connReqLeads.length,
+            messagesSent: msgSent,
+            phantomResult: connResult,
         });
 
     } catch (err) {
         console.error("Launch Error:", err);
+        try {
+            await addLaunchLog(req.params.id, "error", err.message);
+        } catch (_) {}
         res.status(500).json({ error: err.message });
     }
 }

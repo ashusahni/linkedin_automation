@@ -630,6 +630,8 @@ router.get('/campaigns/:campaignId/activity', async (req, res) => {
         // Get recent automation logs for this campaign
         const logsResult = await pool.query(
             `SELECT 
+                al.id,
+                al.lead_id,
                 al.action, 
                 al.status, 
                 al.details, 
@@ -652,7 +654,7 @@ router.get('/campaigns/:campaignId/activity', async (req, res) => {
         const activities = logsResult.rows.map(log => {
             const details = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
             return {
-                id: log.id || Math.random(),
+                id: log.id,
                 action: log.action,
                 status: log.status,
                 lead_name: `${log.first_name || ''} ${log.last_name || ''}`.trim(),
@@ -660,7 +662,9 @@ router.get('/campaigns/:campaignId/activity', async (req, res) => {
                 step_type: log.step_type,
                 container_id: details?.container_id,
                 message_preview: log.generated_content ? log.generated_content.substring(0, 100) : null,
-                timestamp: log.created_at
+                timestamp: log.created_at,
+                reason: details?.reason ?? null,
+                connection_sent: details?.connection_sent ?? null
             };
         });
 

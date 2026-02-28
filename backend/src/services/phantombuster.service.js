@@ -367,7 +367,12 @@ class PhantomBusterService {
         // Still running
         await this.sleep(checkInterval);
       } catch (error) {
-        // If container not found, keep waiting
+        // Don't retry when we already know the container failed (our own throw) – e.g. message may contain "not found" from PhantomBuster output
+        if (error.message.includes("Container failed with exit code") || error.message.includes("Container failed:")) {
+          throw error;
+        }
+
+        // If container not found (from API), keep waiting
         if (error.message.includes("not found") || error.message.includes("404")) {
           console.log("⏳ Container not found yet, waiting...");
           await this.sleep(checkInterval);

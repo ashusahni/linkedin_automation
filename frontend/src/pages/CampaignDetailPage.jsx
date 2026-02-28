@@ -61,7 +61,7 @@ export default function CampaignDetailPage() {
     const [campaign, setCampaign] = useState(null);
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(true);
-    const validTabs = ['leads', 'analytics', 'approvals'];
+    const validTabs = ['leads', 'analytics', 'approvals', 'logs'];
     const tabFromUrl = searchParams.get('tab');
     const [activeTab, setActiveTab] = useState(validTabs.includes(tabFromUrl) ? tabFromUrl : 'leads'); // 'leads', 'analytics', 'approvals'
     const [editing, setEditing] = useState(false);
@@ -83,8 +83,10 @@ export default function CampaignDetailPage() {
     const [approvalStatuses, setApprovalStatuses] = useState({}); // { approvalId: { status, containerId, sentAt } }
     const [recentActivity, setRecentActivity] = useState([]); // Recent sending activity
     const [regeneratingId, setRegeneratingId] = useState(null);
-    const [actioningId, setActioningId] = useState(null);
-    const [bulkActioning, setBulkActioning] = useState(false);
+    const [actioningApproveIds, setActioningApproveIds] = useState([]);
+    const [actioningRejectIds, setActioningRejectIds] = useState([]);
+    const [bulkApproving, setBulkApproving] = useState(false);
+    const [bulkRejecting, setBulkRejecting] = useState(false);
     const [bulkPersonalizing, setBulkPersonalizing] = useState(false);
     const [showBulkPersonalizeModal, setShowBulkPersonalizeModal] = useState(false);
     const [bulkPersonalizeOptions, setBulkPersonalizeOptions] = useState({
@@ -97,6 +99,9 @@ export default function CampaignDetailPage() {
 
     // Approval Gate Modal State
     const [showApprovalGateModal, setShowApprovalGateModal] = useState(false);
+
+    // Launch logs (temporary - for debugging launch flow)
+    const [launchLogs, setLaunchLogs] = useState([]);
 
     // Launch limits (2/day, 8/week): block Launch when at limit unless bypass for testing
     const [launchesToday, setLaunchesToday] = useState({ count: 0, limit: 2, countWeek: 0, limitWeek: 8 });
@@ -120,6 +125,10 @@ export default function CampaignDetailPage() {
     const [outreachChannel, setOutreachChannel] = useState(null); // 'email' or 'sms'
 
     useEffect(() => {
+        if (!id) {
+            setLoading(false);
+            return;
+        }
         fetchCampaignDetails();
     }, [id]);
 
@@ -139,6 +148,14 @@ export default function CampaignDetailPage() {
             // Refresh activity every 10 seconds
             const interval = setInterval(fetchRecentActivity, 10000);
             return () => clearInterval(interval);
+        }
+    }, [activeTab, id]);
+
+    useEffect(() => {
+        if (activeTab === 'logs' && id) {
+            axios.get(`/api/campaigns/${id}/launch-logs`).then((r) => {
+                setLaunchLogs(Array.isArray(r.data) ? r.data : []);
+            }).catch(() => setLaunchLogs([]));
         }
     }, [activeTab, id]);
 
@@ -162,6 +179,7 @@ export default function CampaignDetailPage() {
     }, [approvals]);
 
     const fetchCampaignDetails = async () => {
+        if (!id) return;
         try {
             setLoading(true);
             const [campaignRes, leadsRes] = await Promise.all([
@@ -229,6 +247,20 @@ export default function CampaignDetailPage() {
             setSelectedLeads([]);
         } else {
             setSelectedLeads(leads.map(l => l.lead_id || l.id));
+        }
+    };
+
+    const handleRemoveFromCampaign = async (leadIdsToRemove) => {
+        const ids = Array.isArray(leadIdsToRemove) ? leadIdsToRemove : [leadIdsToRemove];
+        if (ids.length === 0) return;
+        if (!window.confirm(`Remove ${ids.length} lead(s) from this campaign? They will no longer receive messages from this campaign.`)) return;
+        try {
+            const res = await axios.delete(`/api/campaigns/${id}/leads`, { data: { leadIds: ids } });
+            addToast(res.data?.message || `Removed ${ids.length} lead(s) from campaign`, 'success');
+            setSelectedLeads(prev => prev.filter(id => !ids.includes(id)));
+            fetchCampaignDetails();
+        } catch (e) {
+            addToast(e.response?.data?.error || 'Failed to remove leads from campaign', 'error');
         }
     };
 
@@ -349,7 +381,10 @@ export default function CampaignDetailPage() {
             return;
         }
 
-        setBulkActioning(true);
+        setBulkApproving(true);
+        const timeoutId = setTimeout(() => {
+            setBulkApproving(false);
+        }, 90000); // Safety: stop loading after 90s if API hangs
         try {
             await axios.post('/api/sow/approvals/bulk-approve', { ids: selectedApprovals });
             addToast(`Approved ${selectedApprovals.length} messages`, 'success');
@@ -361,7 +396,8 @@ export default function CampaignDetailPage() {
             const errorMsg = error.response?.data?.error || error.message || 'Failed to approve messages';
             addToast(`Error: ${errorMsg}`, 'error');
         } finally {
-            setBulkActioning(false);
+            clearTimeout(timeoutId);
+            setBulkApproving(false);
         }
     };
 
@@ -371,7 +407,10 @@ export default function CampaignDetailPage() {
             return;
         }
 
-        setBulkActioning(true);
+        setBulkRejecting(true);
+        const timeoutId = setTimeout(() => {
+            setBulkRejecting(false);
+        }, 90000);
         try {
             await axios.post('/api/sow/approvals/bulk-reject', { ids: selectedApprovals });
             addToast(`Rejected ${selectedApprovals.length} messages`, 'success');
@@ -382,7 +421,8 @@ export default function CampaignDetailPage() {
             const errorMsg = error.response?.data?.error || error.message || 'Failed to reject messages';
             addToast(`Error: ${errorMsg}`, 'error');
         } finally {
-            setBulkActioning(false);
+            clearTimeout(timeoutId);
+            setBulkRejecting(false);
         }
     };
 
@@ -559,9 +599,14 @@ export default function CampaignDetailPage() {
 
     const atLaunchLimit = limitEnforced && (launchesToday.count >= launchesToday.limit || launchesToday.countWeek >= launchesToday.limitWeek);
 
+    const [launchInProgress, setLaunchInProgress] = useState(false);
+
     const handleLaunch = async () => {
-        // APPROVAL GATE: Check for pending approvals before activating
-        const pendingApprovals = approvals.filter(a => a.status === 'pending');
+        // APPROVAL GATE: only LinkedIn approvals should block launch.
+        // Gmail drafts are optional and should not prevent Play.
+        const pendingApprovals = approvals.filter(
+            (a) => a.status === 'pending' && ['connection_request', 'message'].includes(a.step_type)
+        );
         if (pendingApprovals.length > 0) {
             setShowApprovalGateModal(true);
             return;
@@ -570,13 +615,21 @@ export default function CampaignDetailPage() {
             addToast(`Daily limit reached (${launchesToday.limit} campaigns/day). You can still create and edit campaigns.`, 'warning');
             return;
         }
+        const previousStatus = campaign?.status;
+        setLaunchInProgress(true);
+        setCampaign((prev) => (prev ? { ...prev, status: 'active' } : prev));
+        setLaunchesToday((prev) => ({ ...prev, count: prev.count + 1 }));
         try {
             await axios.post(`/api/campaigns/${id}/launch`, limitEnforced ? {} : { bypassLimit: true });
             addToast('Campaign activated. Scheduler will begin processing leads.', 'success');
-            setLaunchesToday((prev) => ({ ...prev, count: prev.count + 1 }));
             fetchCampaignDetails();
+            axios.get(`/api/campaigns/${id}/launch-logs`).then((r) => {
+                setLaunchLogs(Array.isArray(r.data) ? r.data : []);
+                setActiveTab('logs');
+            }).catch(() => {});
         } catch (error) {
-            console.error('Launch failed:', error);
+            setCampaign((prev) => (prev ? { ...prev, status: previousStatus } : prev));
+            setLaunchesToday((prev) => ({ ...prev, count: Math.max(0, prev.count - 1) }));
             const data = error.response?.data;
             if (data?.code === 'CAMPAIGN_ALREADY_RUNNING') {
                 setQueuedRunningName(data.runningCampaignName || 'A campaign');
@@ -590,6 +643,8 @@ export default function CampaignDetailPage() {
             }
             const errorMsg = data?.error || error.message || 'Launch failed. Please check your settings.';
             addToast(`Error: ${errorMsg}`, 'error');
+        } finally {
+            setLaunchInProgress(false);
         }
     };
 
@@ -647,7 +702,7 @@ export default function CampaignDetailPage() {
 
     if (loading) {
         return (
-            <div className="p-8">
+            <div className="min-h-[60vh] p-8">
                 <CampaignSkeleton />
             </div>
         );
@@ -655,16 +710,19 @@ export default function CampaignDetailPage() {
 
     if (!campaign) {
         return (
-            <div className="flex flex-col items-center justify-center p-20 text-center">
+            <div className="min-h-[40vh] flex flex-col items-center justify-center p-20 text-center">
                 <AlertCircle className="w-12 h-12 text-muted-foreground/50 mb-4" />
                 <h2 className="text-xl font-bold text-white mb-2">Campaign not found</h2>
-                <Button onClick={() => navigate('/campaigns')}>Back to list</Button>
+                <p className="text-muted-foreground mb-4">The campaign may have been deleted or the link is invalid.</p>
+                <Button onClick={() => navigate('/campaigns')}>Back to campaigns</Button>
             </div>
         );
     }
 
     const stats = campaign.stats || { pending: 0, sent: 0, replied: 0, failed: 0 };
-    const pendingApprovalCount = approvals.filter(a => a.status === 'pending').length;
+    const pendingApprovalCount = approvals.filter(
+        (a) => a.status === 'pending' && ['connection_request', 'message'].includes(a.step_type)
+    ).length;
     const hasMessageSteps = (campaign.sequences || []).some(s => ['message', 'connection_request', 'gmail_outreach'].includes(s.type));
     const totalLeads = leads.length;
 
@@ -734,7 +792,7 @@ export default function CampaignDetailPage() {
                                 </TooltipTrigger>
                                 <TooltipContent side="bottom">Pause Campaign</TooltipContent>
                             </Tooltip>
-                        ) : campaign.status === 'paused' ? (
+                        ) : campaign.status === 'completed' ? null : campaign.status === 'paused' ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button onClick={handleResume} size="icon" className="h-9 w-9 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 hover:border-emerald-500/50">
@@ -750,15 +808,19 @@ export default function CampaignDetailPage() {
                                         <Button
                                             onClick={handleLaunch}
                                             size="sm"
-                                            disabled={atLaunchLimit}
+                                            disabled={atLaunchLimit || launchInProgress}
                                             className="gap-1.5 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white border-0 shadow-lg shadow-emerald-500/25 disabled:opacity-60 disabled:pointer-events-none"
                                         >
-                                            <Play className="w-3.5 h-3.5" /> Launch
+                                            {launchInProgress ? (
+                                                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Launching...</>
+                                            ) : (
+                                                <><Play className="w-3.5 h-3.5" /> Launch</>
+                                            )}
                                         </Button>
                                     </span>
                                 </TooltipTrigger>
                                 <TooltipContent side="bottom">
-                                    {atLaunchLimit ? `Limit reached (${launchesToday.limit}/day or ${launchesToday.limitWeek}/week). You can still create campaigns.` : 'Launch Campaign'}
+                                    {launchInProgress ? 'Campaign is launching…' : atLaunchLimit ? `Limit reached (${launchesToday.limit}/day or ${launchesToday.limitWeek}/week). You can still create campaigns.` : 'Launch Campaign'}
                                 </TooltipContent>
                             </Tooltip>
                         )}
@@ -979,7 +1041,8 @@ export default function CampaignDetailPage() {
                     { id: 'sequence', label: 'Sequence', badge: campaign.sequences?.length ?? 0 },
                     { id: 'leads', label: 'Leads', badge: leads.length },
                     { id: 'approvals', label: 'Approvals', badge: pendingApprovalCount > 0 ? pendingApprovalCount : approvals.length, urgent: pendingApprovalCount > 0 },
-                    { id: 'analytics', label: 'Analytics', badge: null }
+                    { id: 'analytics', label: 'Analytics', badge: null },
+                    { id: 'logs', label: 'Launch Logs', badge: launchLogs.length > 0 ? launchLogs.length : null }
                 ].map((tab) => (
                     <button
                         key={tab.id}
@@ -1158,6 +1221,30 @@ export default function CampaignDetailPage() {
                         )}
 
                         <CardContent>
+                            {/* Selection bar: remove from campaign */}
+                            {Array.isArray(selectedLeads) && selectedLeads.length > 0 && (
+                                <div className="mb-4 p-3 rounded-xl bg-primary/10 border border-primary/20 flex flex-wrap items-center justify-between gap-2">
+                                    <span className="text-sm font-medium text-primary flex items-center gap-2">
+                                        <CheckCircle2 className="h-4 w-4" />
+                                        {selectedLeads.length} lead{selectedLeads.length !== 1 ? 's' : ''} selected
+                                    </span>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                                            onClick={() => handleRemoveFromCampaign(selectedLeads)}
+                                        >
+                                            <Trash2 className="w-4 h-4 mr-1.5" />
+                                            Remove from campaign
+                                        </Button>
+                                        <Button size="sm" variant="ghost" onClick={() => setSelectedLeads([])}>
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Scheduler Flow Banner */}
                             <div className="mb-4 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
                                 <div className="flex items-start gap-3">
@@ -1211,6 +1298,7 @@ export default function CampaignDetailPage() {
                                         selectedLeads={selectedLeads}
                                         onToggleLead={toggleSelectLead}
                                         onToggleAll={toggleSelectAllLeads}
+                                        onRemoveLead={handleRemoveFromCampaign}
                                     />
                                 );
                             })()}
@@ -1276,7 +1364,7 @@ export default function CampaignDetailPage() {
                                     ) : (
                                         <div className="space-y-3 max-h-64 overflow-y-auto">
                                             {recentActivity.map((activity, idx) => (
-                                                <div key={idx} className="flex items-start gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                                                <div key={activity.id ?? idx} className="flex items-start gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
                                                     <div className={cn(
                                                         "w-2 h-2 rounded-full mt-2 flex-shrink-0",
                                                         activity.status === 'sent' && "bg-green-500",
@@ -1302,9 +1390,19 @@ export default function CampaignDetailPage() {
                                                                 activity.status === 'sent' && "border-green-500/50 text-green-500",
                                                                 activity.status === 'failed' && "border-red-500/50 text-red-500"
                                                             )}>
-                                                                {activity.status === 'sent' ? '✓ Sent' : activity.status}
+                                                                {activity.status === 'sent' ? '✓ Sent' : activity.status === 'failed' ? '✗ Failed' : activity.status}
                                                             </Badge>
                                                         </div>
+                                                        {activity.status === 'failed' && activity.reason && (
+                                                            <p className="text-xs text-red-400/90 mb-1">
+                                                                {activity.reason}
+                                                            </p>
+                                                        )}
+                                                        {activity.status === 'failed' && activity.connection_sent && (
+                                                            <p className="text-xs text-blue-400/90 mb-1">
+                                                                Connection request was sent; follow-up message failed (e.g. not connected yet or Premium limit).
+                                                            </p>
+                                                        )}
                                                         {activity.message_preview && (
                                                             <p className="text-xs text-muted-foreground mb-1 line-clamp-1">
                                                                 {activity.message_preview}...
@@ -1395,30 +1493,30 @@ export default function CampaignDetailPage() {
                                                 <Button
                                                     variant="outline"
                                                     onClick={handleRejectSelected}
-                                                    disabled={bulkActioning}
+                                                    disabled={bulkApproving || bulkRejecting}
                                                     className="gap-2 border-red-500/50 text-red-500 hover:bg-red-500/10 disabled:opacity-50"
                                                 >
-                                                    {bulkActioning ? (
+                                                    {bulkRejecting ? (
                                                         <Loader2 className="w-4 h-4 animate-spin" />
                                                     ) : (
                                                         <XCircle className="w-4 h-4" />
                                                     )}
-                                                    Reject ({selectedInTab.length})
+                                                    {bulkRejecting ? 'Rejecting...' : `Reject (${selectedInTab.length})`}
                                                 </Button>
                                                 <Button
                                                     onClick={handleApproveSelected}
-                                                    disabled={bulkActioning}
+                                                    disabled={bulkApproving || bulkRejecting}
                                                     className={cn(
                                                         "gap-2 bg-green-600 hover:bg-green-500 transition-all duration-200",
-                                                        bulkActioning && "bg-green-600/80 cursor-wait opacity-80"
+                                                        bulkApproving && "bg-green-600/80 cursor-wait opacity-80"
                                                     )}
                                                 >
-                                                    {bulkActioning ? (
+                                                    {bulkApproving ? (
                                                         <Loader2 className="w-4 h-4 animate-spin" />
                                                     ) : (
                                                         <CheckCheck className="w-4 h-4" />
                                                     )}
-                                                    {bulkActioning ? 'Processing...' : `Approve (${selectedInTab.length})`}
+                                                    {bulkApproving ? 'Approving...' : `Approve (${selectedInTab.length})`}
                                                 </Button>
                                             </>
                                         ) : null;
@@ -1708,11 +1806,15 @@ export default function CampaignDetailPage() {
                                                             <Button
                                                                 size="sm"
                                                                 variant="outline"
-                                                                disabled={actioningId === approval.id}
+                                                                disabled={actioningRejectIds.includes(approval.id) || actioningApproveIds.includes(approval.id)}
                                                                 onClick={async () => {
+                                                                    const id = approval.id;
+                                                                    const timeoutId = setTimeout(() => {
+                                                                        setActioningRejectIds(prev => prev.filter((x) => x !== id));
+                                                                    }, 60000);
                                                                     try {
-                                                                        setActioningId(approval.id);
-                                                                        await axios.post(`/api/sow/approvals/${approval.id}/review`, { action: 'reject' });
+                                                                        setActioningRejectIds(prev => (prev.includes(id) ? prev : [...prev, id]));
+                                                                        await axios.post(`/api/sow/approvals/${id}/review`, { action: 'reject' });
                                                                         addToast('Message rejected', 'info');
                                                                         fetchApprovals();
                                                                     } catch (error) {
@@ -1720,12 +1822,13 @@ export default function CampaignDetailPage() {
                                                                         const errorMsg = error.response?.data?.error || error.message || 'Failed to reject message';
                                                                         addToast(`Error: ${errorMsg}`, 'error');
                                                                     } finally {
-                                                                        setActioningId(null);
+                                                                        clearTimeout(timeoutId);
+                                                                        setActioningRejectIds(prev => prev.filter((x) => x !== id));
                                                                     }
                                                                 }}
                                                                 className="border-red-500/30 text-red-500 hover:bg-red-500/10 disabled:opacity-50 transition-all duration-200"
                                                             >
-                                                                {actioningId === approval.id ? (
+                                                                {actioningRejectIds.includes(approval.id) ? (
                                                                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                                                                 ) : (
                                                                     <XCircle className="w-4 h-4 mr-2" />
@@ -1734,59 +1837,59 @@ export default function CampaignDetailPage() {
                                                             </Button>
                                                             <Button
                                                                 size="sm"
-                                                                disabled={actioningId === approval.id}
+                                                                disabled={actioningRejectIds.includes(approval.id) || actioningApproveIds.includes(approval.id)}
                                                                 onClick={async () => {
+                                                                    const id = approval.id;
+                                                                    const timeoutId = setTimeout(() => {
+                                                                        setActioningApproveIds(prev => prev.filter((x) => x !== id));
+                                                                    }, 60000);
                                                                     try {
-                                                                        setActioningId(approval.id);
-                                                                        await axios.post(`/api/sow/approvals/${approval.id}/review`, { action: 'approve' });
-                                                                        addToast('✅ Message approved! Scheduler will send within 1 minute.', 'success');
+                                                                        setActioningApproveIds(prev => (prev.includes(id) ? prev : [...prev, id]));
+                                                                        await axios.post(`/api/sow/approvals/${id}/review`, { action: 'approve' });
+                                                                        addToast('✅ Message approved. It will be sent when you press the Launch button.', 'success');
                                                                         fetchApprovals();
                                                                         fetchCampaignDetails();
-                                                                        fetchRecentActivity(); // Refresh activity
+                                                                        fetchRecentActivity();
 
-                                                                        // Immediately check status
-                                                                        checkApprovalStatus(approval.id);
+                                                                        checkApprovalStatus(id);
 
-                                                                        // Start aggressive polling for status (every 3 seconds for first minute, then every 10 seconds)
                                                                         let pollCount = 0;
                                                                         const statusInterval = setInterval(() => {
                                                                             pollCount++;
-                                                                            checkApprovalStatus(approval.id);
-                                                                            fetchRecentActivity(); // Also refresh activity
+                                                                            checkApprovalStatus(id);
+                                                                            fetchRecentActivity();
 
-                                                                            // After 20 polls (60 seconds), slow down to every 10 seconds
                                                                             if (pollCount > 20) {
                                                                                 clearInterval(statusInterval);
                                                                                 const slowInterval = setInterval(() => {
-                                                                                    checkApprovalStatus(approval.id);
+                                                                                    checkApprovalStatus(id);
                                                                                     fetchRecentActivity();
                                                                                 }, 10000);
-                                                                                // Stop after 5 more minutes
                                                                                 setTimeout(() => clearInterval(slowInterval), 300000);
                                                                             }
-                                                                        }, 3000); // Check every 3 seconds initially
+                                                                        }, 3000);
 
-                                                                        // Stop polling after 6 minutes total
                                                                         setTimeout(() => clearInterval(statusInterval), 360000);
                                                                     } catch (error) {
                                                                         console.error('Failed to approve:', error);
                                                                         const errorMsg = error.response?.data?.error || error.message || 'Failed to approve message';
                                                                         addToast(`Error: ${errorMsg}`, 'error');
                                                                     } finally {
-                                                                        setActioningId(null);
+                                                                        clearTimeout(timeoutId);
+                                                                        setActioningApproveIds(prev => prev.filter((x) => x !== id));
                                                                     }
                                                                 }}
                                                                 className={cn(
                                                                     "bg-green-600 hover:bg-green-500 transition-all duration-200",
-                                                                    actioningId === approval.id && "bg-green-600/80 cursor-wait opacity-80"
+                                                                    actioningApproveIds.includes(approval.id) && "bg-green-600/80 cursor-wait opacity-80"
                                                                 )}
                                                             >
-                                                                {actioningId === approval.id ? (
+                                                                {actioningApproveIds.includes(approval.id) ? (
                                                                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                                                                 ) : (
                                                                     <Send className="w-4 h-4 mr-2" />
                                                                 )}
-                                                                {actioningId === approval.id ? 'Approving...' : 'Approve'}
+                                                                {actioningApproveIds.includes(approval.id) ? 'Approving...' : 'Approve'}
                                                             </Button>
                                                         </div>
                                                     </div>
@@ -2054,6 +2157,34 @@ export default function CampaignDetailPage() {
                         </Card>
                     </motion.div>
                 )}
+
+                {activeTab === 'logs' && (
+                    <Card className="bg-card/40 border-white/5">
+                        <CardHeader>
+                            <CardTitle className="text-white flex items-center gap-2">
+                                <div className="p-1.5 rounded-lg bg-primary/20"><RefreshCw className="w-4 h-4 text-primary" /></div>
+                                Launch Logs (Temporary)
+                            </CardTitle>
+                            <CardDescription>
+                                Flow: Check lead → 1st degree? Skip Auto Connect : Launch Auto Connect → Wait → Message Sender → Wait → Gmail approved? Send mail → Complete → Pause hidden
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {launchLogs.length === 0 ? (
+                                <p className="text-sm text-muted-foreground py-6">No launch logs yet. Launch the campaign to see the flow.</p>
+                            ) : (
+                                <ul className="space-y-1.5 font-mono text-xs max-h-[400px] overflow-y-auto">
+                                    {launchLogs.map((log, i) => (
+                                        <li key={log.id || i} className="flex gap-2 py-1.5 px-2 rounded bg-white/5 border-l-2 border-primary/30">
+                                            <span className="text-muted-foreground shrink-0">{new Date(log.ts || log.created_at).toLocaleTimeString()}</span>
+                                            <span className="text-foreground">{log.step}: {log.message}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
             </div>
 
             {/* Approval Gate Modal */}
@@ -2077,7 +2208,7 @@ export default function CampaignDetailPage() {
                         <div className="px-6 py-4 space-y-3">
                             <div className="p-4 bg-amber-500/5 border border-amber-500/15 rounded-xl">
                                 <p className="text-sm text-amber-200 font-medium mb-1">
-                                    {pendingApprovalCount} message{pendingApprovalCount !== 1 ? 's' : ''} awaiting approval
+                                    {pendingApprovalCount} LinkedIn message{pendingApprovalCount !== 1 ? 's' : ''} awaiting approval
                                 </p>
                                 <p className="text-xs text-muted-foreground">
                                     The scheduler requires at least one approved message before it can begin sending outreach on your behalf.

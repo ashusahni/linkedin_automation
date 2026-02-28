@@ -6,7 +6,9 @@ import {
     updateCampaign,
     duplicateCampaign,
     addLeadsToCampaign,
+    removeLeadsFromCampaign,
     launchCampaign,
+    getLaunchLogs,
     getLaunchesToday,
     deleteCampaign,
     addSequenceStep,
@@ -30,11 +32,13 @@ router.get('/launches-today', getLaunchesToday);
 router.get('/templates', getCampaignTemplates);
 router.post('/estimate-audience', estimateAudience);
 router.post('/', createCampaign);
+router.get('/:id/launch-logs', getLaunchLogs);
 router.get('/:id', getCampaignById);
 router.put('/:id', updateCampaign);
 router.post('/:id/duplicate', duplicateCampaign);
 router.get('/:id/leads', getCampaignLeads);
 router.post('/:id/leads', addLeadsToCampaign);
+router.delete('/:id/leads', removeLeadsFromCampaign);
 router.post('/:id/launch', launchCampaign);
 router.put('/:id/pause', pauseCampaign);
 router.put('/:id/resume', resumeCampaign);

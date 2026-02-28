@@ -27,17 +27,18 @@ function ErrorHandler({ children }) {
                     error.message ||
                     'An unexpected error occurred';
 
-                // Log to console for debugging
-                console.error('🔴 API Error:', {
-                    url: error.config?.url,
-                    method: error.config?.method,
-                    status: error.response?.status,
-                    message: errorMessage,
-                    fullError: error
-                });
+                // Log to console only when not skipped (e.g. notification poll uses skipGlobalErrorHandler to avoid noise)
+                if (!error.config?.skipGlobalErrorHandler) {
+                    console.error('🔴 API Error:', {
+                        url: error.config?.url,
+                        method: error.config?.method,
+                        status: error.response?.status,
+                        message: errorMessage,
+                        fullError: error
+                    });
+                }
 
                 // Show error in UI (only if not already handled by component)
-                // Components can prevent this by setting skipGlobalErrorHandler: true in config
                 if (!error.config?.skipGlobalErrorHandler) {
                     // Don't show errors for 401/403 (auth) - let components handle those
                     if (error.response?.status !== 401 && error.response?.status !== 403) {

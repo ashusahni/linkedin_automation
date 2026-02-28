@@ -80,17 +80,12 @@ export const ApprovalService = {
         if (!item) throw new Error('Approval not found or already processed');
 
         if (action === 'approve') {
-            if (['connection_request', 'message'].includes(item.step_type)) {
-                try {
-                    const { sendApprovedLeadImmediately } = await import('./outreach.service.js');
-                    await sendApprovedLeadImmediately(item.campaign_id, item.lead_id, item.step_type, item.generated_content, item.id);
-                } catch (err) {
-                    console.error('Outreach send on approve failed:', err.message);
-                    await pool.query(`UPDATE campaign_leads SET status = 'pending', next_action_due = NOW() WHERE campaign_id = $1 AND lead_id = $2`, [item.campaign_id, item.lead_id]);
-                }
-            } else {
-                await pool.query(`UPDATE campaign_leads SET status = 'pending', next_action_due = NOW() WHERE campaign_id = $1 AND lead_id = $2`, [item.campaign_id, item.lead_id]);
-            }
+            // Only mark as approved and set campaign_lead to pending (ready to send).
+            // Actual send happens when user presses the top Launch button.
+            await pool.query(
+                `UPDATE campaign_leads SET status = 'pending', next_action_due = NOW() WHERE campaign_id = $1 AND lead_id = $2`,
+                [item.campaign_id, item.lead_id]
+            );
         }
 
         return result.rows[0];
@@ -106,35 +101,12 @@ export const ApprovalService = {
             [ids]
         );
 
-        // Immediately send for each approved lead (connection_request or message)
+        // Mark as approved only; do not send. Sending happens when user presses Launch.
         for (const item of result.rows) {
-            if (['connection_request', 'message'].includes(item.step_type)) {
-                try {
-                    const { sendApprovedLeadImmediately } = await import('./outreach.service.js');
-                    await sendApprovedLeadImmediately(
-                        item.campaign_id,
-                        item.lead_id,
-                        item.step_type,
-                        item.generated_content,
-                        item.id
-                    );
-                } catch (err) {
-                    console.error(`Outreach send for lead ${item.lead_id} failed:`, err.message);
-                    await pool.query(
-                        `UPDATE campaign_leads 
-                         SET status = 'pending', next_action_due = NOW()
-                         WHERE campaign_id = $1 AND lead_id = $2`,
-                        [item.campaign_id, item.lead_id]
-                    );
-                }
-            } else {
-                await pool.query(
-                    `UPDATE campaign_leads 
-                     SET status = 'pending', next_action_due = NOW()
-                     WHERE campaign_id = $1 AND lead_id = $2`,
-                    [item.campaign_id, item.lead_id]
-                );
-            }
+            await pool.query(
+                `UPDATE campaign_leads SET status = 'pending', next_action_due = NOW() WHERE campaign_id = $1 AND lead_id = $2`,
+                [item.campaign_id, item.lead_id]
+            );
         }
 
         // Create per-campaign notification summarizing queued work
