@@ -151,7 +151,7 @@ export default function DashboardLayout() {
 
     return (
         <TimeFilterProvider>
-            <div className="min-h-screen bg-background flex text-foreground font-sans">
+            <div className="min-h-screen bg-background flex text-foreground font-sans overflow-x-hidden">
                 {/* ── Aurora background ── */}
                 <div className="aurora-bg" aria-hidden="true" />
                 <div className="dot-grid fixed inset-0 -z-[1] pointer-events-none" aria-hidden="true" />
@@ -396,16 +396,16 @@ export default function DashboardLayout() {
 
                 {/* ── Main Content ── */}
                 <main className={cn(
-                    "flex-1 flex flex-col min-h-screen transition-all duration-300 ease-out",
+                    "flex-1 flex flex-col min-h-screen min-w-0 transition-all duration-300 ease-out",
                     sidebarOpen ? "ml-[240px]" : "ml-[68px]"
                 )}>
                     {/* ── Top Header ── */}
-                    <header className="h-[64px] sticky top-0 z-20 px-6 flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
+                    <header className="h-[64px] sticky top-0 z-20 px-4 sm:px-6 flex items-center justify-between gap-2 min-w-0 overflow-hidden shrink-0">
+                        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                             {/* Sidebar toggle */}
                             <button
                                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150"
+                                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 shrink-0"
                                 aria-label="Toggle sidebar"
                             >
                                 <Menu className="w-4 h-4" />
@@ -413,19 +413,19 @@ export default function DashboardLayout() {
 
                             {/* Breadcrumb */}
                             {currentPage && (
-                                <div className="hidden sm:flex items-center gap-1.5 text-sm">
+                                <div className="hidden sm:flex items-center gap-1.5 text-sm min-w-0">
                                     {currentPage.parent && (
                                         <>
-                                            <span className="text-muted-foreground font-medium">{currentPage.parent}</span>
-                                            <span className="text-border">/</span>
+                                            <span className="text-muted-foreground font-medium truncate">{currentPage.parent}</span>
+                                            <span className="text-border shrink-0">/</span>
                                         </>
                                     )}
-                                    <span className="font-semibold text-foreground">{currentPage.label}</span>
+                                    <span className="font-semibold text-foreground truncate">{currentPage.label}</span>
                                 </div>
                             )}
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                             <button
                                 onClick={() => setIsDarkMode((prev) => !prev)}
                                 className="w-9 h-9 rounded-lg border border-border/40 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150"
@@ -438,24 +438,24 @@ export default function DashboardLayout() {
                             {/* Notifications */}
                             <NotificationDropdown />
 
-                            {/* User chip */}
-                            <div className="hidden sm:flex items-center gap-2.5 pl-3 border-l border-border/40">
+                            {/* User chip: truncate so it never overflows */}
+                            <div className="hidden sm:flex items-center gap-2 pl-2 md:pl-3 border-l border-border/40 min-w-0 max-w-[180px] md:max-w-[220px]">
                                 {branding.profileImageUrl ? (
-                                    <img src={branding.profileImageUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-border" />
+                                    <img src={branding.profileImageUrl} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-border shrink-0" />
                                 ) : (
-                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground font-bold text-xs ring-2 ring-primary/20">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/80 to-primary flex items-center justify-center text-primary-foreground font-bold text-xs ring-2 ring-primary/20 shrink-0">
                                         {initials}
                                     </div>
                                 )}
-                                <div className="flex flex-col">
-                                    <span className="text-sm font-semibold text-foreground leading-none">{displayName}</span>
+                                <div className="flex flex-col min-w-0 flex-1">
+                                    <span className="text-sm font-semibold text-foreground leading-none truncate">{displayName}</span>
                                     {branding.linkedinAccountName ? (
-                                        <span className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                                            {branding.linkedinAccountName}
+                                        <span className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shrink-0" />
+                                            <span className="truncate">{branding.linkedinAccountName}</span>
                                         </span>
                                     ) : (
-                                        <span className="text-[11px] text-muted-foreground mt-0.5">Better conversations, by design.</span>
+                                        <span className="text-[11px] text-muted-foreground mt-0.5 truncate" title="Better conversations, by design.">Better conversations, by design.</span>
                                     )}
                                 </div>
                             </div>
@@ -463,7 +463,7 @@ export default function DashboardLayout() {
                     </header>
 
                     {/* ── Page Content ── (min-h-0 so flex child can shrink; overflow-auto so content scrolls within viewport) */}
-                    <div className="flex-1 min-h-0 overflow-auto p-6 md:p-8 max-w-[1440px] mx-auto w-full flex flex-col">
+                    <div className="flex-1 min-h-0 min-w-0 overflow-auto p-4 sm:p-6 md:p-8 max-w-[1440px] mx-auto w-full flex flex-col">
                         <div className="page-enter flex flex-col flex-1 min-h-0">
                             <Outlet />
                         </div>
