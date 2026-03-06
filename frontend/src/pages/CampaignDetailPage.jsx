@@ -6,7 +6,7 @@ import {
     XCircle, Clock, Edit2, Save, Plus, Trash2, Download,
     MessageSquare, Mail, Link as LinkIcon, ChevronRight, BarChart3, Settings as SettingsIcon,
     AlertCircle, AlertTriangle, Zap, Sparkles, Send, Eye, CheckCheck, Copy, Target, Tag, Flag,
-    Phone, Search, Smartphone, RefreshCw, Loader2, Info, Upload
+    Phone, Search, Smartphone, RefreshCw, Loader2, Info, Upload, LayoutDashboard, UserCheck
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -53,17 +53,101 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import CampaignLeadsTable from '../components/CampaignLeadsTable';
 
+function getFriendlyFailureCategory(rawReason) {
+    const reason = (rawReason || '').toLowerCase();
+    if (!reason) return 'Other delivery issue';
+
+    if (
+        reason.includes('limit') ||
+        reason.includes('quota') ||
+        reason.includes('maximum parallel') ||
+        reason.includes('daily') ||
+        reason.includes('weekly') ||
+        reason.includes('too many')
+    ) {
+        return 'Limit reached';
+    }
+
+    if (
+        reason.includes('privacy') ||
+        reason.includes('not connected') ||
+        reason.includes('cannot message') ||
+        reason.includes('not allowed') ||
+        reason.includes('premium')
+    ) {
+        return 'Privacy / connection restriction';
+    }
+
+    if (
+        reason.includes('not found') ||
+        reason.includes('invalid') ||
+        reason.includes('linkedin url') ||
+        reason.includes('profile')
+    ) {
+        return 'Profile issue';
+    }
+
+    if (
+        reason.includes('timeout') ||
+        reason.includes('fetch failed') ||
+        reason.includes('network') ||
+        reason.includes('temporarily')
+    ) {
+        return 'Temporary technical issue';
+    }
+
+    return 'Other delivery issue';
+}
+
+function getFriendlyFailureReason(rawReason) {
+    const category = getFriendlyFailureCategory(rawReason);
+    const cleaned = (rawReason || '').trim();
+
+    if (!cleaned) {
+        if (category === 'Limit reached') return 'LinkedIn sending limit was reached for this account.';
+        if (category === 'Privacy / connection restriction') return 'LinkedIn privacy or connection settings blocked this action.';
+        if (category === 'Profile issue') return 'This lead profile could not be reached or was invalid.';
+        if (category === 'Temporary technical issue') return 'A temporary delivery issue happened. You can retry later.';
+        return 'The action could not be completed.';
+    }
+
+    return cleaned.length > 150 ? `${cleaned.slice(0, 150)}...` : cleaned;
+}
+
+const CAMPAIGN_GOAL_OPTIONS = [
+    { value: 'grow_connections', label: 'Grow Connections', type: 'standard' },
+    { value: 'first_degree_message', label: '1st Degree Message', type: 'nurture' },
+    { value: 'event_promotion', label: 'Event Promotion', type: 'event', needsRegistrationLink: true },
+    { value: 'webinar', label: 'Webinar', type: 'webinar', needsRegistrationLink: true },
+    { value: 're_engage', label: 'Re-engage', type: 're_engagement' },
+    { value: 'cold_outreach', label: 'Cold Outreach', type: 'cold_outreach' },
+];
+
+function inferCampaignGoal(campaign = {}) {
+    const goalValue = campaign.goal || '';
+    const typeValue = campaign.type || '';
+    if (CAMPAIGN_GOAL_OPTIONS.some((g) => g.value === goalValue)) return goalValue;
+    if (typeValue === 'standard') return 'grow_connections';
+    if (typeValue === 'nurture') return 'first_degree_message';
+    if (typeValue === 'event') return 'event_promotion';
+    if (typeValue === 'webinar') return 'webinar';
+    if (typeValue === 're_engagement') return 're_engage';
+    if (typeValue === 'cold_outreach') return 'cold_outreach';
+    return 'grow_connections';
+}
+
 export default function CampaignDetailPage() {
     const { id } = useParams();
     const navigate = useNavigate();
-    const [searchParams, setSearchParams] = useSearchParams();
+    const [searchParams] = useSearchParams();
     const { addToast } = useToast();
     const [campaign, setCampaign] = useState(null);
     const [leads, setLeads] = useState([]);
     const [loading, setLoading] = useState(true);
-    const validTabs = ['leads', 'analytics', 'approvals', 'logs'];
+    const validTabs = ['sequence', 'leads', 'dashboard', 'analytics', 'approvals', 'overview'];
     const tabFromUrl = searchParams.get('tab');
-    const [activeTab, setActiveTab] = useState(validTabs.includes(tabFromUrl) ? tabFromUrl : 'leads'); // 'leads', 'analytics', 'approvals'
+    const normalizedTab = tabFromUrl === 'logs' ? 'overview' : tabFromUrl;
+    const [activeTab, setActiveTab] = useState(validTabs.includes(normalizedTab) ? normalizedTab : 'leads');
     const [editing, setEditing] = useState(false);
     const [formData, setFormData] = useState({});
 
@@ -100,9 +184,6 @@ export default function CampaignDetailPage() {
     // Approval Gate Modal State
     const [showApprovalGateModal, setShowApprovalGateModal] = useState(false);
 
-    // Launch logs (temporary - for debugging launch flow)
-    const [launchLogs, setLaunchLogs] = useState([]);
-
     // Launch limits (2/day, 8/week): block Launch when at limit unless bypass for testing
     const [launchesToday, setLaunchesToday] = useState({ count: 0, limit: 2, countWeek: 0, limitWeek: 8 });
     const [limitEnforced, setLimitEnforced] = useState(true);
@@ -124,6 +205,14 @@ export default function CampaignDetailPage() {
 
     const [outreachChannel, setOutreachChannel] = useState(null); // 'email' or 'sms'
 
+    // Sync URL params so Email submenu can deep-link to Approvals > Gmail (e.g. ?tab=approvals&channel=gmail)
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        const channel = searchParams.get('channel');
+        if (tab && validTabs.includes(tab)) setActiveTab(tab);
+        if (channel === 'gmail') setApprovalSubTab('gmail');
+    }, [searchParams]);
+
     useEffect(() => {
         if (!id) {
             setLoading(false);
@@ -142,20 +231,12 @@ export default function CampaignDetailPage() {
     };
 
     useEffect(() => {
-        if (activeTab === 'approvals') {
+        if (activeTab === 'approvals' || activeTab === 'overview' || activeTab === 'dashboard') {
             fetchApprovals();
             fetchRecentActivity();
-            // Refresh activity every 10 seconds
+            if (activeTab === 'dashboard' || activeTab === 'overview') fetchCampaignDetails();
             const interval = setInterval(fetchRecentActivity, 10000);
             return () => clearInterval(interval);
-        }
-    }, [activeTab, id]);
-
-    useEffect(() => {
-        if (activeTab === 'logs' && id) {
-            axios.get(`/api/campaigns/${id}/launch-logs`).then((r) => {
-                setLaunchLogs(Array.isArray(r.data) ? r.data : []);
-            }).catch(() => setLaunchLogs([]));
         }
     }, [activeTab, id]);
 
@@ -188,7 +269,12 @@ export default function CampaignDetailPage() {
             ]);
 
             setCampaign(campaignRes.data);
-            setFormData(campaignRes.data);
+            const inferredGoal = inferCampaignGoal(campaignRes.data);
+            setFormData({
+                ...campaignRes.data,
+                campaign_goal: inferredGoal,
+                registration_link: campaignRes.data?.settings?.registration_link || ''
+            });
             setLeads(Array.isArray(leadsRes.data) ? leadsRes.data : []);
         } catch (error) {
             console.error('Failed to fetch campaign details', error);
@@ -530,8 +616,19 @@ export default function CampaignDetailPage() {
 
     const handleSaveMetadata = async () => {
         try {
-            await axios.put(`/api/campaigns/${id}`, formData);
-            setCampaign({ ...campaign, ...formData });
+            const selectedGoal = CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === (formData.campaign_goal || inferCampaignGoal(formData))) || CAMPAIGN_GOAL_OPTIONS[0];
+            const payload = {
+                ...formData,
+                goal: selectedGoal.value,
+                type: selectedGoal.type,
+                description: String(formData.description || '').trim(),
+                settings: {
+                    ...(formData.settings || {}),
+                    registration_link: (formData.registration_link || '').trim()
+                }
+            };
+            await axios.put(`/api/campaigns/${id}`, payload);
+            setCampaign({ ...campaign, ...payload });
             setEditing(false);
             addToast('Campaign settings updated', 'success');
         } catch (error) {
@@ -623,10 +720,8 @@ export default function CampaignDetailPage() {
             await axios.post(`/api/campaigns/${id}/launch`, limitEnforced ? {} : { bypassLimit: true });
             addToast('Campaign activated. Scheduler will begin processing leads.', 'success');
             fetchCampaignDetails();
-            axios.get(`/api/campaigns/${id}/launch-logs`).then((r) => {
-                setLaunchLogs(Array.isArray(r.data) ? r.data : []);
-                setActiveTab('logs');
-            }).catch(() => {});
+            fetchRecentActivity();
+            setActiveTab('overview');
         } catch (error) {
             setCampaign((prev) => (prev ? { ...prev, status: previousStatus } : prev));
             setLaunchesToday((prev) => ({ ...prev, count: Math.max(0, prev.count - 1) }));
@@ -641,8 +736,8 @@ export default function CampaignDetailPage() {
                 setLaunchesToday((prev) => ({ ...prev, count: data.launchesToday ?? prev.count, countWeek: data.launchesWeek ?? prev.countWeek }));
                 return;
             }
-            const errorMsg = data?.error || error.message || 'Launch failed. Please check your settings.';
-            addToast(`Error: ${errorMsg}`, 'error');
+            const errorMsg = data?.message || data?.error || error.message || 'Launch failed. Please check your settings.';
+            addToast(errorMsg, 'error', data?.helpUrl ? { helpUrl: data.helpUrl } : {});
         } finally {
             setLaunchInProgress(false);
         }
@@ -725,6 +820,24 @@ export default function CampaignDetailPage() {
     ).length;
     const hasMessageSteps = (campaign.sequences || []).some(s => ['message', 'connection_request', 'gmail_outreach'].includes(s.type));
     const totalLeads = leads.length;
+    const outreachActivities = recentActivity.filter((a) =>
+        ['send_message', 'send_connection_request'].includes(a.action)
+    );
+    const overviewSentCount = outreachActivities.filter((a) => a.status === 'sent').length;
+    const overviewFailedCount = outreachActivities.filter((a) => a.status === 'failed').length;
+    const overviewConnectionSentCount = outreachActivities.filter(
+        (a) => a.action === 'send_connection_request' && a.status === 'sent'
+    ).length;
+    const failureBuckets = outreachActivities
+        .filter((a) => a.status === 'failed')
+        .reduce((acc, item) => {
+            const key = getFriendlyFailureCategory(item.reason);
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+        }, {});
+    const failureBreakdown = Object.entries(failureBuckets)
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((a, b) => b.count - a.count);
 
     return (
         <div className="space-y-6 max-w-7xl mx-auto px-4 py-6 animate-in fade-in slide-in-from-bottom-3 duration-500">
@@ -865,45 +978,38 @@ export default function CampaignDetailPage() {
                                     placeholder="Campaign name"
                                 />
                             </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Type</label>
+                            <div className="space-y-2 md:col-span-2">
+                                <label className="text-sm font-medium">Campaign Goal</label>
                                 <select
                                     className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
-                                    value={formData.type || 'standard'}
-                                    onChange={e => setFormData({ ...formData, type: e.target.value })}
+                                    value={formData.campaign_goal || inferCampaignGoal(formData)}
+                                    onChange={e => setFormData({ ...formData, campaign_goal: e.target.value })}
                                 >
-                                    <option value="standard">Standard</option>
-                                    <option value="event">Event</option>
-                                    <option value="webinar">Webinar</option>
-                                    <option value="nurture">Nurture</option>
-                                    <option value="re_engagement">Re-engagement</option>
-                                    <option value="cold_outreach">Cold outreach</option>
-                                </select>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Goal</label>
-                                <select
-                                    className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
-                                    value={formData.goal || 'connections'}
-                                    onChange={e => setFormData({ ...formData, goal: e.target.value })}
-                                >
-                                    <option value="connections">Connections</option>
-                                    <option value="meetings">Meetings</option>
-                                    <option value="pipeline">Pipeline</option>
-                                    <option value="brand_awareness">Brand awareness</option>
-                                    <option value="event_promotion">Event promotion</option>
-                                    <option value="content_engagement">Content engagement</option>
+                                    {CAMPAIGN_GOAL_OPTIONS.map((goalOption) => (
+                                        <option key={goalOption.value} value={goalOption.value}>{goalOption.label}</option>
+                                    ))}
                                 </select>
                             </div>
                             <div className="space-y-2 md:col-span-2">
-                                <label className="text-sm font-medium">Description</label>
+                                <label className="text-sm font-medium">Description *</label>
                                 <textarea
                                     className="w-full min-h-[80px] px-3 py-2 rounded-md border border-input bg-background text-sm"
                                     value={formData.description || ''}
                                     onChange={e => setFormData({ ...formData, description: e.target.value })}
-                                    placeholder="Campaign description"
+                                    placeholder="Campaign goals and value proposition. Include a link here and it will be sent to leads with the AI-generated LinkedIn message."
                                 />
                             </div>
+                            {['event_promotion', 'webinar'].includes(formData.campaign_goal || inferCampaignGoal(formData)) && (
+                                <div className="space-y-2 md:col-span-2">
+                                    <label className="text-sm font-medium">Registration Link *</label>
+                                    <Input
+                                        type="url"
+                                        value={formData.registration_link || ''}
+                                        onChange={e => setFormData({ ...formData, registration_link: e.target.value })}
+                                        placeholder="https://..."
+                                    />
+                                </div>
+                            )}
                             <div className="space-y-2 md:col-span-2">
                                 <label className="text-sm font-medium">Target audience</label>
                                 <Input
@@ -1040,9 +1146,15 @@ export default function CampaignDetailPage() {
                 {[
                     { id: 'sequence', label: 'Sequence', badge: campaign.sequences?.length ?? 0 },
                     { id: 'leads', label: 'Leads', badge: leads.length },
+                    { id: 'dashboard', label: 'Dashboard', badge: null },
                     { id: 'approvals', label: 'Approvals', badge: pendingApprovalCount > 0 ? pendingApprovalCount : approvals.length, urgent: pendingApprovalCount > 0 },
                     { id: 'analytics', label: 'Analytics', badge: null },
-                    { id: 'logs', label: 'Launch Logs', badge: launchLogs.length > 0 ? launchLogs.length : null }
+                    {
+                        id: 'overview',
+                        label: 'Overview',
+                        badge: recentActivity.filter((a) => a.status === 'failed').length || null,
+                        urgent: recentActivity.some((a) => a.status === 'failed')
+                    }
                 ].map((tab) => (
                     <button
                         key={tab.id}
@@ -1190,8 +1302,8 @@ export default function CampaignDetailPage() {
                                             ? `LinkedIn AI (${selectedLeads.length})`
                                             : 'LinkedIn AI (Messages + Emails)'}
                                 </Button>
-                                <Button size="icon" variant="outline" className="h-9 w-9" title="Export Report">
-                                    <Upload className="w-4 h-4" />
+                                <Button size="icon" variant="outline" className="h-9 w-9 text-foreground" title="Export Report" aria-label="Export Report">
+                                    <Download className="w-4 h-4 shrink-0" />
                                 </Button>
                             </div>
                         </CardHeader>
@@ -1322,8 +1434,20 @@ export default function CampaignDetailPage() {
                             return { subject: '', body: content || '' };
                         }
                     };
+                    const fromEmailSubmenu = searchParams.get('channel') === 'gmail';
                     return (
                         <div className="space-y-6">
+                            {fromEmailSubmenu && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="gap-2 text-muted-foreground hover:text-foreground -ml-1"
+                                    onClick={() => navigate('/campaigns/email')}
+                                >
+                                    <ArrowLeft className="w-4 h-4" />
+                                    Back to Email campaigns
+                                </Button>
+                            )}
                             {/* Info Banner */}
                             <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
                                 <div className="flex items-start gap-3">
@@ -2158,32 +2282,296 @@ export default function CampaignDetailPage() {
                     </motion.div>
                 )}
 
-                {activeTab === 'logs' && (
-                    <Card className="bg-card/40 border-white/5">
-                        <CardHeader>
-                            <CardTitle className="text-white flex items-center gap-2">
-                                <div className="p-1.5 rounded-lg bg-primary/20"><RefreshCw className="w-4 h-4 text-primary" /></div>
-                                Launch Logs (Temporary)
-                            </CardTitle>
-                            <CardDescription>
-                                Flow: Check lead → 1st degree? Skip Auto Connect : Launch Auto Connect → Wait → Message Sender → Wait → Gmail approved? Send mail → Complete → Pause hidden
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            {launchLogs.length === 0 ? (
-                                <p className="text-sm text-muted-foreground py-6">No launch logs yet. Launch the campaign to see the flow.</p>
-                            ) : (
-                                <ul className="space-y-1.5 font-mono text-xs max-h-[400px] overflow-y-auto">
-                                    {launchLogs.map((log, i) => (
-                                        <li key={log.id || i} className="flex gap-2 py-1.5 px-2 rounded bg-white/5 border-l-2 border-primary/30">
-                                            <span className="text-muted-foreground shrink-0">{new Date(log.ts || log.created_at).toLocaleTimeString()}</span>
-                                            <span className="text-foreground">{log.step}: {log.message}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            )}
-                        </CardContent>
-                    </Card>
+                {activeTab === 'dashboard' && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="space-y-6"
+                    >
+                        <div className="flex items-center gap-2 mb-2">
+                            <div className="p-2 rounded-xl bg-primary/20 border border-primary/30">
+                                <LayoutDashboard className="w-5 h-5 text-primary" />
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-bold text-white">Campaign Dashboard</h2>
+                                <p className="text-xs text-muted-foreground">Funnel, acceptance rate, failed messages, and status at a glance</p>
+                            </div>
+                        </div>
+
+                        {/* Dashboard KPI Cards — includes acceptance rate & failed messages */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+                            {[
+                                { label: 'Total Leads', value: totalLeads, sub: 'In campaign', icon: Users, gradient: 'from-primary/20 to-primary/5', iconClr: 'text-primary' },
+                                { label: 'Sent', value: stats.sent || 0, sub: `of ${totalLeads} leads`, icon: Send, gradient: 'from-blue-500/20 to-cyan-500/10', iconClr: 'text-blue-400' },
+                                { label: 'Replies', value: stats.replied || 0, sub: 'Received', icon: MessageSquare, gradient: 'from-emerald-500/20 to-teal-500/10', iconClr: 'text-emerald-400' },
+                                { label: 'Failed Messages', value: stats.failed_messages ?? overviewFailedCount ?? 0, sub: 'Send attempts failed', icon: XCircle, gradient: 'from-red-500/20 to-red-500/10', iconClr: 'text-red-400' },
+                                { label: 'Acceptance Rate', value: stats.acceptance_rate != null ? `${stats.acceptance_rate}%` : '—', sub: stats.connection_requests_sent > 0 ? `${stats.connection_accepted ?? 0} accepted / ${stats.connection_requests_sent} sent` : 'Connection sync data', icon: UserCheck, gradient: 'from-violet-500/20 to-purple-500/10', iconClr: 'text-violet-400' },
+                                { label: 'Response Rate', value: stats.sent > 0 ? `${((stats.replied || 0) / stats.sent * 100).toFixed(1)}%` : '0%', sub: 'Replies per outreach', icon: TrendingUp, gradient: 'from-amber-500/20 to-orange-500/10', iconClr: 'text-amber-400' },
+                            ].map((kpi, i) => (
+                                <motion.div key={i} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.04 }}>
+                                    <Card className={cn("overflow-hidden border-white/5 bg-gradient-to-br", kpi.gradient, "hover:shadow-lg transition-shadow")}>
+                                        <CardContent className="p-4">
+                                            <div className="flex items-center justify-between">
+                                                <div className={cn("p-2 rounded-lg bg-white/5", kpi.iconClr)}>
+                                                    <kpi.icon className="w-4 h-4" />
+                                                </div>
+                                                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{kpi.label}</span>
+                                            </div>
+                                            <p className="text-xl font-bold text-white mt-2">{kpi.value}</p>
+                                            <p className="text-xs text-muted-foreground">{kpi.sub}</p>
+                                        </CardContent>
+                                    </Card>
+                                </motion.div>
+                            ))}
+                        </div>
+
+                        {/* Campaign Funnel */}
+                        <Card className="bg-card/40 border-white/5">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-white flex items-center gap-2">
+                                    <div className="p-1.5 rounded-lg bg-primary/20"><TrendingUp className="w-4 h-4 text-primary" /></div>
+                                    Campaign Funnel
+                                </CardTitle>
+                                <CardDescription>Leads → Outreach → Replies → Meetings</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {[
+                                    { label: 'Total Leads', value: totalLeads, icon: Users, fill: 'bg-primary/40', pct: 100 },
+                                    { label: 'Outreach Sent', value: stats.sent || 0, icon: Send, fill: 'bg-blue-500/50', pct: totalLeads > 0 ? (stats.sent / totalLeads) * 100 : 0 },
+                                    { label: 'Replies Received', value: stats.replied || 0, icon: MessageSquare, fill: 'bg-emerald-500/50', pct: stats.sent > 0 ? (stats.replied / stats.sent) * 100 : 0 },
+                                    { label: 'Meetings', value: stats.booked || 0, icon: CheckCircle2, fill: 'bg-violet-500/50', pct: stats.replied > 0 && stats.booked ? (stats.booked / stats.replied) * 100 : 0 },
+                                ].map((step, i) => (
+                                    <div key={i} className="space-y-1.5">
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-white/90 flex items-center gap-2"><step.icon className="w-3.5 h-3.5 text-muted-foreground" />{step.label}</span>
+                                            <span className="font-bold tabular-nums">{step.value}</span>
+                                        </div>
+                                        <div className="h-2.5 bg-white/5 rounded-full overflow-hidden">
+                                            <motion.div className={cn("h-full rounded-full", step.fill)} initial={{ width: 0 }} animate={{ width: `${step.pct}%` }} transition={{ duration: 0.6, delay: i * 0.1 }} />
+                                        </div>
+                                    </div>
+                                ))}
+                            </CardContent>
+                        </Card>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* Status Distribution */}
+                            <Card className="bg-card/40 border-white/5">
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="text-white flex items-center gap-2">
+                                        <div className="p-1.5 rounded-lg bg-primary/20"><BarChart3 className="w-4 h-4 text-primary" /></div>
+                                        Status Distribution
+                                    </CardTitle>
+                                    <CardDescription>By stage</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    {(stats.pending || 0) + (stats.sent || 0) + (stats.replied || 0) + (stats.failed || 0) === 0 ? (
+                                        <div className="h-[200px] flex items-center justify-center"><p className="text-sm text-muted-foreground">No data yet</p></div>
+                                    ) : (
+                                        <div className="h-[200px]">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={[
+                                                            { name: 'Pending', value: stats.pending || 0, color: '#f59e0b' },
+                                                            { name: 'Sent', value: stats.sent || 0, color: '#3b82f6' },
+                                                            { name: 'Replied', value: stats.replied || 0, color: '#10b981' },
+                                                            { name: 'Failed', value: stats.failed || 0, color: '#ef4444' },
+                                                        ].filter(d => d.value > 0)}
+                                                        cx="50%" cy="50%" innerRadius={44} outerRadius={68} paddingAngle={2} dataKey="value"
+                                                    >
+                                                        {[
+                                                            { name: 'Pending', value: stats.pending || 0, color: '#f59e0b' },
+                                                            { name: 'Sent', value: stats.sent || 0, color: '#3b82f6' },
+                                                            { name: 'Replied', value: stats.replied || 0, color: '#10b981' },
+                                                            { name: 'Failed', value: stats.failed || 0, color: '#ef4444' },
+                                                        ].filter(d => d.value > 0).map((entry, i) => (
+                                                            <Cell key={i} fill={entry.color} />
+                                                        ))}
+                                                    </Pie>
+                                                    <RechartsTooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
+                                                    <Legend layout="vertical" align="right" formatter={(v) => <span className="text-sm text-muted-foreground">{v}</span>} />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            {/* Top failure reasons */}
+                            <Card className="bg-card/40 border-white/5">
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="text-white text-base">Top failure reasons</CardTitle>
+                                    <CardDescription>Why messages or connections failed</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    {failureBreakdown.length === 0 ? (
+                                        <p className="text-sm text-muted-foreground">No failures recorded yet.</p>
+                                    ) : (
+                                        <div className="flex flex-wrap gap-2">
+                                            {failureBreakdown.map((item) => (
+                                                <Badge key={item.reason} variant="outline" className="text-xs border-red-500/30 text-red-300 bg-red-500/5">
+                                                    {item.reason}: {item.count}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </div>
+
+                        {/* Recent activity summary */}
+                        <Card className="bg-card/40 border-white/5">
+                            <CardHeader>
+                                <CardTitle className="text-white text-base">Latest outcomes</CardTitle>
+                                <CardDescription>Recent campaign actions</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                {outreachActivities.length === 0 ? (
+                                    <div className="text-center py-8 text-muted-foreground">
+                                        <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                        <p className="text-sm">No campaign activity yet.</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                                        {outreachActivities.slice(0, 15).map((activity, idx) => {
+                                            const failed = activity.status === 'failed';
+                                            return (
+                                                <div key={activity.id ?? idx} className="rounded-xl border border-white/10 bg-white/5 p-3 flex flex-wrap items-center gap-2">
+                                                    <span className="text-sm font-semibold text-white">{activity.lead_name || 'Unknown'}</span>
+                                                    <Badge variant="outline" className={cn("text-[10px]", failed ? "border-red-500/40 text-red-300" : "border-emerald-500/40 text-emerald-300")}>
+                                                        {failed ? 'Failed' : 'Success'}
+                                                    </Badge>
+                                                    {activity.action === 'send_connection_request' && <Badge variant="outline" className="text-[10px] border-blue-500/40 text-blue-300">Connection</Badge>}
+                                                    {activity.action === 'send_message' && <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-300">Message</Badge>}
+                                                    <span className="text-[11px] text-muted-foreground ml-auto">{new Date(activity.timestamp).toLocaleString()}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </motion.div>
+                )}
+
+                {activeTab === 'overview' && (
+                    <div className="space-y-4">
+                        <Card className="bg-card/40 border-white/5">
+                            <CardHeader>
+                                <CardTitle className="text-white flex items-center gap-2">
+                                    <div className="p-1.5 rounded-lg bg-primary/20"><BarChart3 className="w-4 h-4 text-primary" /></div>
+                                    Campaign Overview
+                                </CardTitle>
+                                <CardDescription>
+                                    User-friendly summary of what worked, what failed, and why.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                                    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Actions</p>
+                                        <p className="text-2xl font-bold text-white">{outreachActivities.length}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                                        <p className="text-[11px] uppercase tracking-wider text-emerald-300">Successful</p>
+                                        <p className="text-2xl font-bold text-emerald-400">{overviewSentCount}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                                        <p className="text-[11px] uppercase tracking-wider text-red-300">Failed</p>
+                                        <p className="text-2xl font-bold text-red-400">{overviewFailedCount}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+                                        <p className="text-[11px] uppercase tracking-wider text-red-300">Failed Messages</p>
+                                        <p className="text-2xl font-bold text-red-400">{stats.failed_messages ?? overviewFailedCount}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-3">
+                                        <p className="text-[11px] uppercase tracking-wider text-blue-300">Connections Sent</p>
+                                        <p className="text-2xl font-bold text-blue-400">{overviewConnectionSentCount}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
+                                        <p className="text-[11px] uppercase tracking-wider text-violet-300">Acceptance Rate</p>
+                                        <p className="text-2xl font-bold text-violet-400">{stats.acceptance_rate != null ? `${stats.acceptance_rate}%` : '—'}</p>
+                                        {stats.connection_requests_sent > 0 && (
+                                            <p className="text-[10px] text-violet-300/80 mt-0.5">{stats.connection_accepted ?? 0} / {stats.connection_requests_sent} accepted</p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                    <p className="text-sm font-semibold text-white mb-2">Top failure reasons</p>
+                                    {failureBreakdown.length === 0 ? (
+                                        <p className="text-xs text-muted-foreground">No failures recorded yet.</p>
+                                    ) : (
+                                        <div className="flex flex-wrap gap-2">
+                                            {failureBreakdown.map((item) => (
+                                                <Badge key={item.reason} variant="outline" className="text-xs border-red-500/30 text-red-300 bg-red-500/5">
+                                                    {item.reason}: {item.count}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        <Card className="bg-card/40 border-white/5">
+                            <CardHeader>
+                                <CardTitle className="text-white text-base">Latest outcomes</CardTitle>
+                                <CardDescription>Recent campaign actions with clear status and reason.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                {outreachActivities.length === 0 ? (
+                                    <div className="text-center py-10 text-muted-foreground">
+                                        <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                        <p className="text-sm">No campaign activity yet.</p>
+                                        <p className="text-xs mt-1">Launch your campaign to start seeing outcomes here.</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2 max-h-[420px] overflow-y-auto">
+                                        {outreachActivities.map((activity, idx) => {
+                                            const failed = activity.status === 'failed';
+                                            return (
+                                                <div key={activity.id ?? idx} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                                                        <span className="text-sm font-semibold text-white">{activity.lead_name || 'Unknown Lead'}</span>
+                                                        <Badge variant="outline" className={cn("text-[10px]",
+                                                            activity.action === 'send_connection_request' ? "border-blue-500/40 text-blue-300" : "border-emerald-500/40 text-emerald-300"
+                                                        )}>
+                                                            {activity.action === 'send_connection_request' ? 'Connection Request' : 'Message'}
+                                                        </Badge>
+                                                        <Badge variant="outline" className={cn("text-[10px]",
+                                                            failed ? "border-red-500/40 text-red-300" : "border-emerald-500/40 text-emerald-300"
+                                                        )}>
+                                                            {failed ? 'Failed' : 'Success'}
+                                                        </Badge>
+                                                    </div>
+
+                                                    {failed ? (
+                                                        <div className="space-y-1">
+                                                            <p className="text-xs text-red-300">
+                                                                <strong>Reason:</strong> {getFriendlyFailureReason(activity.reason)}
+                                                            </p>
+                                                            <p className="text-xs text-amber-300">
+                                                                <strong>Category:</strong> {getFriendlyFailureCategory(activity.reason)}
+                                                            </p>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-emerald-300">Action completed successfully.</p>
+                                                    )}
+
+                                                    <p className="text-[11px] text-muted-foreground mt-2">
+                                                        {new Date(activity.timestamp).toLocaleString()}
+                                                    </p>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </div>
                 )}
             </div>
 

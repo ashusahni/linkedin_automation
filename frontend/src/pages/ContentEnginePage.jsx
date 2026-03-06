@@ -87,12 +87,14 @@ function PhantomBadge({ status }) {
 
 // ── Generate Idea Modal (Dual-variant picker) ────────────────────────────────
 
+const MAX_NEWS_ARTICLES = 5;
+
 function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
     const { addToast } = useToast();
     const [form, setForm] = useState({
         source_id: '', persona: '', industry: '',
         objective: 'thought_leadership', cta_type_id: '', topic: '',
-        news_article_url: '', news_article_title: '', news_article_summary: '',
+        news_articles: [{ url: '', title: '', summary: '' }],
     });
     const [loading, setLoading] = useState(false);
     // Dual-variant picker state
@@ -101,23 +103,39 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
 
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+    const setArticle = (index, field, value) => {
+        setForm(f => ({
+            ...f,
+            news_articles: f.news_articles.map((a, i) =>
+                i === index ? { ...a, [field]: value } : a
+            ),
+        }));
+    };
+    const addArticle = () => {
+        if (form.news_articles.length >= MAX_NEWS_ARTICLES) return;
+        setForm(f => ({ ...f, news_articles: [...f.news_articles, { url: '', title: '', summary: '' }] }));
+    };
+    const removeArticle = (index) => {
+        if (form.news_articles.length <= 1) return;
+        setForm(f => ({ ...f, news_articles: f.news_articles.filter((_, i) => i !== index) }));
+    };
+
     const submit = async () => {
         if (!form.persona.trim() || !form.industry.trim()) {
             addToast('Persona and Industry are required', 'error'); return;
         }
+        const sourceArticles = form.news_articles
+            .map(a => ({ url: (a.url || '').trim(), title: (a.title || '').trim(), summary: (a.summary || '').trim() }))
+            .filter(a => a.url);
         setLoading(true);
         try {
             const payload = {
                 ...form,
                 cta_type_id: form.cta_type_id || null,
-                source_id: form.news_article_url.trim() ? null : (form.source_id || null),
-                source_url: form.news_article_url.trim() || null,
-                source_title: form.news_article_title.trim() || null,
-                source_summary: form.news_article_summary.trim() || null,
+                source_id: sourceArticles.length ? null : (form.source_id || null),
+                source_articles: sourceArticles.length ? sourceArticles : undefined,
             };
-            delete payload.news_article_url;
-            delete payload.news_article_title;
-            delete payload.news_article_summary;
+            delete payload.news_articles;
             // Generate 2 in parallel
             const [r1, r2] = await Promise.all([
                 axios.post('/api/sow/engine/items/generate', payload),
@@ -145,34 +163,36 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
     // ── Variant picker view ──
     if (variants) {
         return (
-            <ModalShell title="✨ Pick Your Favourite" onClose={onClose} wide>
-                <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground text-center">
+            <ModalShell title="✨ Pick Your Favourite" onClose={onClose} wide noBodyScroll>
+                <div className="flex flex-col flex-1 min-h-0 gap-4">
+                    <p className="text-sm text-muted-foreground text-center shrink-0">
                         AI generated two versions — choose the one you prefer. The other will be discarded.
                     </p>
-                    <div className="grid grid-cols-1 gap-4">
+                    <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
                         {variants.map((v, i) => (
                             <motion.div
                                 key={v.id}
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: i * 0.08 }}
-                                className="relative rounded-xl border border-border/40 bg-muted/20 hover:border-indigo-500/40 hover:bg-indigo-500/5 transition-all duration-200 overflow-hidden"
+                                className="relative flex flex-col rounded-xl border border-border/40 bg-muted/20 hover:border-indigo-500/40 hover:bg-indigo-500/5 transition-all duration-200 overflow-hidden min-h-0"
                             >
                                 <div className="absolute top-0 inset-x-0 h-0.5 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-t-xl" />
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 mb-2">
+                                <div className="p-4 flex flex-col min-h-0 flex-1">
+                                    <div className="flex items-center gap-2 mb-2 shrink-0">
                                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/25">
                                             Variant {i + 1}
                                         </span>
                                         <span className="text-xs font-semibold text-foreground line-clamp-1 flex-1">{v.title}</span>
                                     </div>
-                                    <p className="text-[12px] text-muted-foreground/80 leading-relaxed line-clamp-5 font-mono whitespace-pre-wrap">
-                                        {v.edited_content || v.generated_content}
-                                    </p>
+                                    <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1 -mr-1">
+                                        <p className="text-[12px] text-muted-foreground/80 leading-relaxed font-mono whitespace-pre-wrap">
+                                            {v.edited_content || v.generated_content}
+                                        </p>
+                                    </div>
                                     <Button
                                         size="sm"
-                                        className="mt-3 w-full gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-0 shadow-md shadow-indigo-500/20 rounded-xl"
+                                        className="mt-3 w-full gap-2 shrink-0 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-0 shadow-md shadow-indigo-500/20 rounded-xl"
                                         disabled={picking}
                                         onClick={() => pickVariant(v, variants[1 - i])}
                                     >
@@ -183,7 +203,7 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
                             </motion.div>
                         ))}
                     </div>
-                    <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => setVariants(null)}>
+                    <Button variant="ghost" size="sm" className="w-full text-muted-foreground shrink-0" onClick={() => setVariants(null)}>
                         ← Regenerate with different settings
                     </Button>
                 </div>
@@ -230,11 +250,28 @@ function GenerateModal({ sources, ctaTemplates, onClose, onCreated }) {
                         <Newspaper className="w-3.5 h-3.5 text-indigo-400" />
                         News Article (optional)
                     </div>
-                    <p className="text-[11px] text-muted-foreground">Base your post on a news article — paste URL and optionally title or summary. AI will use it for context.</p>
-                    <div className="grid grid-cols-1 gap-2">
-                        <Input placeholder="Article URL (e.g. https://...)" value={form.news_article_url} onChange={e => set('news_article_url', e.target.value)} className="border-border/60 text-sm" />
-                        <Input placeholder="Article title (optional)" value={form.news_article_title} onChange={e => set('news_article_title', e.target.value)} className="border-border/60 text-sm" />
-                        <textarea placeholder="Summary or key points (optional)" value={form.news_article_summary} onChange={e => set('news_article_summary', e.target.value)} rows={2} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground border-border/60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                    <p className="text-[11px] text-muted-foreground">Base your post on one or more articles — paste URL(s) and optionally title or summary. AI will use them for context. Max {MAX_NEWS_ARTICLES} URLs.</p>
+                    <div className="space-y-3">
+                        {form.news_articles.map((article, idx) => (
+                            <div key={idx} className="rounded-lg border border-border/40 bg-background/60 p-3 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Article {idx + 1}</span>
+                                    {form.news_articles.length > 1 && (
+                                        <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-muted-foreground hover:text-destructive" onClick={() => removeArticle(idx)}>
+                                            Remove
+                                        </Button>
+                                    )}
+                                </div>
+                                <Input placeholder="Article URL (e.g. https://...)" value={article.url} onChange={e => setArticle(idx, 'url', e.target.value)} className="border-border/60 text-sm" />
+                                <Input placeholder="Title (optional)" value={article.title} onChange={e => setArticle(idx, 'title', e.target.value)} className="border-border/60 text-sm" />
+                                <textarea placeholder="Summary or key points (optional)" value={article.summary} onChange={e => setArticle(idx, 'summary', e.target.value)} rows={2} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground border-border/60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20" />
+                            </div>
+                        ))}
+                        {form.news_articles.length < MAX_NEWS_ARTICLES && (
+                            <Button type="button" variant="outline" size="sm" className="w-full gap-2 border-dashed border-border/60 text-muted-foreground hover:text-foreground" onClick={addArticle}>
+                                <Plus className="w-3.5 h-3.5" /> Add another article
+                            </Button>
+                        )}
                     </div>
                 </div>
                 {/* Dual generate note */}
@@ -475,6 +512,7 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
     const [showScheduleForm, setShowScheduleForm] = useState(false);
     const [sending, setSending] = useState(false);
     const [retrying, setRetrying] = useState(false);
+    const [sendError, setSendError] = useState(null); // { message, helpUrl } when send fails — show in modal, item stays APPROVED
     // History tab
     const [activeTab, setActiveTab] = useState('content'); // 'content' | 'history'
     const [history, setHistory] = useState([]);
@@ -535,26 +573,36 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
     };
 
     const sendToPhantom = async () => {
+        setSendError(null);
         setSending(true);
         try {
             await axios.post(`/api/sow/engine/items/${item.id}/send`);
-            addToast('✅ Sent to LinkedIn via Phantom!', 'success');
-            onUpdated({ ...item, status: 'POSTED' });
+            addToast('Sent successfully!', 'success');
+            onUpdated({ ...item, status: 'POSTED', error_message: null });
             onClose();
         } catch (e) {
-            addToast(e.response?.data?.error || 'Send failed', 'error');
+            const data = e.response?.data;
+            const msg = data?.message || data?.error || 'Send failed';
+            const helpUrl = data?.helpUrl || null;
+            setSendError({ message: msg, helpUrl });
+            onUpdated({ ...item, error_message: msg });
         } finally { setSending(false); }
     };
 
     const retryPhantom = async () => {
+        setSendError(null);
         setRetrying(true);
         try {
             await axios.post(`/api/sow/engine/items/${item.id}/send`);
-            addToast('✅ Retried — sent to Phantom!', 'success');
-            onUpdated({ ...item, error_message: null });
+            addToast('Sent successfully!', 'success');
+            onUpdated({ ...item, status: 'POSTED', error_message: null });
             onClose();
         } catch (e) {
-            addToast(e.response?.data?.error || 'Retry failed', 'error');
+            const data = e.response?.data;
+            const msg = data?.message || data?.error || 'Retry failed';
+            const helpUrl = data?.helpUrl || null;
+            setSendError({ message: msg, helpUrl });
+            onUpdated({ ...item, error_message: msg });
         } finally { setRetrying(false); }
     };
 
@@ -590,6 +638,28 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
                     {item.cta_name && <Badge variant="secondary" className="text-xs gap-1"><Tag className="w-3 h-3" />{item.cta_name}</Badge>}
                     {item.phantom_status && <PhantomBadge status={item.phantom_status} />}
                 </div>
+
+                {/* Send failure popup — item stays in APPROVED; show reason + link */}
+                {sendError && (
+                    <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 flex flex-col gap-3">
+                        <p className="text-sm font-medium text-destructive">
+                            Publish failed. The post was not sent.
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                            {sendError.message}
+                        </p>
+                        {sendError.helpUrl && (
+                            <a
+                                href={sendError.helpUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center text-sm font-semibold text-primary hover:underline"
+                            >
+                                Reconnect your account
+                            </a>
+                        )}
+                    </div>
+                )}
 
                 {/* Tab bar */}
                 <div className="flex gap-1 p-1 rounded-xl bg-muted/40 border border-border/30">
@@ -871,9 +941,14 @@ function KanbanCard({ item, onClick }) {
 
 // ── Reusable UI helpers ───────────────────────────────────────────────────────
 
-function ModalShell({ title, onClose, children, wide = false }) {
+function ModalShell({ title, onClose, children, wide = false, noBodyScroll = false }) {
+    useEffect(() => {
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = prev; };
+    }, []);
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
             <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -886,7 +961,7 @@ function ModalShell({ title, onClose, children, wide = false }) {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.94, y: 20 }}
                 transition={{ type: 'spring', damping: 28, stiffness: 340 }}
-                className={`relative bg-card/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl shadow-black/40 w-full max-h-[90vh] overflow-hidden flex flex-col ${wide ? 'max-w-2xl' : 'max-w-lg'}`}
+                className={`relative bg-card/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl shadow-black/40 w-full overflow-hidden flex flex-col ${wide ? 'max-w-2xl' : 'max-w-lg'} ${noBodyScroll ? 'h-[85vh] max-h-[85vh]' : 'max-h-[90vh]'}`}
             >
                 {/* Gradient header */}
                 <div className="relative flex items-center justify-between px-6 py-4 border-b border-border/40 shrink-0 overflow-hidden">
@@ -896,7 +971,7 @@ function ModalShell({ title, onClose, children, wide = false }) {
                         <X className="w-3.5 h-3.5" />
                     </Button>
                 </div>
-                <div className="p-6 overflow-y-auto">{children}</div>
+                <div className={`p-6 flex flex-col min-h-0 ${noBodyScroll ? 'overflow-hidden flex-1' : 'overflow-y-auto'}`}>{children}</div>
             </motion.div>
         </div>
     );

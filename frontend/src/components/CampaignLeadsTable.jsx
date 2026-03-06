@@ -10,6 +10,12 @@ import {
 import { Button } from './ui/button';
 import { Mail, Phone, Clock, CheckCircle2, AlertCircle, XCircle, Loader2, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "./ui/tooltip";
 
 // Map campaign_leads.status → user-friendly label + color
 const STATUS_MAP = {
@@ -30,6 +36,91 @@ function getSequenceStage(lead) {
     if (!step && step !== 0) return '—';
     // step_order is 1-indexed in DB
     return `Step ${step}`;
+}
+
+// Per-step status: compact summary + tooltip with full list and failure reasons
+function MessageStatusCell({ stepStatuses = [], leadStatus }) {
+    if (!stepStatuses || stepStatuses.length === 0) {
+        return <span className="text-xs text-muted-foreground/60">—</span>;
+    }
+    const sent = stepStatuses.filter((s) => s.status === 'sent').length;
+    const failed = stepStatuses.filter((s) => s.status === 'failed').length;
+    const pending = stepStatuses.filter((s) => s.status === 'pending').length;
+    const total = stepStatuses.length;
+
+    const summary =
+        failed > 0
+            ? `${sent}/${total} sent, ${failed} failed`
+            : pending > 0
+                ? `${sent}/${total} sent`
+                : `${sent}/${total} sent`;
+
+    const content = (
+        <div className="flex flex-wrap items-center gap-1">
+            {stepStatuses.map((s, i) => {
+                const isSent = s.status === 'sent';
+                const isFailed = s.status === 'failed';
+                const isPending = s.status === 'pending';
+                return (
+                    <span
+                        key={i}
+                        className={cn(
+                            "inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-bold border",
+                            isSent && "bg-emerald-500/15 border-emerald-500/40 text-emerald-400",
+                            isFailed && "bg-red-500/15 border-red-500/40 text-red-400",
+                            isPending && "bg-muted/50 border-white/10 text-muted-foreground"
+                        )}
+                        title={isFailed && s.reason ? s.reason : isSent ? 'Sent' : 'Pending'}
+                    >
+                        {isSent ? '✓' : isFailed ? '✗' : '·'}
+                    </span>
+                );
+            })}
+        </div>
+    );
+
+    const tooltipBody = (
+        <ul className="space-y-1.5 text-left text-xs max-w-[220px]">
+            {stepStatuses.map((s, i) => (
+                <li key={i} className="flex flex-col gap-0.5">
+                    <span className="font-medium text-white">
+                        Step {s.step_order} — {s.label}
+                        {s.status === 'sent' && <span className="text-emerald-400 ml-1">Sent</span>}
+                        {s.status === 'failed' && <span className="text-red-400 ml-1">Failed</span>}
+                        {s.status === 'pending' && <span className="text-muted-foreground ml-1">Pending</span>}
+                    </span>
+                    {s.status === 'failed' && s.reason && (
+                        <span className="text-red-300/90 text-[10px]">{s.reason}</span>
+                    )}
+                    {s.sent_at && s.status === 'sent' && (
+                        <span className="text-muted-foreground text-[10px]">
+                            {new Date(s.sent_at).toLocaleString()}
+                        </span>
+                    )}
+                </li>
+            ))}
+            {leadStatus === 'replied' && (
+                <li className="pt-1 border-t border-white/10 text-emerald-400 text-[10px]">Lead replied — sequence stopped</li>
+            )}
+        </ul>
+    );
+
+    return (
+        <TooltipProvider delayDuration={200}>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <div className="flex flex-col gap-1 cursor-help">
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{summary}</span>
+                        {content}
+                    </div>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="bg-card border border-white/10 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Per-message status</p>
+                    {tooltipBody}
+                </TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
+    );
 }
 
 // Approval status badge
@@ -107,6 +198,7 @@ export default function CampaignLeadsTable({
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sequence Stage</TableHead>
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Current Step</TableHead>
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Approval Status</TableHead>
+                        <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider min-w-[100px]">Message status</TableHead>
                         <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Email</TableHead>
                         {onRemoveLead && (
                             <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[100px]">Actions</TableHead>
@@ -116,7 +208,7 @@ export default function CampaignLeadsTable({
                 <TableBody>
                     {leads.length === 0 ? (
                         <TableRow>
-                            <TableCell colSpan={onRemoveLead ? 7 : 6} className="h-32 text-center text-muted-foreground">
+                            <TableCell colSpan={onRemoveLead ? 8 : 7} className="h-32 text-center text-muted-foreground">
                                 <div className="flex flex-col items-center gap-2">
                                     <Clock className="w-8 h-8 opacity-30" />
                                     <p className="text-sm">No leads in this campaign yet.</p>
@@ -197,6 +289,11 @@ export default function CampaignLeadsTable({
                                         {lead.status === 'replied' && (
                                             <p className="text-[10px] text-muted-foreground/60 mt-0.5">Sequence stopped</p>
                                         )}
+                                    </TableCell>
+
+                                    {/* Message status — per-step sent/failed/pending */}
+                                    <TableCell>
+                                        <MessageStatusCell stepStatuses={lead.step_statuses} leadStatus={lead.status} />
                                     </TableCell>
 
                                     {/* Email */}

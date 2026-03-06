@@ -160,35 +160,68 @@ export const ContentItemService = {
      * → Backend generates LinkedIn-ready post
      * → Applies CTA template
      * → Saves as IDEA
-     * Supports: existing content_sources (source_id), or inline news article (source_url/source_title/source_summary).
+     * Supports: existing content_sources (source_id), inline single article (source_url/source_title/source_summary), or multiple inline articles (source_articles).
      */
-    async generateIdea({ source_id, persona, industry, objective, cta_type_id, topic, source_title, source_url, source_summary }) {
+    async generateIdea({ source_id, persona, industry, objective, cta_type_id, topic, source_title, source_url, source_summary, source_articles }) {
         console.log(`🤖 ContentEngine: Generating IDEA for persona=${persona}, industry=${industry}, objective=${objective}`);
 
         let effectiveSourceId = source_id || null;
-        let effectiveSourceTitle = source_title || null;
-        let effectiveSourceUrl = source_url || null;
-        let effectiveSourceSummary = source_summary || null;
+        const articles = []; // normalized { original_title, source_url, summary } for AI
 
-        // If inline news article data provided, create or reuse a news_article content source and link to it
-        if (effectiveSourceUrl && !effectiveSourceId) {
-            const name = effectiveSourceTitle || 'News Article';
-            const created = await ContentSourceService.create({
-                name: name.substring(0, 255),
-                type: 'news_article',
-                url: effectiveSourceUrl,
-                active: true
-            });
-            effectiveSourceId = created.id;
-            effectiveSourceTitle = effectiveSourceTitle || name;
+        // Multi-URL: source_articles array (max 5 from frontend)
+        if (source_articles && Array.isArray(source_articles) && source_articles.length > 0) {
+            const limited = source_articles.slice(0, 5);
+            for (const a of limited) {
+                const url = (a.url || '').trim();
+                if (!url) continue;
+                articles.push({
+                    original_title: (a.title || '').trim() || 'Article',
+                    source_url: url,
+                    summary: (a.summary || '').trim() || ''
+                });
+            }
+            if (articles.length > 0 && !effectiveSourceId) {
+                const first = articles[0];
+                const created = await ContentSourceService.create({
+                    name: first.original_title.substring(0, 255),
+                    type: 'news_article',
+                    url: first.source_url,
+                    active: true
+                });
+                effectiveSourceId = created.id;
+            }
         }
-        // If only source_id provided, load source to get url/title for the AI prompt
-        else if (effectiveSourceId) {
-            const res = await pool.query('SELECT id, name, url FROM content_sources WHERE id = $1', [effectiveSourceId]);
-            const row = res.rows[0];
-            if (row) {
-                effectiveSourceTitle = effectiveSourceTitle || row.name || null;
-                effectiveSourceUrl = effectiveSourceUrl || row.url || null;
+
+        // Single inline article (backward compat)
+        if (articles.length === 0) {
+            let effectiveSourceTitle = source_title || null;
+            let effectiveSourceUrl = source_url || null;
+            let effectiveSourceSummary = source_summary || null;
+
+            if (effectiveSourceUrl && !effectiveSourceId) {
+                const name = effectiveSourceTitle || 'News Article';
+                const created = await ContentSourceService.create({
+                    name: name.substring(0, 255),
+                    type: 'news_article',
+                    url: effectiveSourceUrl,
+                    active: true
+                });
+                effectiveSourceId = created.id;
+                effectiveSourceTitle = effectiveSourceTitle || name;
+            } else if (effectiveSourceId) {
+                const res = await pool.query('SELECT id, name, url FROM content_sources WHERE id = $1', [effectiveSourceId]);
+                const row = res.rows[0];
+                if (row) {
+                    effectiveSourceTitle = effectiveSourceTitle || row.name || null;
+                    effectiveSourceUrl = effectiveSourceUrl || row.url || null;
+                }
+            }
+            if (effectiveSourceUrl) {
+                articles.push({
+                    original_title: effectiveSourceTitle || 'Article',
+                    source_url: effectiveSourceUrl,
+                    summary: effectiveSourceSummary || ''
+                });
             }
         }
 
@@ -200,22 +233,22 @@ export const ContentItemService = {
         }
 
         // Build AI prompt context
-        const topicContext = topic || effectiveSourceTitle || 'industry trends';
-        const promptData = {
-            original_title: topicContext,
-            source_url: effectiveSourceUrl || '',
-            summary: effectiveSourceSummary || `A LinkedIn post for ${persona} in ${industry} focused on ${objective}`
-        };
+        const topicContext = topic || (articles.length > 0 ? articles[0].original_title : 'industry trends');
 
         let generatedContent = '';
         try {
             if (AIService.isConfigured()) {
-                const rawPost = await AIService.generateThoughtLeadershipPost(promptData, {
-                    persona,
-                    industry,
-                    objective,
-                    ctaText
-                });
+                const rawPost = articles.length > 0
+                    ? await AIService.generateThoughtLeadershipPost(articles, {
+                        persona,
+                        industry,
+                        objective,
+                        ctaText
+                    })
+                    : await AIService.generateThoughtLeadershipPost(
+                        { original_title: topicContext, source_url: '', summary: `A LinkedIn post for ${persona} in ${industry} focused on ${objective}` },
+                        { persona, industry, objective, ctaText }
+                    );
                 generatedContent = rawPost;
             } else {
                 // Fallback template when AI not configured
@@ -405,7 +438,11 @@ export const ContentPhantomService = {
         return results;
     },
 
-    /** Manually trigger a single item to be sent to Phantom (must be APPROVED or SCHEDULED) */
+    /** Manually trigger a single item to be sent to Phantom (must be APPROVED or SCHEDULED).
+     * Waits for container completion; on failure keeps status APPROVED/SCHEDULED and sets error_message.
+     * If send fails after appending to the sheet, we remove that row (undoAppend) so the next run
+     * doesn't post the wrong content (e.g. an old failed post).
+     */
     async sendNow(itemId) {
         const item = await ContentItemService.getById(itemId);
         if (!item) throw new Error('Content item not found');
@@ -418,39 +455,74 @@ export const ContentPhantomService = {
             throw new Error('Content cannot be empty before sending to Phantom');
         }
 
-        const result = await this._sendToPhantom(item);
+        const { default: GoogleSheetsService } = await import('./googleSheets.service.js');
+        let appendedRange = null;
 
-        await pool.query(
-            `UPDATE content_items SET
-                status = 'POSTED',
-                posted_at = NOW(),
-                post_url = $1,
-                phantom_container_id = $2,
-                error_message = NULL,
-                updated_at = NOW()
-             WHERE id = $3`,
-            [result.postUrl || null, result.containerId || null, itemId]
-        );
-        await ContentItemService._logTransition(itemId, item.status, 'POSTED', 'Manually triggered via Send Now');
-
-        // Notify the user with a deep-link
+        // 1. Append to sheet first so Phantom has this post to read
         try {
-            const { default: NotificationService } = await import('./notification.service.js');
-            await NotificationService.create({
-                type: 'phantom_completed',
-                title: 'Post sent to Phantom',
-                message: `Your post "${item.title || 'Untitled Idea'}" has been sent to LinkedIn.`,
-                data: { link: `/content-engine?highlight=${item.id}&tab=board` }
-            });
-        } catch (notifErr) {
-            console.error('ContentEngine: Failed to create notification', notifErr);
+            const appendResult = await GoogleSheetsService.appendPost(content);
+            appendedRange = appendResult.updates?.updatedRange || appendResult.updatedRange;
+            console.log(`✅ ContentEngine: Appended to Google Sheet. Range: ${appendedRange || 'unknown'}`);
+        } catch (sheetError) {
+            console.error(`❌ ContentEngine: Failed to write to Google Sheet.`, sheetError);
+            throw new Error(`Failed to write to Google Sheet: ${sheetError.message}`);
         }
 
-        return { success: true, postUrl: result.postUrl, containerId: result.containerId };
+        try {
+            const result = await this._launchPhantomOnly(item);
+
+            // 2. Wait for the container to finish so we only mark POSTED when it actually succeeded
+            const { default: pb } = await import('./phantombuster.service.js');
+            const maxWaitMinutes = 5;
+            await pb.waitForCompletion(result.containerId, result.phantomId, maxWaitMinutes);
+
+            await pool.query(
+                `UPDATE content_items SET
+                    status = 'POSTED',
+                    posted_at = NOW(),
+                    post_url = $1,
+                    phantom_container_id = $2,
+                    error_message = NULL,
+                    updated_at = NOW()
+                 WHERE id = $3`,
+                [result.postUrl || null, result.containerId || null, itemId]
+            );
+            await ContentItemService._logTransition(itemId, item.status, 'POSTED', 'Manually triggered via Send Now');
+
+            try {
+                const { default: NotificationService } = await import('./notification.service.js');
+                await NotificationService.create({
+                    type: 'phantom_completed',
+                    title: 'Post sent',
+                    message: `Your post "${item.title || 'Untitled Idea'}" has been sent to LinkedIn.`,
+                    data: { link: `/content-engine?highlight=${item.id}&tab=board` }
+                });
+            } catch (notifErr) {
+                console.error('ContentEngine: Failed to create notification', notifErr);
+            }
+
+            return { success: true, postUrl: result.postUrl, containerId: result.containerId };
+        } catch (err) {
+            // Remove the row we just appended so the sheet queue stays correct (next run won't post this failed item)
+            if (appendedRange) {
+                try {
+                    await GoogleSheetsService.undoAppend(appendedRange);
+                } catch (undoErr) {
+                    console.error('ContentEngine: Failed to roll back sheet row after send failure:', undoErr.message);
+                }
+            }
+            // Persist failure reason; item stays in APPROVED/SCHEDULED so user can fix and retry
+            const errMsg = (err && err.message) ? String(err.message).slice(0, 1000) : 'Send failed';
+            await pool.query(
+                `UPDATE content_items SET error_message = $1, updated_at = NOW() WHERE id = $2`,
+                [errMsg, itemId]
+            );
+            throw err;
+        }
     },
 
-    /** Internal: send a content item to Phantom LinkedIn Auto Poster */
-    async _sendToPhantom(item) {
+    /** Internal: append is done in sendNow; this only launches the Phantom (sheet already has the new row). */
+    async _launchPhantomOnly(item) {
         const phantomId = process.env.LINKEDIN_AUTO_POSTER_PHANTOM_ID || process.env.MESSAGE_SENDER_PHANTOM_ID;
 
         if (!phantomId) {
@@ -458,34 +530,19 @@ export const ContentPhantomService = {
         }
 
         const content = item.edited_content || item.generated_content;
-
         console.log(`🚀 ContentEngine: Triggering Phantom ${phantomId} via Google Sheet integration`);
-        console.log(`   Content preview: ${content.substring(0, 80)}...`);
+        console.log(`   Content preview: ${(content || '').substring(0, 80)}...`);
 
-        // 1. Append the post to the Google Sheet (this is where the Phantom reads from)
-        try {
-            const { default: GoogleSheetsService } = await import('./googleSheets.service.js');
-            await GoogleSheetsService.appendPost(content);
-            console.log(`✅ ContentEngine: Appended to Google Sheet successfully.`);
-        } catch (sheetError) {
-            console.error(`❌ ContentEngine: Failed to write to Google Sheet.`, sheetError);
-            throw new Error(`Failed to write to Google Sheet: ${sheetError.message}`);
-        }
-
-        // 2. Launch the Phantom with ZERO arguments.
-        // It uses its dashboard configuration (LinkedIn Session Cookie + Google Sheet URL).
         const { default: pb } = await import('./phantombuster.service.js');
         const launchResult = await pb.launchPhantom(phantomId, {}, { minimalArgs: true });
-
         const containerId = launchResult.containerId;
 
         console.log(`✅ ContentEngine: Phantom launched. Container: ${containerId}`);
 
-        // For async posting (LinkedIn Auto Poster is usually fast)
-        // Return containerId. The actual post_url can be fetched later via webhook or polling.
         return {
             containerId,
-            postUrl: null // Will be updated when Phantom webhook/polling confirms
+            phantomId,
+            postUrl: null
         };
     }
 };

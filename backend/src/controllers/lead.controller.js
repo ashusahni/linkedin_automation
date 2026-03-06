@@ -55,6 +55,7 @@ function buildAdvancedFilterClause(filterJSON, params) {
         else if (field === 'title') dbCol = 'title';
         else if (field === 'company') dbCol = 'company';
         else if (field === 'location') dbCol = 'location';
+        else if (field === 'timezone') dbCol = 'timezone';
         else if (field === 'status') dbCol = 'status';
         else if (field === 'source') dbCol = 'source';
         else if (field === 'review_status') dbCol = 'review_status'; // PHASE 4: Review status
@@ -72,7 +73,7 @@ function buildAdvancedFilterClause(filterJSON, params) {
             params.push(`%${value}%`);
             break;
           case 'equals':
-            if (dbCol === 'status' || dbCol === 'source') {
+            if (dbCol === 'status' || dbCol === 'source' || dbCol === 'timezone') {
               clause = `${dbCol} = $${pIdx}`;
               params.push(value);
             } else {
@@ -81,7 +82,7 @@ function buildAdvancedFilterClause(filterJSON, params) {
             }
             break;
           case 'not_equals':
-            if (dbCol === 'status' || dbCol === 'source') {
+            if (dbCol === 'status' || dbCol === 'source' || dbCol === 'timezone') {
               clause = `${dbCol} != $${pIdx}`;
               params.push(value);
             } else {
@@ -163,11 +164,13 @@ export async function getLeads(req, res) {
       hasLinkedin,
       has_contact_info, // My Contacts filter: leads with email OR phone
       is_priority,      // My Contacts page: AI high-priority leads only
+      my_contacts,      // My Contacts page: priority + qualified from connections/prospects
       search,
       title,
       location,
       company,
       industry,
+      timezone,
       quality, // 'primary', 'secondary', 'tertiary'
       connection_degree,
       createdFrom,
@@ -239,6 +242,10 @@ export async function getLeads(req, res) {
 
       // My Contacts page: AI high-priority leads only (is_priority = true)
       if (is_priority === "true") {
+        conditionClauses.push(`is_priority = TRUE`);
+      }
+      // My Contacts: only highly prioritized, profile-matched leads (Primary tier via industry / URL profile)
+      if (my_contacts === "true") {
         conditionClauses.push(`is_priority = TRUE`);
       }
 
@@ -369,15 +376,54 @@ export async function getLeads(req, res) {
     }
 
     // Standard (non-quality) data fetch
-    const dataResult = await pool.query(
-      `SELECT * FROM leads ${whereClause} ${orderClause}
-       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-      [...params, pageLimit, offset]
-    );
-    const countResult = await pool.query(
-      `SELECT COUNT(*) AS count FROM leads ${whereClause}`,
-      params
-    );
+    let dataResult;
+    let countResult;
+    // My Contacts: no duplicates — dedupe by linkedin_url, then email, then id
+    if (my_contacts === "true") {
+      const dedupeKey = `COALESCE(NULLIF(LOWER(TRIM(linkedin_url)), ''), NULLIF(LOWER(TRIM(email)), ''), '__id__' || id::text)`;
+      dataResult = await pool.query(
+        `WITH filtered AS (
+          SELECT * FROM leads ${whereClause}
+        ),
+        ranked AS (
+          SELECT *,
+            ROW_NUMBER() OVER (
+              PARTITION BY ${dedupeKey}
+              ORDER BY is_priority DESC, updated_at DESC, id DESC
+            ) AS rn
+          FROM filtered
+        )
+        SELECT * FROM ranked WHERE rn = 1 ${orderClause}
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, pageLimit, offset]
+      );
+      countResult = await pool.query(
+        `WITH filtered AS (
+          SELECT * FROM leads ${whereClause}
+        ),
+        ranked AS (
+          SELECT
+            ${dedupeKey} AS dedupe_key,
+            ROW_NUMBER() OVER (
+              PARTITION BY ${dedupeKey}
+              ORDER BY is_priority DESC, updated_at DESC, id DESC
+            ) AS rn
+          FROM filtered
+        )
+        SELECT COUNT(*) AS count FROM ranked WHERE rn = 1`,
+        params
+      );
+    } else {
+      dataResult = await pool.query(
+        `SELECT * FROM leads ${whereClause} ${orderClause}
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, pageLimit, offset]
+      );
+      countResult = await pool.query(
+        `SELECT COUNT(*) AS count FROM leads ${whereClause}`,
+        params
+      );
+    }
 
     return res.json({
       leads: dataResult.rows,
@@ -607,15 +653,26 @@ export async function getStats(req, res) {
       title,
       company,
       location,
+      timezone,
       status,
       filters,
       createdFrom,
       createdTo,
-      source
+      source,
+      is_priority,
+      my_contacts
     } = req.query;
 
     const params = [];
     let whereConditions = [];
+
+    if (is_priority === "true") {
+      whereConditions.push(`is_priority = TRUE`);
+    }
+    // My Contacts: only highly prioritized, profile-matched leads (Primary tier)
+    if (my_contacts === "true") {
+      whereConditions.push(`is_priority = TRUE`);
+    }
 
     // Re-use logic from getLeads for building whereConditions
     if (source && source !== 'all') {
@@ -648,6 +705,10 @@ export async function getStats(req, res) {
     if (company && company.trim()) {
       whereConditions.push(`company ILIKE $${params.length + 1}`);
       params.push(`%${company.trim()}%`);
+    }
+    if (timezone && timezone.trim()) {
+      whereConditions.push(`timezone = $${params.length + 1}`);
+      params.push(timezone.trim());
     }
     if (connection_degree && connection_degree.trim()) {
       const degrees = connection_degree.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
@@ -685,6 +746,12 @@ export async function getStats(req, res) {
     const sourceBreakdown = await pool.query(
       `SELECT source, COUNT(*) FROM leads ${whereClause} GROUP BY source`, params
     );
+    const degreeWhere = whereClause
+      ? `${whereClause} AND connection_degree IS NOT NULL AND connection_degree != ''`
+      : 'WHERE connection_degree IS NOT NULL AND connection_degree != \'\'';
+    const degreeBreakdown = await pool.query(
+      `SELECT connection_degree, COUNT(*) FROM leads ${degreeWhere} GROUP BY connection_degree`, params
+    );
 
     // Count duplicates (leads with same linkedin_url)
     const dupWhere = whereConditions.length > 0
@@ -697,6 +764,15 @@ export async function getStats(req, res) {
        ${dupWhere}`, params
     );
 
+    const degreeCount = { first: 0, second: 0, third: 0 };
+    (degreeBreakdown.rows || []).forEach((row) => {
+      const d = (row.connection_degree || '').toLowerCase().trim();
+      const n = parseInt(row.count, 10) || 0;
+      if (d.includes('1st') || d === '1') degreeCount.first += n;
+      else if (d.includes('2nd') || d === '2') degreeCount.second += n;
+      else if (d.includes('3rd') || d === '3') degreeCount.third += n;
+    });
+
     const stats = {
       totalLeads: parseInt(totalLeads.rows[0].count),
       statusCount: statusBreakdown.rows.reduce((acc, row) => {
@@ -707,6 +783,7 @@ export async function getStats(req, res) {
         acc[row.source || 'unknown'] = parseInt(row.count);
         return acc;
       }, {}),
+      degreeCount,
       duplicates: parseInt(duplicatesResult.rows[0]?.duplicates || 0)
     };
 
@@ -1707,10 +1784,11 @@ export async function bulkApproveLeads(req, res) {
       [leadIds]
     );
 
-    // Update leads to approved
+    // Update leads to approved and add to My Contacts (is_priority = true; no duplicates there)
     const result = await pool.query(
       `UPDATE leads 
        SET review_status = 'approved',
+           is_priority = TRUE,
            approved_at = CURRENT_TIMESTAMP,
            approved_by = $1,
            rejected_reason = NULL,
@@ -1972,10 +2050,11 @@ export async function qualifyLeadsByNiche(req, res) {
       [leadsToQualify]
     );
 
-    // Update matching leads to approved
+    // Update matching leads to approved and add to My Contacts (is_priority = true)
     const result = await pool.query(
       `UPDATE leads 
        SET review_status = 'approved',
+           is_priority = TRUE,
            approved_at = CASE WHEN approved_at IS NULL THEN CURRENT_TIMESTAMP ELSE approved_at END,
            approved_by = $1,
            rejected_reason = NULL,
@@ -2223,6 +2302,7 @@ export async function exportLeads(req, res) {
       location,
       company,
       industry,
+      timezone,
       quality, // 'primary', 'secondary', 'tertiary'
       connection_degree,
       createdFrom,
@@ -2246,8 +2326,17 @@ export async function exportLeads(req, res) {
     } else {
       // --- Legacy / Simple Filter Logic ---
       if (source && source !== 'all') {
-        conditionClauses.push(`source = $${params.length + 1}`);
-        params.push(source);
+        if (source.includes(',')) {
+          const sources = source.split(',').map(s => s.trim()).filter(s => s);
+          if (sources.length > 0) {
+            const placeholders = sources.map((_, i) => `$${params.length + i + 1}`).join(', ');
+            conditionClauses.push(`source IN (${placeholders})`);
+            params.push(...sources);
+          }
+        } else {
+          conditionClauses.push(`source = $${params.length + 1}`);
+          params.push(source);
+        }
       }
       if (status && status !== 'all') {
         conditionClauses.push(`status = $${params.length + 1}`);
@@ -2311,6 +2400,12 @@ export async function exportLeads(req, res) {
         conditionClauses.push(`created_at <= $${params.length + 1}`);
         params.push(createdTo);
       }
+    }
+
+    // Timezone filter (applies for both advanced and legacy filter paths)
+    if (timezone && timezone.trim()) {
+      conditionClauses.push(`timezone = $${params.length + 1}`);
+      params.push(timezone.trim());
     }
 
     if (search && search.trim()) {

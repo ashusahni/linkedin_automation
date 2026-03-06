@@ -11,12 +11,37 @@
  * Total = preference_score. Tier = highest tier matched (Primary > Secondary > Tertiary).
  *
  * AI High Priority rule:
- *   If tier === Primary OR (tier === Secondary AND score >= threshold) then is_priority = true, review_status = 'approved'
- *   Else is_priority = false, review_status = 'to_be_reviewed'
+ *   My Contacts: only Primary tier (profile-matched through industry) gets is_priority = true.
+ *   Secondary and Tertiary do not; tiers remain dynamic for dashboard/counts.
  */
 
 import pool from '../db.js';
-import { INDUSTRY_KEYWORDS } from '../config/industries.js';
+import { INDUSTRY_KEYWORDS, TIER_INDUSTRY_GROUPS } from '../config/industries.js';
+import {
+  resolveLeadTopLevel,
+  resolveLeadSubIndustry,
+  getTopLevelFromIndustryLabel,
+  getSubCategoryFromIndustryLabel,
+  getTierFromHierarchy,
+} from './industryHierarchy.service.js';
+import { getIndustryList } from './industryList.service.js';
+import config from '../config/index.js';
+
+/** Build map: normalised(industry label or sub_category) -> top_level_industry, so Settings labels (e.g. "Restaurants") match lead resolved industry (e.g. "Food & Beverage Services"). */
+async function getIndustryLabelToTopLevelMap() {
+  const list = await getIndustryList();
+  const map = new Map();
+  for (const item of list) {
+    const top = item.top_level_industry || item.name || '';
+    if (top) {
+      map.set(normalise(item.name || ''), top);
+      map.set(normalise(item.label || ''), top);
+      if (item.sub_category) map.set(normalise(item.sub_category), top);
+      map.set(normalise(top), top);
+    }
+  }
+  return map;
+}
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -105,19 +130,49 @@ function scoreTitleMatch(leadTitle, tiers) {
   return { score: 0, tier: null };
 }
 
-function scoreIndustryMatch(leadIndustry, tiers) {
+/**
+ * Match lead industry candidates against preference industry list.
+ * @param {string[]} leadIndustryCandidates - e.g. [lead.industry, resolveIndustry(company, title)]
+ * @param {object} tiers - preference_tiers
+ * @param {Map<string,string>} [industryLabelToTopLevel] - optional map: normalised(label) -> top_level_industry (so "Restaurants" matches "Food & Beverage Services")
+ */
+function scoreIndustryMatch(leadIndustry, tiers, industryLabelToTopLevel = null) {
   if (!tiers || !leadIndustry) return { score: 0, tier: null };
+  const candidates = Array.isArray(leadIndustry)
+    ? leadIndustry.filter(Boolean)
+    : [leadIndustry].filter(Boolean);
+  if (candidates.length === 0) return { score: 0, tier: null };
+
+  const expandPrefIndustry = (prefLabel) => {
+    const list = [prefLabel];
+    if (industryLabelToTopLevel && prefLabel) {
+      const top = industryLabelToTopLevel.get(normalise(String(prefLabel)));
+      if (top && top !== prefLabel) list.push(top);
+    }
+    return list;
+  };
+
   const primaryIndustries = tiers.primary?.industries || [];
   const secondaryIndustries = tiers.secondary?.industries || [];
   const tertiaryIndustries = tiers.tertiary?.industries || [];
+
   for (const i of primaryIndustries) {
-    if (matchesAny(leadIndustry, [i])) return { score: TIER_SCORE.primary.industry, tier: 'primary' };
+    const toMatch = expandPrefIndustry(i);
+    if (candidates.some((c) => toMatch.some((m) => matchesAny(c, [m])))) {
+      return { score: TIER_SCORE.primary.industry, tier: 'primary' };
+    }
   }
   for (const i of secondaryIndustries) {
-    if (matchesAny(leadIndustry, [i])) return { score: TIER_SCORE.secondary.industry, tier: 'secondary' };
+    const toMatch = expandPrefIndustry(i);
+    if (candidates.some((c) => toMatch.some((m) => matchesAny(c, [m])))) {
+      return { score: TIER_SCORE.secondary.industry, tier: 'secondary' };
+    }
   }
   for (const i of tertiaryIndustries) {
-    if (matchesAny(leadIndustry, [i])) return { score: TIER_SCORE.tertiary.industry, tier: 'tertiary' };
+    const toMatch = expandPrefIndustry(i);
+    if (candidates.some((c) => toMatch.some((m) => matchesAny(c, [m])))) {
+      return { score: TIER_SCORE.tertiary.industry, tier: 'tertiary' };
+    }
   }
   return { score: 0, tier: null };
 }
@@ -155,22 +210,27 @@ function highestTier(tiers) {
  * Calculate preference_score and preference_tier using tiered preferences only.
  * Degree does NOT influence tier. Tier = highest matched (Primary > Secondary > Tertiary).
  *
- * @param {object} lead – { title, company, location, company_size? } (DB row or plain object)
+ * @param {object} lead – { title, company, location, company_size?, industry? } (DB row or plain object)
  * @param {object} prefs – preference_settings row (with preference_tiers JSONB)
+ * @param {Map<string,string>} [industryLabelToTopLevel] – optional map so Settings industry labels (e.g. sub-categories) match resolved top-level
  * @returns {{ score: number, tier: string|null }}
  */
-export function calculateScore(lead, prefs) {
+export function calculateScore(lead, prefs, industryLabelToTopLevel = null) {
   const tiers = prefs?.preference_tiers || null;
   if (!tiers || (typeof tiers !== 'object')) {
     return { score: 0, tier: null };
   }
 
   const leadTitle = lead.title || '';
-  const leadIndustry = resolveIndustry(lead.company || '', lead.title || '');
+  const industryFromLead = lead.industry || '';
+  const industryFromKeywords = resolveIndustry(lead.company || '', lead.title || '');
+  const leadIndustryCandidates = [industryFromLead, industryFromKeywords]
+    .map((v) => String(v || '').trim())
+    .filter(Boolean);
   const leadCompanySize = lead.company_size || null;
 
   const titleResult = scoreTitleMatch(leadTitle, tiers);
-  const industryResult = scoreIndustryMatch(leadIndustry, tiers);
+  const industryResult = scoreIndustryMatch(leadIndustryCandidates, tiers, industryLabelToTopLevel);
   const companySizeResult = scoreCompanySizeMatch(leadCompanySize, tiers);
 
   const score = titleResult.score + industryResult.score + companySizeResult.score;
@@ -181,17 +241,90 @@ export function calculateScore(lead, prefs) {
 }
 
 /**
- * My Contacts (is_priority): tier-based only — no fixed score threshold.
- * Primary = high quality, Secondary = warm → both count as My Contacts.
- * Tertiary = less warm → not in My Contacts by default.
+ * My Contacts (is_priority): only Primary tier — highly prioritized, profile-matched through industry codes.
+ * Tiers (Primary/Secondary/Tertiary) stay dynamic for all leads; My Contacts lists only Primary so it is not dominated by secondary.
  */
 export function applyPriorityRule(score, tier, prefs, overrideIsPriority = null) {
-  let isPriority = tier === 'primary' || tier === 'secondary';
+  let isPriority = tier === 'primary';
   if (overrideIsPriority !== null) {
     isPriority = overrideIsPriority;
   }
   const reviewStatus = isPriority ? 'approved' : 'to_be_reviewed';
   return { isPriority, reviewStatus };
+}
+
+// ── profile-based tiering (default profile or saved LinkedIn URL) ──────────
+
+/** Score for profile-based tier so dashboard sort is sensible (primary > secondary > tertiary). */
+const PROFILE_TIER_SCORE = { primary: 100, secondary: 50, tertiary: 10 };
+
+/**
+ * Resolve user profile for tier comparison: either from prefs (URL + profile_meta) or default profile.
+ * Returns { userTopLevel, userSub } or null if resolution fails.
+ */
+async function getProfileForTiering(prefs) {
+  const defaultProfile = config.defaultProfile || {};
+  const profileUrl = prefs?.linkedin_profile_url || defaultProfile.linkedinUrl;
+  const profileMeta = prefs?.profile_meta && typeof prefs.profile_meta === 'object' ? prefs.profile_meta : {};
+
+  let industryLabel = profileMeta.industry || profileMeta.title || null;
+  if (industryLabel && typeof industryLabel !== 'string') industryLabel = null;
+
+  if (!industryLabel && profileUrl) {
+    try {
+      const profileEnrichment = (await import('./profileEnrichment.service.js')).default;
+      const enriched = await profileEnrichment.enrichProfileFromUrl(profileUrl);
+      if (enriched && enriched.industry) industryLabel = enriched.industry;
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  if (!industryLabel) {
+    industryLabel = defaultProfile.industry || null;
+  }
+  if (!industryLabel) return null;
+
+  let userTopLevel = await getTopLevelFromIndustryLabel(industryLabel);
+  if (!userTopLevel && defaultProfile.industry) {
+    userTopLevel = await getTopLevelFromIndustryLabel(defaultProfile.industry);
+  }
+  if (!userTopLevel) return null;
+  const userSub = defaultProfile.subIndustry ?? (await getSubCategoryFromIndustryLabel(industryLabel)) ?? null;
+  return { userTopLevel, userSub };
+}
+
+/**
+ * Get default tier for a lead from profile-based industry groups (no manual tier lists).
+ * Primary = industries related to user profile (e.g. chemical CEO → manufacturing, chemicals, marketing).
+ * Secondary = adjacent industries (e.g. IT, tech, education).
+ * Tertiary = remaining. All leads (from any source) get one of the three tiers.
+ */
+function getProfileTierFromGroups(userTopLevel, leadTopLevel) {
+  if (!leadTopLevel) return 'tertiary';
+  const groups = TIER_INDUSTRY_GROUPS[userTopLevel];
+  if (!groups) {
+    // No group defined: same top-level = primary, else tertiary (fallback to strict hierarchy)
+    const sameTop = normalise(String(userTopLevel)) === normalise(String(leadTopLevel));
+    return sameTop ? 'primary' : 'tertiary';
+  }
+  const nLead = normalise(String(leadTopLevel));
+  const primarySet = new Set((groups.primary || []).map((s) => normalise(s)));
+  const secondarySet = new Set((groups.secondary || []).map((s) => normalise(s)));
+  if (primarySet.has(nLead)) return 'primary';
+  if (secondarySet.has(nLead)) return 'secondary';
+  return 'tertiary';
+}
+
+/**
+ * Calculate score and tier for a lead using profile-based industry groups (no manual tier lists).
+ * All leads from My Contacts (any source) are tiered: primary = profile-related industries, secondary = adjacent, tertiary = rest.
+ */
+function calculateScoreFromProfile(lead, userTopLevel, userSub) {
+  const leadTopLevel = resolveLeadTopLevel(lead.company || '', lead.title || '');
+  const tier = getProfileTierFromGroups(userTopLevel, leadTopLevel);
+  const score = (PROFILE_TIER_SCORE[tier] ?? PROFILE_TIER_SCORE.tertiary) + defaultQualityScore(lead);
+  return { score: Math.round(score), tier };
 }
 
 // ── database helpers ───────────────────────────────────────────────────────
@@ -277,18 +410,6 @@ export async function savePreferences(data) {
 }
 
 /**
- * Dynamic tier bands: primary 20–40%, secondary 30–50%, tertiary 40–50%.
- * Picks random valid percentages each rescore so counts vary (not fixed 33/33/33).
- */
-function getDynamicTierPercentages() {
-  const primaryPct = 0.20 + Math.random() * 0.20;
-  const secondaryMax = Math.min(0.50, 0.60 - primaryPct);
-  const secondaryMin = Math.max(0.30, 0.50 - primaryPct);
-  const secondaryPct = secondaryMin + Math.random() * Math.max(0, secondaryMax - secondaryMin);
-  return { pctPrimary: primaryPct, pctSecondary: secondaryPct };
-}
-
-/**
  * Default quality score for a lead when no preference_tiers are set.
  * Based only on profile completeness (title, company, email, phone). Connection degree is NOT used.
  */
@@ -302,10 +423,10 @@ function defaultQualityScore(lead) {
 }
 
 /**
- * Recalculate scores for all leads.
- * - Default (no tier fields saved): score = profile completeness, then assign Primary/Secondary/Tertiary by rank (dynamic % bands).
- * - When user has saved tier fields (Save Preferences): hierarchy is set from those fields — leads matching Primary → primary, Secondary → secondary, Tertiary → tertiary; no match → tertiary.
- * - manual_tier is cleared so dashboard reflects this logic.
+ * Recalculate scores for all leads (any source: My Contacts, search, import). No hardcoded logic restricts which leads go into which tier.
+ * - Manual LinkedIn Preference tiers (Settings) have priority: if primary/secondary/tertiary have titles/industries/sizes, leads matching those lists get that tier; no match → tertiary.
+ * - When no manual tiers: profile-based default using saved LinkedIn URL (or default profile). Primary = industries related to profile (e.g. chemical CEO → manufacturing, marketing, chemicals); Secondary = adjacent (IT, education); Tertiary = rest.
+ * - manual_tier on a lead overrides computed preference_tier for display/filters.
  */
 export async function recalculateAllScores() {
   const prefs = await loadPreferences();
@@ -316,8 +437,27 @@ export async function recalculateAllScores() {
     (tiers.secondary && (tiers.secondary.titles?.length || tiers.secondary.industries?.length || tiers.secondary.company_sizes?.length)) ||
     (tiers.tertiary && (tiers.tertiary.titles?.length || tiers.tertiary.industries?.length || tiers.tertiary.company_sizes?.length))
   );
-  // When user has saved tier fields: set hierarchy by those fields. Otherwise: keep default (percentile) logic.
   const useProfileScoring = Boolean(hasTierCriteria);
+
+  // When using saved tier criteria, map Settings industry labels to top-level so "Restaurants" etc. match lead resolved industry.
+  let industryLabelToTopLevel = null;
+  if (useProfileScoring) {
+    try {
+      industryLabelToTopLevel = await getIndustryLabelToTopLevelMap();
+    } catch (err) {
+      console.warn('[scoring] Industry label map failed, using direct match only:', err?.message);
+    }
+  }
+
+  // When no manual tiers: try profile-based (default profile or saved URL) so relevant connections stay on top.
+  let profileForTier = null;
+  if (!useProfileScoring) {
+    try {
+      profileForTier = await getProfileForTiering(prefs);
+    } catch (err) {
+      console.warn('[scoring] Profile for tiering failed, using fallback:', err?.message);
+    }
+  }
 
   let offset = 0;
   const PAGE = 1000;
@@ -325,7 +465,7 @@ export async function recalculateAllScores() {
 
   while (true) {
     const { rows } = await pool.query(
-      `SELECT id, company, title, location, connection_degree, email
+      `SELECT id, company, title, location, connection_degree, email, phone, industry, manual_tier
        FROM leads
        ORDER BY id
        LIMIT $1 OFFSET $2`,
@@ -335,7 +475,11 @@ export async function recalculateAllScores() {
     for (const lead of rows) {
       let score, tier;
       if (useProfileScoring) {
-        const out = calculateScore(lead, prefs);
+        const out = calculateScore(lead, prefs, industryLabelToTopLevel);
+        score = out.score;
+        tier = out.tier;
+      } else if (profileForTier) {
+        const out = calculateScoreFromProfile(lead, profileForTier.userTopLevel, profileForTier.userSub);
         score = out.score;
         tier = out.tier;
       } else {
@@ -346,6 +490,7 @@ export async function recalculateAllScores() {
         id: lead.id,
         preference_score: score,
         preference_tier: tier,
+        manual_tier: lead.manual_tier || null,
       });
     }
     offset += PAGE;
@@ -356,30 +501,23 @@ export async function recalculateAllScores() {
 
   let finalUpdates = allUpdates;
   if (useProfileScoring) {
-    // Use actual matched tier from preferences; leads that match no tier become tertiary so dashboard totals add up.
+    finalUpdates = allUpdates.map((u) => ({
+      ...u,
+      preference_tier: u.preference_tier || 'tertiary',
+    }));
+  } else if (profileForTier) {
     finalUpdates = allUpdates.map((u) => ({
       ...u,
       preference_tier: u.preference_tier || 'tertiary',
     }));
   } else {
-    // No tier criteria: assign by score rank (dynamic percentile bands).
-    allUpdates.sort((a, b) => {
-      if (b.preference_score !== a.preference_score) return b.preference_score - a.preference_score;
-      return a.id - b.id;
-    });
-    const total = allUpdates.length;
-    const { pctPrimary, pctSecondary } = getDynamicTierPercentages();
-    const primaryCount = Math.max(1, Math.floor(total * pctPrimary));
-    const secondaryCount = Math.max(1, Math.floor(total * pctSecondary));
-    finalUpdates = allUpdates.map((u, idx) => {
-      if (idx < primaryCount) return { ...u, preference_tier: 'primary' };
-      if (idx < primaryCount + secondaryCount) return { ...u, preference_tier: 'secondary' };
-      return { ...u, preference_tier: 'tertiary' };
-    });
+    // No manual tiers and no profile: assign all to tertiary so every lead has a tier (no arbitrary % split).
+    finalUpdates = allUpdates.map((u) => ({ ...u, preference_tier: 'tertiary' }));
   }
 
   finalUpdates.forEach(u => {
-    const { isPriority, reviewStatus } = applyPriorityRule(u.preference_score, u.preference_tier, prefs ?? null, null);
+    const effectiveTier = u.manual_tier || u.preference_tier;
+    const { isPriority, reviewStatus } = applyPriorityRule(u.preference_score, effectiveTier, prefs ?? null, null);
     u.is_priority = isPriority;
     u.review_status = reviewStatus;
   });
@@ -402,16 +540,15 @@ export async function recalculateAllScores() {
       );
     }
     await client.query('COMMIT');
-    const mode = useProfileScoring ? 'saved profile (preference active)' : 'default quality score';
-    const tierSummary = useProfileScoring
+    const mode = useProfileScoring
+      ? 'manual preference tiers (Settings)'
+      : profileForTier
+        ? 'profile-based (industry groups from LinkedIn URL)'
+        : 'tertiary (no profile)';
+    const tierSummary = useProfileScoring || profileForTier
       ? `${finalUpdates.filter(u => u.preference_tier === 'primary').length} primary / ${finalUpdates.filter(u => u.preference_tier === 'secondary').length} secondary / ${finalUpdates.filter(u => u.preference_tier === 'tertiary').length} tertiary`
       : 'dynamic % bands';
     console.log(`[scoring] Recalculated ${finalUpdates.length} leads: ${tierSummary}. Mode: ${mode}.`);
-    try {
-      await pool.query('UPDATE leads SET manual_tier = NULL WHERE manual_tier IS NOT NULL');
-    } catch (_) {
-      // manual_tier column may not exist on older DBs; tier update already committed
-    }
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[scoring] Recalculate failed:', err);
@@ -425,10 +562,38 @@ export async function recalculateAllScores() {
 
 /**
  * Score a single lead (at ingestion). Returns { score, tier, isPriority, reviewStatus }.
+ * Uses manual tier lists when saved; otherwise profile-based hierarchy (default profile or prefs URL).
  */
 export async function scoreAndClassifyLead(lead) {
   const prefs = await loadPreferences();
-  const { score, tier } = calculateScore(lead, prefs);
+  const tiers = prefs?.preference_tiers && typeof prefs.preference_tiers === 'object' ? prefs.preference_tiers : null;
+  const hasTierCriteria = tiers && (
+    (tiers.primary && (tiers.primary.titles?.length || tiers.primary.industries?.length || tiers.primary.company_sizes?.length)) ||
+    (tiers.secondary && (tiers.secondary.titles?.length || tiers.secondary.industries?.length || tiers.secondary.company_sizes?.length)) ||
+    (tiers.tertiary && (tiers.tertiary.titles?.length || tiers.tertiary.industries?.length || tiers.tertiary.company_sizes?.length))
+  );
+
+  let score, tier;
+  if (hasTierCriteria) {
+    let industryLabelToTopLevel = null;
+    try {
+      industryLabelToTopLevel = await getIndustryLabelToTopLevelMap();
+    } catch (_) {}
+    const out = calculateScore(lead, prefs, industryLabelToTopLevel);
+    score = out.score;
+    tier = out.tier;
+  } else {
+    const profileForTier = await getProfileForTiering(prefs);
+    if (profileForTier) {
+      const out = calculateScoreFromProfile(lead, profileForTier.userTopLevel, profileForTier.userSub);
+      score = out.score;
+      tier = out.tier;
+    } else {
+      score = defaultQualityScore(lead);
+      tier = null;
+    }
+  }
+
   const { isPriority, reviewStatus } = applyPriorityRule(score, tier, prefs);
   return {
     score,

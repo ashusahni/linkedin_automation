@@ -1,5 +1,6 @@
 import express from 'express';
 import industryHierarchyService from '../services/industryHierarchy.service.js';
+import { getIndustryList } from '../services/industryList.service.js';
 
 const router = express.Router();
 
@@ -56,6 +57,27 @@ router.get('/subtags', async (req, res) => {
         res.status(500).json({
             success: false,
             error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/industry/list
+ * Returns all industries (code + name/label + hierarchy) for Settings primary/secondary/tertiary dropdowns.
+ * Source: linkedin_industries table, or fallback to linkedin_industry_code_v2_all_eng.json.
+ */
+router.get('/list', async (req, res) => {
+    try {
+        const industries = await getIndustryList();
+        res.json({
+            success: true,
+            data: industries,
+        });
+    } catch (error) {
+        console.error('Error fetching industry list:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
         });
     }
 });

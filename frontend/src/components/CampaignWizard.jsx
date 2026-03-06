@@ -9,22 +9,57 @@ import axios from 'axios';
 import { useToast } from './ui/toast';
 import { cn } from '../lib/utils';
 
-const CAMPAIGN_TYPES = [
-    { value: 'standard', label: 'Standard Outreach', icon: '🎯', description: 'General connection & follow-up' },
-    { value: 'event', label: 'Event Promotion', icon: '🎉', description: 'Invite to events or webinars' },
-    { value: 'webinar', label: 'Webinar', icon: '📺', description: 'Webinar registration drive' },
-    { value: 'nurture', label: 'Nurture', icon: '🌱', description: 'Long-term relationship building' },
-    { value: 're_engagement', label: 'Re-engagement', icon: '🔄', description: 'Reconnect with old contacts' },
-    { value: 'cold_outreach', label: 'Cold Outreach', icon: '❄️', description: 'First-time cold contacts' }
-];
-
-const CAMPAIGN_GOALS = [
-    { value: 'connections', label: 'Build Connections', icon: '🤝' },
-    { value: 'meetings', label: 'Book Meetings', icon: '📅' },
-    { value: 'pipeline', label: 'Generate Pipeline', icon: '💰' },
-    { value: 'brand_awareness', label: 'Brand Awareness', icon: '📢' },
-    { value: 'event_promotion', label: 'Event Promotion', icon: '🎪' },
-    { value: 'content_engagement', label: 'Content Engagement', icon: '📝' }
+const CAMPAIGN_GOAL_OPTIONS = [
+    {
+        value: 'grow_connections',
+        type: 'standard',
+        legacyGoal: 'connections',
+        label: 'Grow Connections',
+        icon: '🤝',
+        description: 'Connection Request with 2nd and 3rd degree to grow your network. Uses your LinkedIn Inmail credits.',
+    },
+    {
+        value: 'first_degree_message',
+        type: 'nurture',
+        legacyGoal: 'content_engagement',
+        label: '1st Degree Message',
+        icon: '💬',
+        description: 'Message your existing network - General connect / Product / Service / Announcement campaign. Uses your LinkedIn messages.',
+    },
+    {
+        value: 'event_promotion',
+        type: 'event',
+        legacyGoal: 'event_promotion',
+        label: 'Event Promotion',
+        icon: '🎉',
+        description: 'Invite your network to an in-person event.',
+        needsRegistrationLink: true,
+    },
+    {
+        value: 'webinar',
+        type: 'webinar',
+        legacyGoal: 'event_promotion',
+        label: 'Webinar',
+        icon: '📺',
+        description: 'Invite your network to a digital event / webinar.',
+        needsRegistrationLink: true,
+    },
+    {
+        value: 're_engage',
+        type: 're_engagement',
+        legacyGoal: 'brand_awareness',
+        label: 'Re-engage',
+        icon: '🔄',
+        description: 'Reconnect with your engaged audience from a previous campaign. Reload a campaign with Outreach Status = Replied.',
+    },
+    {
+        value: 'cold_outreach',
+        type: 'cold_outreach',
+        legacyGoal: 'pipeline',
+        label: 'Cold Outreach',
+        icon: '❄️',
+        description: 'Product / Service / Announcement campaign to 2nd and 3rd degree. Uses your LinkedIn Inmail credits, as applicable, and therefore not recommended.',
+    },
 ];
 
 export default function CampaignWizard({ onClose, onCreate }) {
@@ -35,9 +70,11 @@ export default function CampaignWizard({ onClose, onCreate }) {
     // Form Data
     const [campaignData, setCampaignData] = useState({
         name: '',
+        campaign_goal: 'grow_connections',
         type: 'standard',
         goal: 'connections',
         description: '',
+        registration_link: '',
         priority: 'normal',
         tags: [],
 
@@ -80,9 +117,19 @@ export default function CampaignWizard({ onClose, onCreate }) {
     };
 
     const handleNext = () => {
+        const selectedGoal = CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === campaignData.campaign_goal) || CAMPAIGN_GOAL_OPTIONS[0];
+
         // Validation
         if (currentStep === 1 && !campaignData.name.trim()) {
             addToast('Please enter a campaign name', 'warning');
+            return;
+        }
+        if (currentStep === 1 && !campaignData.description.trim()) {
+            addToast('Campaign description is required', 'warning');
+            return;
+        }
+        if (currentStep === 1 && selectedGoal.needsRegistrationLink && !campaignData.registration_link?.trim()) {
+            addToast('Registration link is required for this campaign goal', 'warning');
             return;
         }
 
@@ -100,19 +147,21 @@ export default function CampaignWizard({ onClose, onCreate }) {
     const handleCreate = async () => {
         setLoading(true);
         try {
+            const selectedGoal = CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === campaignData.campaign_goal) || CAMPAIGN_GOAL_OPTIONS[0];
             // Convert filters to target_audience JSONB
             const payload = {
                 name: campaignData.name.trim(),
-                type: campaignData.type,
-                goal: campaignData.goal,
-                description: campaignData.description.trim() || undefined,
+                type: selectedGoal.type,
+                goal: campaignData.campaign_goal,
+                description: campaignData.description.trim(),
                 target_audience: JSON.stringify(campaignData.filters), // Store as JSONB
                 schedule_start: campaignData.schedule_start || undefined,
                 schedule_end: campaignData.schedule_end || undefined,
                 daily_cap: campaignData.daily_cap ? parseInt(campaignData.daily_cap, 10) : 0,
                 timezone: campaignData.timezone || 'UTC',
                 tags: campaignData.tags.length ? campaignData.tags : undefined,
-                priority: campaignData.priority
+                priority: campaignData.priority,
+                settings: (campaignData.registration_link?.trim() ? { registration_link: campaignData.registration_link.trim() } : undefined)
             };
 
             await onCreate(payload);
@@ -126,7 +175,33 @@ export default function CampaignWizard({ onClose, onCreate }) {
     };
 
     const updateField = (field, value) => {
-        setCampaignData(prev => ({ ...prev, [field]: value }));
+        setCampaignData((prev) => {
+            if (field === 'campaign_goal') {
+                const selectedGoal = CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === value) || CAMPAIGN_GOAL_OPTIONS[0];
+                const nextState = {
+                    ...prev,
+                    campaign_goal: value,
+                    type: selectedGoal.type,
+                    goal: value,
+                };
+
+                if (value === 're_engage') {
+                    nextState.filters = {
+                        operator: 'OR',
+                        groups: [
+                            {
+                                operator: 'AND',
+                                conditions: [
+                                    { field: 'status', operator: 'equals', value: 'replied', exclude: false }
+                                ]
+                            }
+                        ]
+                    };
+                }
+                return nextState;
+            }
+            return { ...prev, [field]: value };
+        });
     };
 
     const steps = [
@@ -210,50 +285,25 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                 />
                             </div>
 
-                            {/* Type Selection */}
+                            {/* Campaign Goal Selection */}
                             <div className="space-y-3">
-                                <label className="text-sm font-medium">Campaign Type</label>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                    {CAMPAIGN_TYPES.map((type) => (
+                                <label className="text-sm font-medium">Campaign Goal</label>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {CAMPAIGN_GOAL_OPTIONS.map((goal) => (
                                         <button
-                                            key={type.value}
+                                            key={goal.value}
                                             type="button"
-                                            onClick={() => updateField('type', type.value)}
+                                            onClick={() => updateField('campaign_goal', goal.value)}
                                             className={cn(
                                                 "p-4 rounded-lg border-2 text-left transition-all hover:border-primary/50",
-                                                campaignData.type === type.value
+                                                campaignData.campaign_goal === goal.value
                                                     ? "border-primary bg-primary/5 ring-2 ring-primary/20"
                                                     : "border-muted hover:bg-muted/30"
                                             )}
                                         >
-                                            <div className="text-2xl mb-2">{type.icon}</div>
-                                            <div className="font-semibold text-sm">{type.label}</div>
-                                            <div className="text-xs text-muted-foreground mt-1">{type.description}</div>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Goal Selection */}
-                            <div className="space-y-3">
-                                <label className="text-sm font-medium">Campaign Goal</label>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                    {CAMPAIGN_GOALS.map((goal) => (
-                                        <button
-                                            key={goal.value}
-                                            type="button"
-                                            onClick={() => updateField('goal', goal.value)}
-                                            className={cn(
-                                                "p-3 rounded-lg border-2 text-left transition-all hover:border-primary/50",
-                                                campaignData.goal === goal.value
-                                                    ? "border-primary bg-primary/5"
-                                                    : "border-muted hover:bg-muted/30"
-                                            )}
-                                        >
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-xl">{goal.icon}</span>
-                                                <span className="font-medium text-sm">{goal.label}</span>
-                                            </div>
+                                            <div className="text-2xl mb-2">{goal.icon}</div>
+                                            <div className="font-semibold text-sm">{goal.label}</div>
+                                            <div className="text-xs text-muted-foreground mt-1">{goal.description}</div>
                                         </button>
                                     ))}
                                 </div>
@@ -262,19 +312,36 @@ export default function CampaignWizard({ onClose, onCreate }) {
                             {/* Description */}
                             <div className="space-y-2">
                                 <label className="text-sm font-medium flex items-center gap-2">
-                                    Campaign Description
-                                    <Badge variant="secondary" className="text-xs">Optional</Badge>
+                                    Campaign Description *
                                 </label>
                                 <textarea
                                     className="w-full min-h-[100px] px-3 py-2 rounded-md border border-input bg-background text-sm resize-y"
-                                    placeholder="Describe your campaign goals and value proposition. This will help AI generate better messages later..."
+                                    placeholder="Describe your campaign goals and value proposition. This helps AI generate better messages. Tip: Include a link here (e.g. product page, signup) — it will be sent to leads together with the AI-generated LinkedIn message."
                                     value={campaignData.description}
                                     onChange={(e) => updateField('description', e.target.value)}
                                 />
                                 <p className="text-xs text-muted-foreground">
-                                    💡 Tip: Include your product/service name and target persona for better AI-generated messages
+                                    💡 Tip: Include your product/service name, target persona, and any link (e.g. signup or product page) — links in the description are sent to leads with the AI-generated LinkedIn message.
                                 </p>
                             </div>
+                            {/* Registration Link for Event Promotion & Webinar */}
+                            {(campaignData.campaign_goal === 'event_promotion' || campaignData.campaign_goal === 'webinar') && (
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium flex items-center gap-2">
+                                        Registration Link *
+                                    </label>
+                                    <Input
+                                        type="url"
+                                        placeholder="https://..."
+                                        value={campaignData.registration_link}
+                                        onChange={(e) => updateField('registration_link', e.target.value)}
+                                        className="text-base"
+                                    />
+                                    <p className="text-xs text-muted-foreground">
+                                        This link will be automatically included in outbound LinkedIn messages.
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -351,8 +418,9 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                     <div className="flex-1">
                                         <h2 className="text-2xl font-bold">{campaignData.name}</h2>
                                         <div className="flex flex-wrap gap-2 mt-2">
-                                            <Badge variant="outline">{CAMPAIGN_TYPES.find(t => t.value === campaignData.type)?.label}</Badge>
-                                            <Badge variant="outline">{CAMPAIGN_GOALS.find(g => g.value === campaignData.goal)?.label}</Badge>
+                                            <Badge variant="outline">
+                                                {CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === campaignData.campaign_goal)?.label}
+                                            </Badge>
                                         </div>
                                     </div>
                                 </div>
@@ -386,12 +454,10 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                     </CardHeader>
                                     <CardContent className="space-y-2">
                                         <div className="flex justify-between text-sm">
-                                            <span className="text-muted-foreground">Type:</span>
-                                            <span className="font-medium">{CAMPAIGN_TYPES.find(t => t.value === campaignData.type)?.label}</span>
-                                        </div>
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-muted-foreground">Goal:</span>
-                                            <span className="font-medium">{CAMPAIGN_GOALS.find(g => g.value === campaignData.goal)?.label}</span>
+                                            <span className="text-muted-foreground">Campaign Goal:</span>
+                                            <span className="font-medium">
+                                                {CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === campaignData.campaign_goal)?.label}
+                                            </span>
                                         </div>
 
                                     </CardContent>

@@ -10,108 +10,145 @@ import { buildLinkedInSearchUrl, buildSearchQueryFromCriteria } from "../utils/l
 import pool from "../db.js";
 import { NotificationService } from "../services/notification.service.js";
 
+// Link shown to user when sign-in or connection needs to be refreshed (no technical wording in UI)
+const FIX_CONNECTION_URL = "https://app.phantombuster.com";
+
+/**
+ * Builds the JSON payload (and status) for a phantom error. Used by handlePhantomError and by
+ * campaign launch so the same user-friendly message + link are returned everywhere.
+ * @returns {{ status: number, payload: object } | null} null if not a recognized phantom error
+ */
+export function getPhantomErrorPayload(error) {
+  const msg = String(error.message || "");
+
+  // Sign-in expired or session/cookie missing — user-friendly message + link only
+  if (
+    (/^PB_/.test(error.code) || !error.code) &&
+    /cookie|session|li_at|login|expir/i.test(msg)
+  ) {
+    return {
+      status: 400,
+      payload: {
+        success: false,
+        code: "PB_COOKIE_MISSING",
+        message: "Your sign-in has expired. Please sign in again to continue.",
+        tips: ["Use the link below to reconnect your account, then try again."],
+        helpUrl: FIX_CONNECTION_URL,
+      },
+    };
+  }
+
+  // LinkedIn / Sales Navigator monthly quota exhausted
+  if (error.code === "PB_LINKEDIN_QUOTA_EXCEEDED") {
+    return {
+      status: 429,
+      payload: {
+        success: false,
+        code: error.code,
+        message: "Search limit reached for this month. You can try again after it resets or use a different account.",
+        tips: [
+          "Use the link below to check your account and limits.",
+          "You can still work with leads already in the app.",
+        ],
+        helpUrl: FIX_CONNECTION_URL,
+      },
+    };
+  }
+
+  // Agent doesn't exist / wrong ID
+  if (error.code === "PB_AGENT_NOT_FOUND") {
+    return {
+      status: 400,
+      payload: {
+        success: false,
+        code: error.code,
+        message: "The connection to your automation could not be found. Please check your setup.",
+        tips: ["Use the link below to open your dashboard and reconnect the automation."],
+        helpUrl: FIX_CONNECTION_URL,
+        configuredAgentIds: {
+          SEARCH_EXPORT_PHANTOM_ID: process.env.SEARCH_EXPORT_PHANTOM_ID || process.env.SEARCH_LEADS_PHANTOM_ID || null,
+          CONNECTIONS_EXPORT_PHANTOM_ID: process.env.CONNECTIONS_EXPORT_PHANTOM_ID || null,
+          PROFILE_SCRAPER_PHANTOM_ID: process.env.PROFILE_SCRAPER_PHANTOM_ID || null,
+          MESSAGE_SENDER_PHANTOM_ID: process.env.MESSAGE_SENDER_PHANTOM_ID || process.env.LINKEDIN_MESSAGE_PHANTOM_ID || process.env.PHANTOM_MESSAGE_SENDER_ID || null
+        },
+      },
+    };
+  }
+
+  // Max parallelism (already running)
+  if (error.code === "PB_MAX_PARALLELISM") {
+    return {
+      status: 429,
+      payload: {
+        success: false,
+        code: error.code,
+        message: "A run is already in progress. Please wait for it to finish, or stop it first.",
+        tips: ["Use the link below to view and manage running tasks."],
+        helpUrl: FIX_CONNECTION_URL,
+      },
+    };
+  }
+
+  // Network
+  if (error.code === "PB_NETWORK_ERROR") {
+    return {
+      status: 502,
+      payload: {
+        success: false,
+        code: error.code,
+        message: "We couldn’t reach the service. Please try again in a minute.",
+        helpUrl: FIX_CONNECTION_URL,
+      },
+    };
+  }
+
+  // Argument invalid (e.g. run once from dashboard first)
+  if (
+    (error.code === "PB_UNKNOWN_ERROR" || !error.code) &&
+    /argument-invalid|argument invalid/i.test(msg)
+  ) {
+    return {
+      status: 400,
+      payload: {
+        success: false,
+        code: "PB_ARGUMENT_INVALID",
+        message: "Setup isn’t complete yet. Run it once from the link below, then try again here.",
+        tips: ["Open the link below, run the automation once there, then come back and try again."],
+        helpUrl: FIX_CONNECTION_URL,
+      },
+    };
+  }
+
+  // Fallback: still add the link so user has a place to fix things
+  const message = error.message || "Something went wrong. Try again or use the link below to check your account.";
+  return {
+    status: 500,
+    payload: {
+      success: false,
+      code: error.code || "PB_UNKNOWN_ERROR",
+      message,
+      helpUrl: FIX_CONNECTION_URL,
+      ...(error.details && { details: error.details }),
+      ...(process.env.NODE_ENV === "development" && error.stack && { stack: error.stack }),
+    },
+  };
+}
+
 // Centralized helper to map PhantomBuster errors into clear API responses
 function handlePhantomError(res, context, error) {
   console.error(`❌ ${context} error:`, error.message);
 
-  // Special case: LinkedIn / Sales Navigator monthly quota exhausted
-  if (error.code === "PB_LINKEDIN_QUOTA_EXCEEDED") {
-    return res.status(429).json({
-      success: false,
-      code: error.code,
-      message: error.message,
-      tips: [
-        "Open LinkedIn / Sales Navigator and confirm that profile search quota is exhausted.",
-        "Wait until LinkedIn resets your monthly quota (usually each billing cycle).",
-        "Optionally connect a different LinkedIn account / subscription with available quota.",
-        "You can still work with already-imported leads in the app while quota is exhausted."
-      ]
-    });
+  const result = getPhantomErrorPayload(error);
+  if (result) {
+    return res.status(result.status).json(result.payload);
   }
 
-  // Special case: agent doesn't exist / wrong ID
-  if (error.code === "PB_AGENT_NOT_FOUND") {
-    return res.status(400).json({
-      success: false,
-      code: error.code,
-      message: "The configured PhantomBuster agent ID does not exist. Please update the ID in your backend .env file.",
-      tips: [
-        "Open your PhantomBuster dashboard and copy the ID of your LinkedIn search phantom.",
-        "Update SEARCH_EXPORT_PHANTOM_ID (LinkedIn Search Export phantom) and other *_PHANTOM_ID values in backend/.env.",
-        "Restart the backend after changing .env."
-      ],
-      configuredAgentIds: {
-        SEARCH_EXPORT_PHANTOM_ID: process.env.SEARCH_EXPORT_PHANTOM_ID || process.env.SEARCH_LEADS_PHANTOM_ID || null,
-        CONNECTIONS_EXPORT_PHANTOM_ID: process.env.CONNECTIONS_EXPORT_PHANTOM_ID || null,
-        PROFILE_SCRAPER_PHANTOM_ID: process.env.PROFILE_SCRAPER_PHANTOM_ID || null,
-        MESSAGE_SENDER_PHANTOM_ID: process.env.MESSAGE_SENDER_PHANTOM_ID || process.env.LINKEDIN_MESSAGE_PHANTOM_ID || process.env.PHANTOM_MESSAGE_SENDER_ID || null
-      }
-    });
-  }
-
-  // Special case: max parallelism reached (agent already running)
-  if (error.code === "PB_MAX_PARALLELISM") {
-    return res.status(429).json({
-      success: false,
-      code: error.code,
-      message: "Your PhantomBuster agent is already running and has reached its maximum parallel executions limit.",
-      tips: [
-        "Open the PhantomBuster agent and stop/kill any running executions.",
-        "Avoid clicking 'Search and Import' multiple times quickly.",
-        "Wait for the current run to finish before starting another search."
-      ]
-    });
-  }
-
-  // Network-level issues
-  if (error.code === "PB_NETWORK_ERROR") {
-    return res.status(502).json({
-      success: false,
-      code: error.code,
-      message: "Network error while talking to PhantomBuster. Please try again in a minute.",
-    });
-  }
-
-  // Cookie/session missing (common for Search Export: phantom expects dashboard LinkedIn)
-  if (
-    (error.code === "PB_UNKNOWN_ERROR" || !error.code) &&
-    /cookie|session|li_at|login/i.test(String(error.message || ""))
-  ) {
-    return res.status(400).json({
-      success: false,
-      code: "PB_COOKIE_MISSING",
-      message: "LinkedIn session not available for this phantom. For Search Export, connect LinkedIn in the PhantomBuster dashboard for this agent (do not pass cookie in .env).",
-      tips: [
-        "Open PhantomBuster → your LinkedIn Search Export agent → Connect / add your LinkedIn account for this agent.",
-        "The app no longer passes .env cookie to Search Export by default; the phantom uses the dashboard connection.",
-        "If you prefer to use .env cookie, set SEARCH_EXPORT_USE_ENV_COOKIE=true in backend .env and ensure LINKEDIN_SESSION_COOKIE is set and valid."
-      ]
-    });
-  }
-
-  // argument-invalid: phantom rejected launch arguments (common with Search Export when run via API)
-  if (
-    (error.code === "PB_UNKNOWN_ERROR" || !error.code) &&
-    /argument-invalid|argument invalid/i.test(String(error.message || ""))
-  ) {
-    return res.status(400).json({
-      success: false,
-      code: "PB_ARGUMENT_INVALID",
-      message: "PhantomBuster Search Export phantom rejected the launch arguments. Run it once from the PhantomBuster dashboard instead.",
-      tips: [
-        "In PhantomBuster, open your LinkedIn Search Export agent and set the Search URL and number of results in the setup.",
-        "Click Launch in PhantomBuster (run it once from the dashboard) to confirm it works there.",
-        "Then try Search & Import again from this app. If it still fails, run the phantom from PhantomBuster when you need leads and export/import results manually, or contact PhantomBuster support for the exact API launch argument format for this agent."
-      ]
-    });
-  }
-
-  // Fallback: unknown/other error (include details if PhantomBuster sent them)
-  const message = error.message || "Unexpected error while communicating with PhantomBuster.";
+  const message = error.message || "Something went wrong. Try again or use the link below to check your account.";
   return res.status(500).json({
     success: false,
     code: error.code || "PB_UNKNOWN_ERROR",
     message,
+    helpUrl: FIX_CONNECTION_URL,
     ...(error.details && { details: error.details }),
     ...(process.env.NODE_ENV === "development" && error.stack && { stack: error.stack })
   });

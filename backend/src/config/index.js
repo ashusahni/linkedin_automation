@@ -98,11 +98,20 @@ const config = {
     }
   },
 
+  // Default profile for My Contacts / tier prioritization when no preferences are set.
+  // Keeps relevant connections (same industry as this profile) on top everywhere.
+  defaultProfile: {
+    linkedinUrl: process.env.DEFAULT_PROFILE_URL || 'https://www.linkedin.com/in/rishab-khandelwal-954484101/',
+    industry: process.env.DEFAULT_PROFILE_INDUSTRY || 'Manufacturing',
+    subIndustry: process.env.DEFAULT_PROFILE_SUB_INDUSTRY || null, // e.g. 'Chemical Manufacturing'
+  },
+
   // Branding Configuration
   branding: {
     userName: process.env.APP_USER_NAME || '',
     companyName: process.env.APP_COMPANY_NAME || 'Scottish Chemical Industries',
-    logoUrl: process.env.APP_LOGO_URL || '/logo.jpg',
+    logoUrl: process.env.APP_LOGO_URL || '/api/settings/logo/default',
+    navLogoUrl: process.env.APP_NAV_LOGO_URL || '/api/settings/logo/nav',
     profileImageUrl: process.env.APP_PROFILE_IMAGE_URL || '',
     theme: process.env.APP_THEME || 'default'
   }

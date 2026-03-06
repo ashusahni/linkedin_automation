@@ -5,6 +5,44 @@ import pool from '../db.js';
 const router = express.Router();
 
 /**
+ * POST /api/email/manual
+ * Send a manual email to any address (subject + content) via SendGrid/SES
+ */
+router.post('/manual', async (req, res) => {
+    try {
+        const { to, subject, content } = req.body;
+
+        if (!to || typeof to !== 'string' || !to.trim()) {
+            return res.status(400).json({ error: 'Recipient email (to) is required' });
+        }
+
+        if (!emailService.isConfigured()) {
+            return res.status(503).json({
+                error: 'Email service not configured',
+                message: 'Please set SENDGRID_API_KEY or AWS SES credentials in .env'
+            });
+        }
+
+        const subjectStr = typeof subject === 'string' ? subject.trim() : '';
+        const text = typeof content === 'string' ? content.trim() : '';
+
+        await emailService.sendEmail(to.trim(), subjectStr || '(No subject)', text);
+
+        return res.json({
+            success: true,
+            message: `Email sent to ${to.trim()}`,
+            provider: emailService.provider
+        });
+    } catch (error) {
+        console.error('Manual email error:', error);
+        return res.status(500).json({
+            error: 'Failed to send email',
+            details: error.message
+        });
+    }
+});
+
+/**
  * POST /api/email/test
  * Send a test email to verify configuration
  */

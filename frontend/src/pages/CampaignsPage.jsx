@@ -24,7 +24,6 @@ import {
 } from "../components/ui/dropdown-menu";
 import { useToast } from '../components/ui/toast';
 import { Skeleton } from '../components/ui/skeleton';
-import { useTimeFilter } from '../context/TimeFilterContext';
 import PageGuide from '../components/PageGuide';
 import CampaignWizard from '../components/CampaignWizard';
 import { cn } from '../lib/utils';
@@ -53,6 +52,24 @@ function rateColor(r) {
     if (r >= 30) return '#10b981';
     if (r >= 15) return '#f59e0b';
     return '#64748b';
+}
+
+const CAMPAIGN_GOAL_LABELS = {
+    grow_connections: 'Grow Connections',
+    first_degree_message: '1st Degree Message',
+    event_promotion: 'Event Promotion',
+    webinar: 'Webinar',
+    re_engage: 'Re-engage',
+    cold_outreach: 'Cold Outreach',
+    connections: 'Connections',
+    meetings: 'Meetings',
+    pipeline: 'Pipeline',
+    brand_awareness: 'Brand Awareness',
+    content_engagement: 'Content Engagement',
+};
+
+function goalLabel(goal) {
+    return CAMPAIGN_GOAL_LABELS[goal] || goal;
 }
 
 // ── Stat Card ────────────────────────────────────────────────────────────────
@@ -205,7 +222,7 @@ function CampaignCard({ campaign, index, onNavigate, onDuplicate, onLaunch, onPa
                         <div className="flex flex-wrap gap-1">
                             {campaign.goal && (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary border border-primary/20">
-                                    {campaign.goal}
+                                    {goalLabel(campaign.goal)}
                                 </span>
                             )}
                             {campaign.type && campaign.type !== 'standard' && (
@@ -245,13 +262,30 @@ export default function CampaignsPage() {
     const [filterGoal, setFilterGoal] = useState('all');
     const [filterType, setFilterType] = useState('all');
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const { period, month, year } = useTimeFilter();
     const [launchesToday, setLaunchesToday] = useState({ count: 0, limit: 2, countWeek: 0, limitWeek: 8 });
     const [limitEnforced, setLimitEnforced] = useState(true);
     const [showQueuedModal, setShowQueuedModal] = useState(false);
     const [queuedCampaignName, setQueuedCampaignName] = useState('');
+    const [showRateLimitOffConfirm, setShowRateLimitOffConfirm] = useState(false);
+
+    const RATE_LIMIT_OFF_HOURS = 12;
+
     useEffect(() => {
-        try { setLimitEnforced(localStorage.getItem('campaignLimitEnforced') !== 'false'); } catch { }
+        try {
+            const offUntil = localStorage.getItem('campaignLimitOffUntil');
+            if (offUntil) {
+                const until = new Date(offUntil).getTime();
+                if (Date.now() >= until) {
+                    setLimitEnforced(true);
+                    localStorage.removeItem('campaignLimitOffUntil');
+                    localStorage.setItem('campaignLimitEnforced', 'true');
+                } else {
+                    setLimitEnforced(false);
+                }
+            } else {
+                setLimitEnforced(localStorage.getItem('campaignLimitEnforced') !== 'false');
+            }
+        } catch { }
     }, []);
     useEffect(() => {
         axios.get('/api/campaigns/launches-today').then((r) => {
@@ -264,36 +298,14 @@ export default function CampaignsPage() {
         }).catch(() => {});
     }, []);
 
-    useEffect(() => { fetchCampaigns(); }, [period, month, year]);
+    useEffect(() => { fetchCampaigns(); }, []);
 
     const fetchCampaigns = async () => {
         try {
             setError(null);
             setLoading(true);
 
-            // Calculate range based on global context
-            const now = new Date();
-            let start, end;
-            if (period === "daily") {
-                start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-            } else if (period === "weekly") {
-                const day = now.getDay() || 7;
-                start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1);
-                end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-            } else if (period === "monthly") {
-                start = new Date(year, month, 1);
-                end = new Date(year, month + 1, 1);
-            } else if (period === "yearly") {
-                start = new Date(year, 0, 1);
-                end = new Date(year + 1, 0, 1);
-            }
-
-            const params = new URLSearchParams();
-            if (start) params.set('createdFrom', start.toISOString());
-            if (end) params.set('createdTo', end.toISOString());
-
-            const res = await axios.get(`/api/campaigns?${params.toString()}`);
+            const res = await axios.get('/api/campaigns');
             setCampaigns(Array.isArray(res.data) ? res.data : []);
         } catch (err) {
             const errorMsg = err.response?.data?.error || err.message || 'Could not load campaigns';
@@ -410,51 +422,38 @@ export default function CampaignsPage() {
                             <Megaphone className="relative w-6 h-6 text-indigo-500" />
                         </div>
                         <div>
-                            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Campaigns</h1>
+                            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">LinkedIn Campaigns</h1>
                             <p className="text-muted-foreground text-sm mt-0.5">Manage your LinkedIn outreach campaigns</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                        {/* Launch limits: label "Limits" + tooltip with day/week rows */}
-                        <div className="flex items-center gap-1.5 shrink-0 h-9">
-                            <TooltipProvider delayDuration={200}>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <span
-                                            className={cn(
-                                                "inline-flex items-center h-8 px-2.5 rounded-lg border text-xs font-medium cursor-default",
-                                                (limitEnforced && (launchesToday.count >= launchesToday.limit || launchesToday.countWeek >= launchesToday.limitWeek))
-                                                    ? "border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400"
-                                                    : "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                            )}
-                                        >
-                                            Limits
-                                        </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="bottom" className="font-normal">
-                                        <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">Campaign limits</p>
-                                        <div className="space-y-1 text-xs tabular-nums">
-                                            <p>Day &nbsp; {launchesToday.count} / {launchesToday.limit}</p>
-                                            <p>Week {launchesToday.countWeek} / {launchesToday.limitWeek}</p>
-                                        </div>
-                                    </TooltipContent>
-                                </Tooltip>
-                            </TooltipProvider>
+                        {/* Campaign Limits: Daily X/2 | Weekly Y/8 | Rate limit toggle */}
+                        <div className="flex items-center gap-2 shrink-0 h-9">
+                            <span className="text-xs font-medium text-muted-foreground hidden sm:inline">
+                                Daily {launchesToday.count} / {launchesToday.limit} &nbsp;|&nbsp; Weekly {launchesToday.countWeek} / {launchesToday.limitWeek} &nbsp;|&nbsp;
+                            </span>
+                            <span className="text-xs font-medium text-muted-foreground sm:hidden">Rate limit:</span>
                             <button
                                 type="button"
                                 onClick={() => {
-                                    const next = !limitEnforced;
-                                    setLimitEnforced(next);
-                                    try { localStorage.setItem('campaignLimitEnforced', next ? 'true' : 'false'); } catch { }
+                                    if (limitEnforced) {
+                                        setShowRateLimitOffConfirm(true);
+                                    } else {
+                                        setLimitEnforced(true);
+                                        try {
+                                            localStorage.setItem('campaignLimitEnforced', 'true');
+                                            localStorage.removeItem('campaignLimitOffUntil');
+                                        } catch { }
+                                    }
                                 }}
                                 className={cn(
-                                    "h-8 px-2 rounded-lg border text-xs font-medium transition-colors",
+                                    "h-8 px-2.5 rounded-lg border text-xs font-medium transition-colors",
                                     "border-border/60 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground",
                                     limitEnforced && "ring-1 ring-primary/30 text-primary"
                                 )}
-                                title={limitEnforced ? "Limits on (2/day, 8/week). Click to turn off for testing." : "Limits off (testing). Click to turn on."}
+                                title={limitEnforced ? "Rate limit ON. Click to turn off (with confirmation)." : "Rate limit OFF. Click to turn on."}
                             >
-                                {limitEnforced ? 'On' : 'Off'}
+                                {limitEnforced ? 'ON' : 'OFF'}
                             </button>
                         </div>
                         <Button
@@ -475,16 +474,53 @@ export default function CampaignsPage() {
                     </div>
                 </div>
 
+                {/* ── Campaign Limits ─────────────────────────────────── */}
+                <Card className="border-border/40 bg-card/60">
+                    <CardContent className="py-4 px-5">
+                        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                            <span className="text-sm font-semibold text-foreground">Campaign Limits</span>
+                            <span className="text-xs tabular-nums text-muted-foreground">
+                                Daily {launchesToday.count} / {launchesToday.limit} &nbsp;|&nbsp; Weekly {launchesToday.countWeek} / {launchesToday.limitWeek} &nbsp;|&nbsp;
+                                <span className={limitEnforced ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-amber-600 dark:text-amber-400 font-medium"}>
+                                    Rate limit {limitEnforced ? 'ON' : 'OFF'}
+                                </span>
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (limitEnforced) setShowRateLimitOffConfirm(true);
+                                    else {
+                                        setLimitEnforced(true);
+                                        try { localStorage.setItem('campaignLimitEnforced', 'true'); localStorage.removeItem('campaignLimitOffUntil'); } catch { }
+                                    }
+                                }}
+                                className={cn(
+                                    "h-8 px-2.5 rounded-lg border text-xs font-medium transition-colors",
+                                    "border-border/60 bg-muted/60 hover:bg-muted",
+                                    limitEnforced ? "text-primary ring-1 ring-primary/30" : "text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                {limitEnforced ? 'ON' : 'OFF'}
+                            </button>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                            Rate limit is enabled to protect your LinkedIn account. Turn off for exception scenarios and only after your account has been active for 45 days.
+                        </p>
+                    </CardContent>
+                </Card>
+
                 {/* ── Stat Cards ─────────────────────────────────────────── */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                     <StatCard label="Total" value={stats.total} accent="#6366f1" icon={Megaphone} />
                     <StatCard label="Active" value={stats.active} accent="#10b981" icon={Zap} pulse />
                     <StatCard label="Draft" value={stats.draft} accent="#f59e0b" icon={Clock} />
-                    <StatCard label="Total Leads" value={stats.totalLeads.toLocaleString()} accent="#8b5cf6" icon={Users} />
+                    <StatCard label="Leads Generated" value={Number(stats.totalLeads).toLocaleString()} accent="#8b5cf6" icon={Users} />
                 </div>
 
-                {/* ── Toolbar ────────────────────────────────────────────── */}
-                <div className="flex flex-col sm:flex-row gap-3">
+                {/* ── Campaign Filters ────────────────────────────────── */}
+                <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-foreground">Campaign Filters</h3>
+                    <div className="flex flex-col sm:flex-row gap-3">
                     <div className="relative flex-1 max-w-sm">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <Input
@@ -521,8 +557,8 @@ export default function CampaignsPage() {
                                 </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="bg-card/95 backdrop-blur-xl border-border/50 text-xs">
-                                {['all', 'connections', 'meetings', 'pipeline', 'brand_awareness', 'event_promotion'].map(g => (
-                                    <DropdownMenuItem key={g} onClick={() => setFilterGoal(g)} className="text-xs">{g === 'all' ? 'All Goals' : g.replace('_', ' ')}</DropdownMenuItem>
+                                {['all', 'grow_connections', 'first_degree_message', 'event_promotion', 'webinar', 're_engage', 'cold_outreach', 'connections', 'meetings', 'pipeline', 'brand_awareness', 'content_engagement'].map(g => (
+                                    <DropdownMenuItem key={g} onClick={() => setFilterGoal(g)} className="text-xs">{g === 'all' ? 'All Goals' : goalLabel(g)}</DropdownMenuItem>
                                 ))}
                             </DropdownMenuContent>
                         </DropdownMenu>
@@ -548,6 +584,7 @@ export default function CampaignsPage() {
                                 <X className="h-3.5 w-3.5" /> Clear
                             </Button>
                         )}
+                    </div>
                     </div>
                 </div>
 
@@ -676,6 +713,34 @@ export default function CampaignsPage() {
                     <p className="text-sm text-muted-foreground">
                         Another campaign (<strong>{queuedCampaignName}</strong>) is currently running. This campaign has been queued. Try launching again when the current campaign has finished.
                     </p>
+                </DialogContent>
+            </Dialog>
+
+            {/* Rate limit OFF confirmation */}
+            <Dialog open={showRateLimitOffConfirm} onOpenChange={setShowRateLimitOffConfirm}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Turn off rate limits?</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                        You are turning off campaign rate limits and this may impact your account. Are you sure you wish to continue? If you click Yes, rate limits will be turned off for {RATE_LIMIT_OFF_HOURS} hours.
+                    </p>
+                    <div className="flex justify-end gap-2 pt-4">
+                        <Button variant="outline" onClick={() => setShowRateLimitOffConfirm(false)}>No</Button>
+                        <Button
+                            onClick={() => {
+                                setLimitEnforced(false);
+                                try {
+                                    localStorage.setItem('campaignLimitEnforced', 'false');
+                                    const offUntil = new Date(Date.now() + RATE_LIMIT_OFF_HOURS * 60 * 60 * 1000).toISOString();
+                                    localStorage.setItem('campaignLimitOffUntil', offUntil);
+                                } catch { }
+                                setShowRateLimitOffConfirm(false);
+                            }}
+                        >
+                            Yes
+                        </Button>
+                    </div>
                 </DialogContent>
             </Dialog>
 

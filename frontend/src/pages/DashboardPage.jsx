@@ -68,7 +68,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import PageGuide from "../components/PageGuide";
 import { useTimeFilter } from "../context/TimeFilterContext";
 
 const PERIODS = [
@@ -173,6 +172,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const { period, setPeriod, month, setMonth, year, setYear } = useTimeFilter();
   const [analytics, setAnalytics] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState(null); // e.g. "Backend unreachable"
   const [imports, setImports] = useState([]);
   const [branding, setBranding] = useState({ userName: "", companyName: "" });
   const [loading, setLoading] = useState(true);
@@ -184,19 +184,19 @@ export default function DashboardPage() {
   const [selectedConnectionDegree, setSelectedConnectionDegree] =
     useState(null); // null | '1st' | '2nd' | '3rd'
 
-  // Preferences & Chart Interaction
+  // Preferences: driven globally by Settings (preference_active). No dashboard toggle.
   const [settings, setSettings] = useState(null);
-  const [preferencesApplied, setPreferencesApplied] = useState(() => {
-    return localStorage.getItem("usePreferences") === "true";
-  });
-  const [preferencesLoading, setPreferencesLoading] = useState(false);
-  const [showPreferenceSuccess, setShowPreferenceSuccess] = useState(false);
+  const [preferencesApplied, setPreferencesApplied] = useState(false);
 
 
 
-  const fetchAnalytics = async () => {
+  const analyticsAbortRef = useRef(null);
+  const fetchDebounceRef = useRef(null);
+
+  const fetchAnalytics = async (signal = null) => {
     try {
       setLoading(true);
+      setAnalyticsError(null);
       const params = new URLSearchParams({
         period,
         month,
@@ -207,13 +207,27 @@ export default function DashboardPage() {
         params.set("connection_degree", selectedConnectionDegree);
       const res = await axios.get(
         `/api/analytics/dashboard?${params.toString()}`,
+        signal ? { signal } : {}
       );
+      if (signal?.aborted) return;
       setAnalytics(res.data);
     } catch (err) {
-      console.error("Failed to fetch dashboard analytics", err);
+      if (axios.isCancel(err) || err?.name === "AbortError") return;
+      const isNetworkError =
+        err.code === "ERR_NETWORK" ||
+        (err.request && err.request.status === 0) ||
+        err.message === "Network Error";
+      if (isNetworkError) {
+        const base = axios.defaults.baseURL || "the backend";
+        setAnalyticsError(
+          `Can't reach the server. Make sure the backend is running (e.g. ${base}).`
+        );
+      } else {
+        setAnalyticsError(err.response?.data?.error || err.message || "Failed to load analytics.");
+      }
       setAnalytics(null);
     } finally {
-      setLoading(false);
+      if (!signal || !signal.aborted) setLoading(false);
     }
   };
 
@@ -242,7 +256,20 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    fetchAnalytics();
+    if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
+    if (analyticsAbortRef.current) analyticsAbortRef.current.abort();
+
+    fetchDebounceRef.current = setTimeout(() => {
+      fetchDebounceRef.current = null;
+      const controller = new AbortController();
+      analyticsAbortRef.current = controller;
+      fetchAnalytics(controller.signal);
+    }, 300);
+
+    return () => {
+      if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
+      if (analyticsAbortRef.current) analyticsAbortRef.current.abort();
+    };
   }, [period, month, year, selectedConnectionDegree, preferencesApplied]);
 
   useEffect(() => {
@@ -268,21 +295,16 @@ export default function DashboardPage() {
       .catch(() => { });
   }, []);
 
-  const handleTogglePreferences = () => {
-    setPreferencesLoading(true);
-    setPreferencesApplied((prev) => {
-      const newState = !prev;
-      localStorage.setItem("usePreferences", newState);
-      return newState;
-    });
-
-    // Allow state upgrade then stop loading
-    setTimeout(() => {
-      setPreferencesLoading(false);
-      setShowPreferenceSuccess(true);
-      setTimeout(() => setShowPreferenceSuccess(false), 3000);
-    }, 800);
-  };
+  // Global preference_active from Settings (single source of truth). Leads matching profile URL stay on top.
+  useEffect(() => {
+    axios
+      .get("/api/preferences")
+      .then((r) => {
+        const active = !!(r.data && r.data.preference_active);
+        setPreferencesApplied(active);
+      })
+      .catch(() => {});
+  }, []);
 
   const hasProfileUrl = !!settings?.preferences?.linkedinProfileUrl;
 
@@ -542,26 +564,16 @@ export default function DashboardPage() {
   return (
     <TooltipProvider>
       <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700 relative">
-        {/* Preference Success Overlay/Toast */}
-        {showPreferenceSuccess && (
-          <div className="fixed bottom-8 right-8 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
-            <div className="bg-primary text-primary-foreground px-6 py-3 rounded-full shadow-lg flex items-center gap-3">
-              <Sparkles className="h-5 w-5 animate-pulse" />
-              <span className="font-medium">
-                {preferencesApplied
-                  ? "Prioritizing your network & company matches!"
-                  : "Specific preferences cleared."}
-              </span>
-            </div>
-          </div>
-        )}
         {/* Header: Title + Time/Import Actions */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           {/* Left: Title & Subtitle */}
           <div className="flex flex-col gap-1.5">
-            <p className="text-base font-semibold text-blue-600 flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-blue-500 fill-blue-500/20" />
-              LinkedIn lead discovery, quality scoring, and campaign analytics in one place.
+            <p className="text-base font-semibold text-heading-2 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-heading-2 fill-heading-2/20" />
+              Better conversations, by design.
+            </p>
+            <p className="text-sm text-muted-foreground max-w-xl">
+              Build stronger connections with quality outreach, scoring, and analytics that turn replies into meetings.
             </p>
             {selectedConnectionDegree && (
               <Badge variant="secondary" className="text-xs font-medium w-fit">
@@ -634,53 +646,37 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Filters & Preferences Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-2 border-b border-border/40 pb-6">
-          <div className="flex items-center gap-4 w-full">
-            <Button
-              variant={preferencesApplied ? "default" : "outline"}
-              size="sm"
-              onClick={handleTogglePreferences}
-              disabled={preferencesLoading || !hasProfileUrl}
-              className={cn(
-                "gap-2 transition-all duration-300",
-                preferencesApplied
-                  ? "ring-2 ring-primary/20 shadow-sm pl-4 pr-5"
-                  : "hover:bg-primary/5 text-muted-foreground hover:text-foreground",
-                !hasProfileUrl && "opacity-50 cursor-not-allowed",
-              )}
-            >
-              {preferencesLoading ? (
-                <Sparkles className="h-4 w-4 animate-spin" />
-              ) : (
-                <Sparkles
-                  className={cn(
-                    "h-4 w-4",
-                    preferencesApplied ? "fill-current" : "text-muted-foreground",
-                  )}
-                />
-              )}
-              {preferencesLoading
-                ? "Applying..."
-                : preferencesApplied
-                  ? "Preferences Active"
-                  : "Apply Preferences"}
-              {!hasProfileUrl && (
-                <span className="text-xs ml-1 opacity-70">
-                  (Set profile URL first)
-                </span>
-              )}
-            </Button>
-
-            {preferencesApplied && (
-              <span className="text-xs text-muted-foreground animate-in fade-in slide-in-from-left-2">
-                Results prioritized by your profile & interests
-              </span>
-            )}
-          </div>
-        </div>
+        {/* Preferences are global (Settings). When active, leads matching your profile URL stay on top. */}
 
 
+        {analyticsError && (
+          <Card className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/50 mb-6">
+            <CardContent className="pt-6">
+              <div className="flex flex-col sm:flex-row items-start gap-4">
+                <AlertCircle className="h-10 w-10 text-amber-600 dark:text-amber-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-amber-900 dark:text-amber-100">
+                    Failed to load dashboard analytics
+                  </h3>
+                  <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                    {analyticsError}
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                    If the backend runs on a different port, set VITE_API_URL in frontend .env (e.g. http://localhost:3000) and restart the dev server.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4 border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-900/50"
+                    onClick={() => fetchAnalytics()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* —— Search & Lead Scraping —— */}
         <Card
@@ -715,19 +711,19 @@ export default function DashboardPage() {
                     <InfoTooltip
                       content={
                         <div className="space-y-2">
-                          <p className="font-semibold border-b border-border/50 pb-1 mb-1">Lead Relevance Scoring</p>
+                          <p className="font-semibold border-b border-border/50 pb-1 mb-1">Lead relevance scoring</p>
                           <div className="grid gap-1.5">
                             <div className="flex items-center gap-2">
                               <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
-                              <span className="text-muted-foreground">Primary <span className="text-foreground/80 font-medium ml-1">= High relevance match</span></span>
+                              <span className="text-muted-foreground">Primary <span className="text-foreground/80 font-medium ml-1">= high relevance match</span></span>
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]" />
-                              <span className="text-muted-foreground">Secondary <span className="text-foreground/80 font-medium ml-1">= Medium relevance match</span></span>
+                              <span className="text-muted-foreground">Secondary <span className="text-foreground/80 font-medium ml-1">= medium relevance match</span></span>
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="w-2 h-2 rounded-full bg-slate-400" />
-                              <span className="text-muted-foreground">Tertiary <span className="text-foreground/80 font-medium ml-1">= Low relevance match</span></span>
+                              <span className="text-muted-foreground">Tertiary <span className="text-foreground/80 font-medium ml-1">= low relevance match</span></span>
                             </div>
                           </div>
                         </div>
@@ -737,10 +733,10 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-foreground">{ls.totalLeads ?? totalQualityLeads}</span>
-                  <span className="text-sm font-medium text-muted-foreground">Total Leads</span>
+                  <span className="text-3xl font-bold text-foreground">{Number(ls.totalLeads ?? totalQualityLeads)}</span>
+                  <span className="text-sm font-medium text-muted-foreground">Leads Generated</span>
                 </div>
-                <p className="text-[11px] text-muted-foreground/70">Primary = high quality, Secondary = warm, Tertiary = less warm. Based on LinkedIn Preferences when set.</p>
+                <p className="text-[11px] text-muted-foreground/70">Primary = best match to your profile, Secondary = medium match, Tertiary = lower match. Based on Settings → LinkedIn Preferences (profile URL).</p>
               </div>
 
               {loading ? (
@@ -756,11 +752,10 @@ export default function DashboardPage() {
                         key={idx}
                         className="cursor-pointer flex flex-col p-4 rounded-md bg-background/50 border border-border/50 hover:border-primary/50 hover:bg-muted/40 transition-all group relative overflow-hidden space-y-2"
                         onClick={() => {
-                          const range = getRangeParams();
                           navigate(
                             selectedConnectionDegree
-                              ? `/leads?quality=${item.id}&connection_degree=${selectedConnectionDegree}${range}`
-                              : `/leads?quality=${item.id}${range}`,
+                              ? `/my-contacts?quality=${item.id}&connection_degree=${selectedConnectionDegree}`
+                              : `/my-contacts?quality=${item.id}`,
                           );
                         }}
                         role="button"
@@ -822,7 +817,7 @@ export default function DashboardPage() {
                   <Sparkles className="h-8 w-8 opacity-20" />
                   <p>No scored leads yet</p>
                   <p className="text-xs opacity-70">
-                    Add profile preferences to enable scoring
+                    Set LinkedIn profile URL and turn on preferences in Settings to rank leads by your profile
                   </p>
                 </div>
               )}
@@ -857,7 +852,7 @@ export default function DashboardPage() {
                     content={
                       selectedConnectionDegree
                         ? `Showing only ${selectedConnectionDegree} degree leads. Click a card to filter, click again to clear.`
-                        : "Distribution of 1st, 2nd, and 3rd degree connections. Click a card to filter dashboard by that degree."
+                        : "Distribution of 1st, 2nd, and 3rd degree connections. Click a card to filter the dashboard by that degree."
                     }
                   />
                 </p>
@@ -997,7 +992,7 @@ export default function DashboardPage() {
                             {ls.totalLeads > 0 ? Math.round((lq.primary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Hot (Primary): {ls.totalLeads > 0 ? Math.round((lq.primary / ls.totalLeads) * 100) : 0}%
+                            Hot (primary): {ls.totalLeads > 0 ? Math.round((lq.primary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}
@@ -1013,7 +1008,7 @@ export default function DashboardPage() {
                             {ls.totalLeads > 0 ? Math.round((lq.secondary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Warm (Secondary): {ls.totalLeads > 0 ? Math.round((lq.secondary / ls.totalLeads) * 100) : 0}%
+                            Warm (secondary): {ls.totalLeads > 0 ? Math.round((lq.secondary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}
@@ -1029,7 +1024,7 @@ export default function DashboardPage() {
                             {ls.totalLeads > 0 ? Math.round((lq.tertiary / ls.totalLeads) * 100) : 0}%
                           </span>
                           <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[10px] px-2 py-1 rounded shadow-lg border opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                            Cold (Tertiary): {ls.totalLeads > 0 ? Math.round((lq.tertiary / ls.totalLeads) * 100) : 0}%
+                            Cold (tertiary): {ls.totalLeads > 0 ? Math.round((lq.tertiary / ls.totalLeads) * 100) : 0}%
                           </div>
                         </div>
                       )}
@@ -1398,7 +1393,7 @@ export default function DashboardPage() {
                                       title={
                                         hasSubcategories
                                           ? "Expand subcategories"
-                                          : "Expand"
+                                          : "Expand details"
                                       }
                                     >
                                       {isExpanded ? (
@@ -1915,8 +1910,6 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Page Guide Footer */}
-        <PageGuide pageKey="dashboard" />
       </div>
     </TooltipProvider>
   );

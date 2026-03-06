@@ -168,6 +168,12 @@ router.post('/engine/items/:id/send', async (req, res) => {
         res.json(result);
     } catch (e) {
         console.error('ContentEngine send error:', e);
+        const { getPhantomErrorPayload } = await import('../controllers/phantom.controller.js');
+        const phantomPayload = getPhantomErrorPayload(e);
+        if (phantomPayload) {
+            const { status, payload } = phantomPayload;
+            return res.status(status).json({ ...payload, error: payload.message });
+        }
         res.status(400).json({ error: e.message });
     }
 });
@@ -273,6 +279,11 @@ router.post('/connections/sync', async (req, res) => {
 router.get('/approvals', async (req, res) => {
     try {
         const campaignId = req.query.campaign_id ? parseInt(req.query.campaign_id) : null;
+        const status = req.query.status || 'pending';
+        if (status === 'approved') {
+            const items = await ApprovalService.getApprovedItems(campaignId, true);
+            return res.json(items);
+        }
         const items = await ApprovalService.getPendingItems(campaignId);
         res.json(items);
     } catch (e) {
@@ -663,7 +674,7 @@ router.get('/campaigns/:campaignId/activity', async (req, res) => {
                 container_id: details?.container_id,
                 message_preview: log.generated_content ? log.generated_content.substring(0, 100) : null,
                 timestamp: log.created_at,
-                reason: details?.reason ?? null,
+                reason: details?.reason ?? details?.error ?? null,
                 connection_sent: details?.connection_sent ?? null
             };
         });

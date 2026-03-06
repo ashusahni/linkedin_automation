@@ -2,7 +2,7 @@ import LeadsTable from '../components/LeadsTable';
 
 /**
  * Prospects = 2nd & 3rd degree workflow.
- * Base query: connection_degree IN ('2nd','3rd'). Tabs: Review (default), Qualified, Rejected.
+ * Only Review and Rejected tabs; qualified leads live in My Contacts (no Qualified tab here).
  */
 export default function ProspectsPage() {
   return (
@@ -10,6 +10,8 @@ export default function ProspectsPage() {
       baseQuery={{ connection_degree: '2nd,3rd' }}
       showReviewTabs={true}
       showBackToReview={false}
+      reviewTabs={['to_be_reviewed', 'rejected']}
+      initialReviewTab="to_be_reviewed"
     />
   );
 }

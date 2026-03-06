@@ -11,6 +11,7 @@ export default function LeadImportPage() {
     const [connectionsResult, setConnectionsResult] = useState(null);
     const [searchResult, setSearchResult] = useState(null);
     const [error, setError] = useState(null);
+    const [errorHelpUrl, setErrorHelpUrl] = useState(null);
 
     // Check phantom status on mount
     useEffect(() => {
@@ -37,6 +38,7 @@ export default function LeadImportPage() {
         setIsImportingConnections(true);
         setConnectionsStatus('running');
         setError(null);
+        setErrorHelpUrl(null);
         setConnectionsResult(null);
 
         try {
@@ -50,7 +52,9 @@ export default function LeadImportPage() {
             }
         } catch (err) {
             console.error('Error importing connections:', err);
-            setError(err.response?.data?.message || err.message || 'Failed to import connections');
+            const data = err.response?.data;
+            setError(data?.message || err.message || 'Failed to import connections');
+            setErrorHelpUrl(data?.helpUrl || null);
             setConnectionsStatus('error');
         } finally {
             setIsImportingConnections(false);
@@ -61,6 +65,7 @@ export default function LeadImportPage() {
         setIsImportingSearch(true);
         setSearchStatus('running');
         setError(null);
+        setErrorHelpUrl(null);
         setSearchResult(null);
 
         try {
@@ -75,7 +80,9 @@ export default function LeadImportPage() {
             }
         } catch (err) {
             console.error('Error importing search leads:', err);
-            setError(err.response?.data?.message || err.message || 'Failed to import search leads');
+            const data = err.response?.data;
+            setError(data?.message || err.message || 'Failed to import search leads');
+            setErrorHelpUrl(data?.helpUrl || null);
             setSearchStatus('error');
         } finally {
             setIsImportingSearch(false);
@@ -125,8 +132,13 @@ export default function LeadImportPage() {
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
-                        <h3 className="font-semibold text-red-900 mb-1">Import Error</h3>
+                        <h3 className="font-semibold text-red-900 mb-1">Import failed</h3>
                         <p className="text-sm text-red-700">{error}</p>
+                        {errorHelpUrl && (
+                            <a href={errorHelpUrl} target="_blank" rel="noopener noreferrer" className="inline-block mt-2 text-sm font-semibold text-primary hover:underline">
+                                Reconnect your account
+                            </a>
+                        )}
                     </div>
                 </div>
             )}

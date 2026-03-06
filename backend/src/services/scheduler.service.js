@@ -6,6 +6,7 @@ import { ApprovalService } from './approval.service.js';
 import SafetyService from './safety.service.js';
 import replyDetectionService from './reply-detection.service.js';
 import { NotificationService } from './notification.service.js';
+import { appendCampaignLinksToMessage } from './campaignMessageLink.service.js';
 
 // ==========================================
 // SCHEDULER ORCHESTRATOR (SEQUENTIAL)
@@ -109,6 +110,8 @@ async function executeStepForLead(lead) {
         // Fetch full lead details (need URL)
         const leadDetails = await pool.query("SELECT * FROM leads WHERE id = $1", [lead.lead_id]);
         const profile = leadDetails.rows[0];
+        const campaignRes = await pool.query("SELECT goal, type, description, target_audience, settings FROM campaigns WHERE id = $1", [lead.campaign_id]);
+        const campaignContext = campaignRes.rows[0] || null;
 
         // --- HUMAN-IN-THE-LOOP CHECK ---
         const requiresApproval = ['message', 'connection_request', 'gmail_outreach'].includes(lead.step_type);
@@ -125,9 +128,6 @@ async function executeStepForLead(lead) {
                     try {
                         const enrichmentRes = await pool.query("SELECT * FROM lead_enrichment WHERE lead_id = $1", [lead.lead_id]);
                         const enrichment = enrichmentRes.rows[0] || null;
-                        let campaignContext = null;
-                        const campRes = await pool.query("SELECT goal, type, description, target_audience FROM campaigns WHERE id = $1", [lead.campaign_id]);
-                        if (campRes.rows[0]) campaignContext = campRes.rows[0];
                         const { default: AIService } = await import('./ai.service.js');
                         const draft = await AIService.generateGmailDraft(profile, enrichment, { campaign: campaignContext });
                         const content = JSON.stringify({ subject: draft.subject, body: draft.body });
@@ -159,7 +159,11 @@ async function executeStepForLead(lead) {
             return;
         }
 
-        const contentToSend = queueItem ? queueItem.generated_content : lead.step_content;
+        const contentToSend = appendCampaignLinksToMessage(
+            queueItem ? queueItem.generated_content : lead.step_content,
+            campaignContext || {},
+            { stepType: lead.step_type }
+        );
         console.log(`📝 Content to send: ${contentToSend ? contentToSend.substring(0, 100) + '...' : 'None'}`);
 
         if (lead.step_type === 'connection_request') {

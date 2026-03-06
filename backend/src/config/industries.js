@@ -78,3 +78,114 @@ export const INDUSTRY_KEYWORDS = {
     "Non-profit & Organization": ["non-profit", "nonprofit", "charity", "foundation", "social organization", "ngo", "philanthropy", "association", "society", "community organization"],
     "Design & Arts": ["design", "graphic design", "interior design", "creative", "art", "photography", "artist", "illustrator", "animator"],
 };
+
+/**
+ * Default profile-based tier groups (used when no manual LinkedIn Preference tiers are set).
+ * All leads from My Contacts (any source) are split into:
+ *   Primary = industries closely related to user profile (e.g. chemical CEO → manufacturing, chemicals, marketing, sales)
+ *   Secondary = adjacent industries (e.g. IT, tech, education)
+ *   Tertiary = remaining leads
+ * Keys are top-level industry names (must match INDUSTRY_KEYWORDS). Manual preference_tiers override this.
+ */
+export const TIER_INDUSTRY_GROUPS = {
+  Manufacturing: {
+    primary: ["Manufacturing", "Oil, Gas, and Mining", "Construction", "Wholesale", "Marketing & Advertising", "Professional Services", "Utilities", "Automotive", "Hospitals and Health Care", "Transportation, Logistics, Supply Chain and Storage"],
+    secondary: ["Technology, Information and Media", "Education", "Financial Services", "Retail", "Administrative and Support Services", "Real Estate and Equipment Rental Services", "Entertainment Providers", "Consumer Services", "Accommodation Services", "Food & Beverage Services"],
+  },
+  "Technology, Information and Media": {
+    primary: ["Technology, Information and Media", "Professional Services", "Marketing & Advertising", "Financial Services", "Administrative and Support Services", "Design & Arts"],
+    secondary: ["Manufacturing", "Education", "Retail", "Hospitals and Health Care", "Entertainment Providers", "Real Estate and Equipment Rental Services", "Consumer Services", "Government Administration"],
+  },
+  "Hospitals and Health Care": {
+    primary: ["Hospitals and Health Care", "Manufacturing", "Professional Services", "Oil, Gas, and Mining", "Utilities", "Wholesale", "Technology, Information and Media"],
+    secondary: ["Education", "Financial Services", "Retail", "Government Administration", "Non-profit & Organization", "Real Estate and Equipment Rental Services"],
+  },
+  "Financial Services": {
+    primary: ["Financial Services", "Professional Services", "Technology, Information and Media", "Administrative and Support Services", "Holding Companies"],
+    secondary: ["Manufacturing", "Retail", "Real Estate and Equipment Rental Services", "Education", "Government Administration", "Marketing & Advertising"],
+  },
+  Education: {
+    primary: ["Education", "Professional Services", "Technology, Information and Media", "Non-profit & Organization", "Government Administration"],
+    secondary: ["Financial Services", "Hospitals and Health Care", "Retail", "Manufacturing", "Marketing & Advertising", "Entertainment Providers"],
+  },
+  "Marketing & Advertising": {
+    primary: ["Marketing & Advertising", "Technology, Information and Media", "Professional Services", "Retail", "Entertainment Providers", "Design & Arts", "Consumer Services"],
+    secondary: ["Manufacturing", "Financial Services", "Education", "Real Estate and Equipment Rental Services", "Administrative and Support Services"],
+  },
+  "Professional Services": {
+    primary: ["Professional Services", "Technology, Information and Media", "Financial Services", "Marketing & Advertising", "Administrative and Support Services"],
+    secondary: ["Manufacturing", "Education", "Retail", "Real Estate and Equipment Rental Services", "Government Administration", "Hospitals and Health Care"],
+  },
+  Construction: {
+    primary: ["Construction", "Manufacturing", "Real Estate and Equipment Rental Services", "Oil, Gas, and Mining", "Utilities", "Wholesale", "Professional Services"],
+    secondary: ["Technology, Information and Media", "Financial Services", "Government Administration", "Retail", "Transportation, Logistics, Supply Chain and Storage"],
+  },
+  Retail: {
+    primary: ["Retail", "Consumer Services", "Marketing & Advertising", "Food & Beverage Services", "Wholesale", "Transportation, Logistics, Supply Chain and Storage"],
+    secondary: ["Technology, Information and Media", "Financial Services", "Manufacturing", "Professional Services", "Real Estate and Equipment Rental Services", "Entertainment Providers"],
+  },
+  "Oil, Gas, and Mining": {
+    primary: ["Oil, Gas, and Mining", "Manufacturing", "Utilities", "Construction", "Transportation, Logistics, Supply Chain and Storage", "Professional Services", "Wholesale"],
+    secondary: ["Technology, Information and Media", "Financial Services", "Government Administration", "Education", "Retail"],
+  },
+  "Transportation, Logistics, Supply Chain and Storage": {
+    primary: ["Transportation, Logistics, Supply Chain and Storage", "Manufacturing", "Retail", "Wholesale", "Oil, Gas, and Mining", "Professional Services"],
+    secondary: ["Technology, Information and Media", "Financial Services", "Construction", "Real Estate and Equipment Rental Services", "Administrative and Support Services"],
+  },
+  "Real Estate and Equipment Rental Services": {
+    primary: ["Real Estate and Equipment Rental Services", "Construction", "Professional Services", "Financial Services", "Government Administration"],
+    secondary: ["Manufacturing", "Retail", "Technology, Information and Media", "Hospitals and Health Care", "Administrative and Support Services"],
+  },
+  "Accommodation Services": {
+    primary: ["Accommodation Services", "Food & Beverage Services", "Consumer Services", "Retail", "Entertainment Providers"],
+    secondary: ["Marketing & Advertising", "Real Estate and Equipment Rental Services", "Professional Services", "Technology, Information and Media", "Administrative and Support Services"],
+  },
+  "Food & Beverage Services": {
+    primary: ["Food & Beverage Services", "Accommodation Services", "Retail", "Consumer Services", "Farming, Ranching, Forestry", "Wholesale"],
+    secondary: ["Marketing & Advertising", "Transportation, Logistics, Supply Chain and Storage", "Professional Services", "Manufacturing", "Entertainment Providers"],
+  },
+  "Government Administration": {
+    primary: ["Government Administration", "Professional Services", "Education", "Hospitals and Health Care", "Utilities", "Transportation, Logistics, Supply Chain and Storage"],
+    secondary: ["Technology, Information and Media", "Financial Services", "Construction", "Non-profit & Organization", "Manufacturing"],
+  },
+  Utilities: {
+    primary: ["Utilities", "Oil, Gas, and Mining", "Manufacturing", "Construction", "Government Administration", "Professional Services"],
+    secondary: ["Technology, Information and Media", "Financial Services", "Transportation, Logistics, Supply Chain and Storage", "Education"],
+  },
+  Wholesale: {
+    primary: ["Wholesale", "Manufacturing", "Retail", "Transportation, Logistics, Supply Chain and Storage", "Professional Services", "Oil, Gas, and Mining"],
+    secondary: ["Technology, Information and Media", "Financial Services", "Construction", "Consumer Services", "Real Estate and Equipment Rental Services"],
+  },
+  "Entertainment Providers": {
+    primary: ["Entertainment Providers", "Technology, Information and Media", "Marketing & Advertising", "Consumer Services", "Design & Arts", "Retail"],
+    secondary: ["Professional Services", "Financial Services", "Education", "Real Estate and Equipment Rental Services", "Accommodation Services"],
+  },
+  "Consumer Services": {
+    primary: ["Consumer Services", "Retail", "Food & Beverage Services", "Accommodation Services", "Marketing & Advertising", "Entertainment Providers"],
+    secondary: ["Technology, Information and Media", "Professional Services", "Financial Services", "Real Estate and Equipment Rental Services"],
+  },
+  "Administrative and Support Services": {
+    primary: ["Administrative and Support Services", "Professional Services", "Technology, Information and Media", "Financial Services", "Manufacturing", "Retail"],
+    secondary: ["Education", "Government Administration", "Hospitals and Health Care", "Real Estate and Equipment Rental Services", "Transportation, Logistics, Supply Chain and Storage"],
+  },
+  "Farming, Ranching, Forestry": {
+    primary: ["Farming, Ranching, Forestry", "Food & Beverage Services", "Wholesale", "Manufacturing", "Consumer Services", "Utilities"],
+    secondary: ["Professional Services", "Financial Services", "Government Administration", "Retail", "Transportation, Logistics, Supply Chain and Storage"],
+  },
+  "Holding Companies": {
+    primary: ["Holding Companies", "Financial Services", "Professional Services", "Manufacturing", "Technology, Information and Media", "Real Estate and Equipment Rental Services"],
+    secondary: ["Retail", "Oil, Gas, and Mining", "Transportation, Logistics, Supply Chain and Storage", "Education", "Government Administration", "Utilities"],
+  },
+  Automotive: {
+    primary: ["Automotive", "Manufacturing", "Retail", "Wholesale", "Transportation, Logistics, Supply Chain and Storage", "Professional Services"],
+    secondary: ["Technology, Information and Media", "Financial Services", "Oil, Gas, and Mining", "Construction", "Consumer Services"],
+  },
+  "Non-profit & Organization": {
+    primary: ["Non-profit & Organization", "Education", "Government Administration", "Hospitals and Health Care", "Professional Services"],
+    secondary: ["Financial Services", "Technology, Information and Media", "Marketing & Advertising", "Real Estate and Equipment Rental Services", "Retail"],
+  },
+  "Design & Arts": {
+    primary: ["Design & Arts", "Marketing & Advertising", "Technology, Information and Media", "Entertainment Providers", "Retail", "Consumer Services"],
+    secondary: ["Professional Services", "Education", "Real Estate and Equipment Rental Services", "Manufacturing", "Financial Services"],
+  },
+};

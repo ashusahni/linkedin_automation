@@ -7,12 +7,13 @@ const ToastContext = createContext(null);
 export const ToastProvider = ({ children }) => {
     const [toasts, setToasts] = useState([]);
 
-    const addToast = useCallback((message, type = 'success') => {
+    const addToast = useCallback((message, type = 'success', options = {}) => {
         const id = Math.random().toString(36).substr(2, 9);
-        setToasts((prev) => [...prev, { id, message, type }]);
+        const { helpUrl } = options;
+        setToasts((prev) => [...prev, { id, message, type, helpUrl }]);
         setTimeout(() => {
             setToasts((prev) => prev.filter((t) => t.id !== id));
-        }, 5000);
+        }, 7000);
     }, []);
 
     const removeToast = (id) => {
@@ -45,8 +46,21 @@ export const ToastProvider = ({ children }) => {
                                     {toast.type === 'warning' && <AlertCircle className="w-5 h-5" />}
                                     {toast.type === 'info' && <Info className="w-5 h-5" />}
                                 </div>
-                                <div className="flex-1 text-sm font-medium whitespace-pre-wrap break-words max-w-md">
-                                    {toast.message}
+                                <div className="flex-1 text-sm font-medium whitespace-pre-wrap break-words max-w-md space-y-2">
+                                    <span>{toast.message}</span>
+                                    {toast.helpUrl && (
+                                        <div className="pt-1">
+                                            <a
+                                                href={toast.helpUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="underline font-semibold hover:opacity-90"
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                Reconnect your account
+                                            </a>
+                                        </div>
+                                    )}
                                 </div>
                                 <button
                                     onClick={() => removeToast(toast.id)}

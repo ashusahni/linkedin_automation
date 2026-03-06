@@ -9,11 +9,12 @@
  *   - getRows()                    → (Future) Read all rows for deduplication
  *
  * Authentication:
- *   - Service account JSON: backend/src/config/linkedin-post-488117-96c95d33663a.json
+ *   - Service account JSON: backend/src/config/linkedin-post-488117-96c95d33663a.json (default)
  *   - Scope: https://www.googleapis.com/auth/spreadsheets
  *
  * Config via environment variables:
  *   - GOOGLE_SHEET_ID   → Spreadsheet ID (from the sheet URL)
+ *   - GOOGLE_SHEETS_CREDENTIALS_PATH → (optional) Path to service account JSON (absolute or relative to backend)
  *
  * ⚠️  Credentials are NEVER exposed to the frontend or committed publicly.
  * ─────────────────────────────────────────────────────────────────────────────
@@ -28,10 +29,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const CREDENTIALS_PATH = path.resolve(
+// Credentials: use GOOGLE_SHEETS_CREDENTIALS_PATH (absolute or relative to backend) or default path
+const DEFAULT_CREDENTIALS_PATH = path.resolve(
     __dirname,
     '../config/linkedin-post-488117-96c95d33663a.json'
 );
+
+function getCredentialsPath() {
+    const envPath = process.env.GOOGLE_SHEETS_CREDENTIALS_PATH;
+    if (envPath) {
+        return path.isAbsolute(envPath) ? envPath : path.resolve(__dirname, '../..', envPath);
+    }
+    return DEFAULT_CREDENTIALS_PATH;
+}
 
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
@@ -48,14 +58,15 @@ const SHEET_RANGE = 'Sheet1!A:B';
  * Throws clearly if credentials file is missing.
  */
 function getAuthClient() {
-    if (!fs.existsSync(CREDENTIALS_PATH)) {
+    const credentialsPath = getCredentialsPath();
+    if (!fs.existsSync(credentialsPath)) {
         throw new Error(
-            `Google Sheets credentials file not found at: ${CREDENTIALS_PATH}\n` +
-            `Ensure the service account JSON is placed at backend/src/config/`
+            `Google Sheets credentials file not found at: ${credentialsPath}\n` +
+            `Ensure the service account JSON is at backend/src/config/ or set GOOGLE_SHEETS_CREDENTIALS_PATH in .env`
         );
     }
 
-    const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+    const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
 
     const auth = new google.auth.GoogleAuth({
         credentials,
@@ -112,12 +123,68 @@ const GoogleSheetsService = {
             },
         });
 
+        const updatedRange = response.data.updates?.updatedRange || null;
         console.log(
             `📊 GoogleSheets: Appended post to sheet. ` +
-            `Updated range: ${response.data.updates?.updatedRange || 'unknown'}`
+            `Updated range: ${updatedRange || 'unknown'}`
         );
 
-        return response.data;
+        return { ...response.data, updatedRange };
+    },
+
+    /**
+     * Remove the row that was just appended (rollback when send fails).
+     * Use the updatedRange returned from appendPost (e.g. "Sheet1!A5:B5").
+     * Avoids leaving a failed post in the sheet so the next run doesn't post the wrong content.
+     *
+     * @param {string} updatedRange - e.g. "Sheet1!A5:B5" from append response
+     * @returns {Promise<void>}
+     */
+    async undoAppend(updatedRange) {
+        if (!updatedRange || typeof updatedRange !== 'string') {
+            console.warn('GoogleSheets: undoAppend skipped (no updatedRange)');
+            return;
+        }
+        const auth = getAuthClient();
+        const sheets = google.sheets({ version: 'v4', auth });
+        const spreadsheetId = getSheetId();
+
+        // Parse "Sheet1!A5:B5" -> sheetName = Sheet1, row = 5 (1-based)
+        const match = updatedRange.match(/^'?([^'!]+)'?!A(\d+):/i) || updatedRange.match(/^([^!]+)!A(\d+):/i);
+        const sheetName = match ? match[1].replace(/^'|'$/g, '') : 'Sheet1';
+        const row1Based = match ? parseInt(match[2], 10) : null;
+        if (!row1Based || row1Based < 1) {
+            console.warn('GoogleSheets: undoAppend could not parse row from range:', updatedRange);
+            return;
+        }
+
+        const meta = await sheets.spreadsheets.get({ spreadsheetId });
+        const sheet = (meta.data.sheets || []).find(
+            (s) => (s.properties?.title || '') === sheetName
+        );
+        const sheetId = sheet?.properties?.sheetId ?? 0;
+        const startIndex = row1Based - 1;
+        const endIndex = startIndex + 1;
+
+        await sheets.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+                requests: [
+                    {
+                        deleteDimension: {
+                            range: {
+                                sheetId,
+                                dimension: 'ROWS',
+                                startIndex,
+                                endIndex,
+                            },
+                        },
+                    },
+                ],
+            },
+        });
+
+        console.log(`📊 GoogleSheets: Rolled back appended row (${updatedRange}) after send failure.`);
     },
 
     /**

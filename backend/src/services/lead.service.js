@@ -111,10 +111,14 @@ export async function saveLead(lead) {
     initialReviewStatus = 'approved';
   }
 
+  const phantomMetadataJson = lead.phantomMetadata && typeof lead.phantomMetadata === 'object'
+    ? JSON.stringify(lead.phantomMetadata)
+    : null;
+
   const query = `
     INSERT INTO leads
-    (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, source, connection_degree, review_status, preference_score, preference_tier, is_priority)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+    (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, source, connection_degree, review_status, preference_score, preference_tier, is_priority, phantom_metadata)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
     ON CONFLICT (linkedin_url) DO UPDATE SET
       first_name = COALESCE(EXCLUDED.first_name, leads.first_name),
       last_name = COALESCE(EXCLUDED.last_name, leads.last_name),
@@ -128,6 +132,7 @@ export async function saveLead(lead) {
       preference_score = EXCLUDED.preference_score,
       preference_tier  = EXCLUDED.preference_tier,
       is_priority      = EXCLUDED.is_priority,
+      phantom_metadata = COALESCE(EXCLUDED.phantom_metadata, leads.phantom_metadata),
       approved_at = CASE WHEN EXCLUDED.review_status = 'approved' AND leads.approved_at IS NULL THEN NOW() ELSE leads.approved_at END,
       updated_at = NOW()
     RETURNING (xmax = 0) AS inserted;
@@ -148,6 +153,7 @@ export async function saveLead(lead) {
     score,
     tier || 'tertiary',
     !!initialIsPriority,
+    phantomMetadataJson,
   ];
 
   const result = await pool.query(query, values);

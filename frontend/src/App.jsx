@@ -1,8 +1,12 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import DashboardLayout from './components/layout/DashboardLayout';
+
+/** Redirect /leads to /my-contacts, preserving query string (e.g. ?quality=primary). */
+function RedirectLeadsToMyContacts() {
+    const { search } = useLocation();
+    return <Navigate to={`/my-contacts${search || ''}`} replace />;
+}
 import DashboardPage from './pages/DashboardPage';
-import LeadsTable from './components/LeadsTable';
-import LeadsPage from './pages/LeadsPage';
 import ConnectionsPage from './pages/ConnectionsPage';
 import ProspectsPage from './pages/ProspectsPage';
 import MyContactsPage from './pages/MyContactsPage';
@@ -12,12 +16,13 @@ import LeadImportPage from './pages/LeadImportPage';
 import NetworkPage from './pages/NetworkPage';
 import CampaignsPage from './pages/CampaignsPage';
 import CampaignDetailPage from './pages/CampaignDetailPage';
+import EmailCampaignsPage from './pages/EmailCampaignsPage';
 import ImportsPage from './pages/ImportsPage';
 import ContentEnginePage from './pages/ContentEnginePage';
 import SettingsPage from './pages/SettingsPage';
 
 function App() {
-    return (
+    return (   
         <Routes>
             <Route path="/" element={<DashboardLayout />}>
                 <Route index element={<DashboardPage />} />
@@ -26,9 +31,10 @@ function App() {
                 <Route path="connections" element={<ConnectionsPage />} />
                 <Route path="prospects" element={<ProspectsPage />} />
                 <Route path="my-contacts" element={<MyContactsPage />} />
-                <Route path="leads" element={<LeadsPage />} />
+                <Route path="leads" element={<RedirectLeadsToMyContacts />} />
                 <Route path="leads/:id" element={<LeadDetailPage />} />
                 <Route path="campaigns" element={<CampaignsPage />} />
+                <Route path="campaigns/email" element={<EmailCampaignsPage />} />
                 <Route path="campaigns/:id" element={<CampaignDetailPage />} />
                 <Route path="network" element={<NetworkPage />} />
                 <Route path="content" element={<ContentEnginePage />} />

@@ -1,5 +1,7 @@
 import pool from "../db.js";
 import { NotificationService } from "../services/notification.service.js";
+import emailService from "../services/email.service.js";
+import { appendCampaignLinksToMessage } from "../services/campaignMessageLink.service.js";
 
 // Allowed automation step types for sequences.
 // These MUST stay in sync with:
@@ -12,6 +14,15 @@ const ALLOWED_SEQUENCE_STEP_TYPES = [
     "gmail_outreach"
 ];
 
+const DYNAMIC_GOAL_TYPE_MAP = {
+    grow_connections: "standard",
+    first_degree_message: "nurture",
+    event_promotion: "event",
+    webinar: "webinar",
+    re_engage: "re_engagement",
+    cold_outreach: "cold_outreach",
+};
+
 // GET /api/campaigns
 export async function getCampaigns(req, res) {
     try {
@@ -20,7 +31,9 @@ export async function getCampaigns(req, res) {
             SELECT c.*, 
             (SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id) as lead_count,
             (SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id AND cl.status IN ('sent', 'replied', 'completed')) as sent_count,
-            (SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id AND cl.status = 'replied') as replied_count
+            (SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id AND cl.status = 'replied') as replied_count,
+            (SELECT COUNT(*) FROM sequences s WHERE s.campaign_id = c.id AND s.type IN ('email','gmail_outreach')) as email_steps_count,
+            (SELECT COUNT(*) FROM approval_queue aq2 WHERE aq2.campaign_id = c.id AND aq2.status = 'approved' AND aq2.step_type IN ('email','gmail_outreach')) as approved_email_count
             FROM campaigns c 
             WHERE 1=1
         `;
@@ -39,10 +52,15 @@ export async function getCampaigns(req, res) {
             const total = parseInt(row.lead_count) || 0;
             const sent = parseInt(row.sent_count) || 0;
             const replied = parseInt(row.replied_count) || 0;
+            const emailStepsCount = parseInt(row.email_steps_count) || 0;
+            const approvedEmailCount = parseInt(row.approved_email_count) || 0;
             return {
                 ...row,
                 progress: total > 0 ? Math.round((sent / total) * 100) : 0,
-                response_rate: sent > 0 ? Math.round((replied / sent) * 100) : 0
+                response_rate: sent > 0 ? Math.round((replied / sent) * 100) : 0,
+                email_steps_count: emailStepsCount,
+                has_email_steps: emailStepsCount > 0,
+                approved_email_count: approvedEmailCount
             };
         });
         return res.json(rows);
@@ -70,6 +88,18 @@ export async function createCampaign(req, res) {
             settings = {}
         } = req.body;
         if (!name) return res.status(400).json({ error: "Name is required" });
+        if (!description || !String(description).trim()) {
+            return res.status(400).json({ error: "Campaign description is required" });
+        }
+
+        const dynamicType = DYNAMIC_GOAL_TYPE_MAP[goal];
+        const normalizedType = dynamicType || type;
+        const normalizedSettings = (settings && typeof settings === "object") ? settings : {};
+        const registrationLink = normalizedSettings?.registration_link ? String(normalizedSettings.registration_link).trim() : "";
+        const needsRegistrationLink = normalizedType === "event" || normalizedType === "webinar" || goal === "event_promotion" || goal === "webinar";
+        if (needsRegistrationLink && !registrationLink) {
+            return res.status(400).json({ error: "Registration link is required for event and webinar campaigns" });
+        }
 
         const result = await pool.query(
             `INSERT INTO campaigns (
@@ -77,10 +107,10 @@ export async function createCampaign(req, res) {
                 schedule_start, schedule_end, daily_cap, timezone, tags, priority, notes, settings
             ) VALUES ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb) RETURNING *`,
             [
-                name, type, description || null, goal, target_audience || null,
+                name, normalizedType, String(description).trim(), goal, target_audience || null,
                 schedule_start || null, schedule_end || null, parseInt(daily_cap, 10) || 0,
                 timezone, Array.isArray(tags) ? tags : (tags ? [tags] : []), priority, notes || null,
-                typeof settings === 'object' ? JSON.stringify(settings) : '{}'
+                JSON.stringify(normalizedSettings)
             ]
         );
 
@@ -130,6 +160,36 @@ export async function getCampaignById(req, res) {
         // "Sent" = leads we've sent at least one message/connection to (completed or replied)
         stats.sent = (stats.completed || 0) + (stats.replied || 0);
 
+        // Failed messages count (automation_logs: send_message + status failed)
+        const failedMsgResult = await pool.query(
+            `SELECT COUNT(*)::int AS count FROM automation_logs 
+             WHERE campaign_id = $1 AND action = 'send_message' AND status = 'failed'`,
+            [id]
+        );
+        stats.failed_messages = failedMsgResult.rows[0]?.count ?? 0;
+
+        // Connection requests sent (for acceptance rate denominator)
+        const connSentResult = await pool.query(
+            `SELECT COUNT(*)::int AS count FROM automation_logs 
+             WHERE campaign_id = $1 AND action = 'send_connection_request' AND status = 'sent'`,
+            [id]
+        );
+        const connection_requests_sent = connSentResult.rows[0]?.count ?? 0;
+        stats.connection_requests_sent = connection_requests_sent;
+
+        // Connection accepted (campaign_leads.linkedin_connect_status = 'accepted')
+        const connAcceptedResult = await pool.query(
+            `SELECT COUNT(*)::int AS count FROM campaign_leads 
+             WHERE campaign_id = $1 AND linkedin_connect_status = 'accepted'`,
+            [id]
+        );
+        const connection_accepted = connAcceptedResult.rows[0]?.count ?? 0;
+        stats.connection_accepted = connection_accepted;
+        stats.acceptance_rate =
+            connection_requests_sent > 0
+                ? Math.round((connection_accepted / connection_requests_sent) * 100)
+                : null;
+
         return res.json({
             ...campaignResult.rows[0],
             sequences: sequenceResult.rows,
@@ -149,8 +209,25 @@ export async function updateCampaign(req, res) {
             schedule_start, schedule_end, daily_cap, timezone, tags, priority, notes, settings
         } = req.body;
 
-        const check = await pool.query("SELECT id FROM campaigns WHERE id = $1", [id]);
+        const check = await pool.query("SELECT * FROM campaigns WHERE id = $1", [id]);
         if (check.rows.length === 0) return res.status(404).json({ error: "Campaign not found" });
+        const existing = check.rows[0];
+
+        if (description !== undefined && !String(description || "").trim()) {
+            return res.status(400).json({ error: "Campaign description is required" });
+        }
+
+        const effectiveGoal = goal ?? existing.goal;
+        const mappedType = DYNAMIC_GOAL_TYPE_MAP[effectiveGoal];
+        const effectiveType = mappedType || type || existing.type;
+
+        const parsedSettings = settings != null ? settings : existing.settings;
+        const normalizedSettings = (parsedSettings && typeof parsedSettings === "object") ? parsedSettings : {};
+        const registrationLink = normalizedSettings?.registration_link ? String(normalizedSettings.registration_link).trim() : "";
+        const needsRegistrationLink = effectiveType === "event" || effectiveType === "webinar" || effectiveGoal === "event_promotion" || effectiveGoal === "webinar";
+        if (needsRegistrationLink && !registrationLink) {
+            return res.status(400).json({ error: "Registration link is required for event and webinar campaigns" });
+        }
 
         const result = await pool.query(
             `UPDATE campaigns SET
@@ -170,10 +247,10 @@ export async function updateCampaign(req, res) {
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = $1 RETURNING *`,
             [
-                id, name, type, description, goal, target_audience,
+                id, name, effectiveType, (description !== undefined ? String(description).trim() : null), goal, target_audience,
                 schedule_start, schedule_end, daily_cap != null ? parseInt(daily_cap, 10) : null,
                 timezone, Array.isArray(tags) ? tags : (tags != null ? [tags] : null), priority, notes,
-                settings != null ? JSON.stringify(settings) : null
+                settings != null ? JSON.stringify(normalizedSettings) : null
             ]
         );
         return res.json(result.rows[0]);
@@ -380,6 +457,7 @@ export async function autoConnectCampaign(req, res) {
 
         const campaignRes = await pool.query("SELECT * FROM campaigns WHERE id = $1", [id]);
         if (campaignRes.rows.length === 0) return res.status(404).json({ error: "Campaign not found" });
+        const campaign = campaignRes.rows[0];
 
         let leadIdList = Array.isArray(leadIds) ? leadIds : (leadIds != null ? [leadIds] : []);
         if (leadIdList.length === 0) {
@@ -432,12 +510,13 @@ export async function autoConnectCampaign(req, res) {
         // Build messages array in the same order as profiles
         const messages = profiles.map(profile => {
             const message = messageByLeadId[profile.id];
+            const finalMessage = appendCampaignLinksToMessage(message || "", campaign, { stepType: "connection_request" });
             if (message) {
-                console.log(`   ✅ Lead ${profile.id} (${profile.full_name}): Using approved message (${message.length} chars)`);
+                console.log(`   ✅ Lead ${profile.id} (${profile.full_name}): Using approved message (${finalMessage.length} chars)`);
             } else {
                 console.log(`   ⚠️  Lead ${profile.id} (${profile.full_name}): No approved message, will send without note`);
             }
-            return message || '';
+            return finalMessage;
         });
 
         const hasMessages = messages.some(m => m && m.trim().length > 0);
@@ -550,6 +629,7 @@ export async function launchCampaign(req, res) {
         // 1. Get Campaign to verify it exists
         const campaignRes = await pool.query("SELECT * FROM campaigns WHERE id = $1", [id]);
         if (campaignRes.rows.length === 0) return res.status(404).json({ error: "Campaign not found" });
+        const campaign = campaignRes.rows[0];
 
         // Only one campaign can run at a time: if another is active, return queued
         const activeOther = await pool.query(
@@ -650,8 +730,9 @@ export async function launchCampaign(req, res) {
         for (let i = 0; i < pendingLeads.rows.length; i++) {
             const p = pendingLeads.rows[i];
             const approval = approvalByLeadId[p.id] || { connection_request: "", message: "" };
-            const connNote = approval.connection_request || "";
-            const followUpMessage = approval.message || connNote;
+            const connNote = appendCampaignLinksToMessage(approval.connection_request || "", campaign, { stepType: "connection_request" });
+            const followUpBaseMessage = approval.message || approval.connection_request || "";
+            const followUpMessage = appendCampaignLinksToMessage(followUpBaseMessage, campaign, { stepType: "message" });
             const deg = p.connection_degree || "";
 
             await addLaunchLog(id, `lead_${i + 1}_check`, `Lead ${i + 1} (${p.full_name || p.first_name || "?"}): connection_degree=${deg || "unknown"}`, p.id);
@@ -785,6 +866,16 @@ export async function launchCampaign(req, res) {
         try {
             await addLaunchLog(req.params.id, "error", err.message);
         } catch (_) {}
+        // If this is a phantom/sign-in error, return same user-friendly message + link as phantom routes
+        const { getPhantomErrorPayload } = await import("./phantom.controller.js");
+        const phantomPayload = getPhantomErrorPayload(err);
+        if (phantomPayload) {
+            const { status, payload } = phantomPayload;
+            return res.status(status).json({
+                ...payload,
+                error: payload.message,
+            });
+        }
         res.status(500).json({ error: err.message });
     }
 }
@@ -1020,12 +1111,63 @@ export async function getCampaignTemplates(req, res) {
     }
 }
 
+// Build per-step status for one lead from sequence steps and their automation_logs
+function buildStepStatuses(sequences, logs) {
+    const steps = (sequences || []).slice().sort((a, b) => a.step_order - b.step_order);
+    const byAction = {
+        send_connection_request: (logs || []).filter((l) => l.action === 'send_connection_request').sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+        send_message: (logs || []).filter((l) => l.action === 'send_message').sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+        email_failover: (logs || []).filter((l) => l.action === 'email_failover').sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+    };
+    const indices = { send_connection_request: 0, send_message: 0, email_failover: 0 };
+    const statuses = [];
+
+    for (const seq of steps) {
+        const type = (seq.type || '').toLowerCase();
+        let actionKey = null;
+        if (type === 'connection_request') actionKey = 'send_connection_request';
+        else if (type === 'message') actionKey = 'send_message';
+        else if (type === 'email' || type === 'gmail_outreach') actionKey = 'email_failover';
+
+        const list = actionKey ? byAction[actionKey] : [];
+        const idx = actionKey ? indices[actionKey] : 0;
+        const log = list[idx] || null;
+        if (actionKey && log) indices[actionKey]++;
+
+        let details = null;
+        if (log && log.details) {
+            try {
+                details = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
+            } catch (_) {
+                details = null;
+            }
+        }
+        const status = log ? (log.status === 'sent' ? 'sent' : log.status === 'failed' ? 'failed' : 'pending') : 'pending';
+        const reason = (details && (details.reason || details.error)) || null;
+        const sentAt = log ? (details?.sent_at || log.created_at) : null;
+
+        let stepLabel = type.replace(/_/g, ' ');
+        if (type === 'message') stepLabel = `Message`;
+        if (type === 'connection_request') stepLabel = 'Connection';
+
+        statuses.push({
+            step_order: seq.step_order,
+            type: seq.type,
+            label: stepLabel,
+            status,
+            reason: reason || undefined,
+            sent_at: sentAt || undefined,
+        });
+    }
+    return statuses;
+}
+
 // GET /api/campaigns/:id/leads (List leads in a campaign)
 export async function getCampaignLeads(req, res) {
     try {
         const { id } = req.params;
         const result = await pool.query(`
-            SELECT cl.*, l.first_name, l.last_name, l.linkedin_url, l.title, l.company,
+            SELECT cl.*, l.first_name, l.last_name, l.full_name, l.linkedin_url, l.title, l.company,
                    l.email, l.phone,
                    le.last_enriched_at,
                    aq.id as approval_id, aq.status as approval_status, aq.generated_content
@@ -1037,13 +1179,161 @@ export async function getCampaignLeads(req, res) {
             ORDER BY cl.created_at DESC
         `, [id]);
 
-        return res.json(result.rows);
+        const sequencesRes = await pool.query(
+            `SELECT id, step_order, type FROM sequences WHERE campaign_id = $1 ORDER BY step_order ASC`,
+            [id]
+        );
+        const sequences = sequencesRes.rows || [];
+
+        const logsRes = await pool.query(
+            `SELECT lead_id, action, status, details, created_at
+             FROM automation_logs
+             WHERE campaign_id = $1 AND action IN ('send_connection_request', 'send_message', 'email_failover')
+             ORDER BY lead_id, created_at ASC`,
+            [id]
+        );
+        const logsByLead = {};
+        for (const row of logsRes.rows || []) {
+            if (!logsByLead[row.lead_id]) logsByLead[row.lead_id] = [];
+            logsByLead[row.lead_id].push(row);
+        }
+
+        const rows = result.rows.map((row) => ({
+            ...row,
+            id: row.lead_id,
+            step_statuses: buildStepStatuses(sequences, logsByLead[row.lead_id] || []),
+        }));
+
+        return res.json(rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 }
 
+// POST /api/campaigns/:id/send-approved-emails
+// Send approved email/Gmail drafts to campaign leads (emails must already be on lead records; frontend saves manual entries via PUT /api/leads/:id first).
+export async function sendApprovedEmails(req, res) {
+    try {
+        const { id } = req.params;
+        const { leadIds } = req.body || {};
 
+        const campaignRes = await pool.query("SELECT id, name FROM campaigns WHERE id = $1", [id]);
+        if (campaignRes.rows.length === 0) {
+            return res.status(404).json({ error: "Campaign not found" });
+        }
+
+        if (!emailService.isConfigured()) {
+            return res.status(503).json({
+                error: "Email service not configured",
+                message: "Set SENDGRID_API_KEY or AWS SES in .env"
+            });
+        }
+
+        let leadsQuery = `
+            SELECT cl.lead_id, l.id as lead_id, l.first_name, l.last_name, l.email
+            FROM campaign_leads cl
+            JOIN leads l ON cl.lead_id = l.id
+            WHERE cl.campaign_id = $1 AND l.email IS NOT NULL AND TRIM(l.email) != ''
+        `;
+        const params = [id];
+        if (Array.isArray(leadIds) && leadIds.length > 0) {
+            params.push(leadIds);
+            leadsQuery += ` AND l.id = ANY($2::int[])`;
+        }
+        leadsQuery += ` ORDER BY cl.lead_id`;
+        const leadsRes = await pool.query(leadsQuery, params);
+        const leads = leadsRes.rows;
+
+        if (leads.length === 0) {
+            return res.json({
+                success: true,
+                message: "No leads with email to send to",
+                sent: 0,
+                failed: 0,
+                noEmail: 0,
+                noDraft: 0,
+                details: []
+            });
+        }
+
+        const approvalRes = await pool.query(
+            `SELECT lead_id, step_type, generated_content
+             FROM approval_queue
+             WHERE campaign_id = $1 AND lead_id = ANY($2::int[]) AND status = 'approved'
+             AND step_type IN ('email', 'gmail_outreach')
+             ORDER BY lead_id`,
+            [id, leads.map((l) => l.lead_id)]
+        );
+        const draftByLeadId = {};
+        for (const row of approvalRes.rows) {
+            if (!draftByLeadId[row.lead_id]) draftByLeadId[row.lead_id] = row;
+        }
+
+        const details = [];
+        let sent = 0;
+        let failed = 0;
+        let noDraft = 0;
+
+        for (const lead of leads) {
+            const draft = draftByLeadId[lead.lead_id];
+            if (!draft || !draft.generated_content) {
+                noDraft++;
+                details.push({
+                    leadId: lead.lead_id,
+                    name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(),
+                    email: lead.email,
+                    success: false,
+                    error: "No approved email draft"
+                });
+                continue;
+            }
+            let subject = "Follow up";
+            let body = "";
+            try {
+                const parsed = JSON.parse(draft.generated_content);
+                subject = parsed.subject || subject;
+                body = parsed.body || String(draft.generated_content);
+            } catch {
+                body = draft.generated_content;
+            }
+            try {
+                await emailService.sendEmail(lead.email, subject, body);
+                sent++;
+                details.push({
+                    leadId: lead.lead_id,
+                    name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(),
+                    email: lead.email,
+                    success: true
+                });
+                await pool.query(
+                    `INSERT INTO automation_logs (campaign_id, lead_id, action, status, details)
+                     VALUES ($1, $2, 'send_email_approved', 'sent', $3::jsonb)`,
+                    [id, lead.lead_id, JSON.stringify({ subject, sent_at: new Date().toISOString() })]
+                );
+            } catch (err) {
+                failed++;
+                details.push({
+                    leadId: lead.lead_id,
+                    name: `${lead.first_name || ""} ${lead.last_name || ""}`.trim(),
+                    email: lead.email,
+                    success: false,
+                    error: err.message
+                });
+            }
+        }
+
+        return res.json({
+            success: true,
+            message: `Sent ${sent} email(s), ${failed} failed, ${noDraft} without approved draft`,
+            sent,
+            failed,
+            noDraft,
+            details
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+}
 
 // POST /api/campaigns/estimate-audience
 // Estimate how many leads match the given filter criteria

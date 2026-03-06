@@ -78,6 +78,33 @@ export async function getPreferences(req, res) {
     }
 }
 
+// Helper: update branding (user name + profile image) in .env from LinkedIn profile data
+async function updateBrandingFromProfile(userName, profileImageUrl) {
+    try {
+        const path = (await import('path')).default;
+        const fs = (await import('fs')).default;
+        const { fileURLToPath } = await import('url');
+        const __dirname = path.dirname(fileURLToPath(import.meta.url));
+        const envPath = path.join(__dirname, '..', '..', '.env');
+        if (!fs.existsSync(envPath)) return;
+        let envContent = fs.readFileSync(envPath, 'utf8');
+        const setEnv = (key, value) => {
+            if (value === undefined || value === null || value === '') return;
+            const str = String(value).trim();
+            const regex = new RegExp(`^${key}=.*$`, 'm');
+            const line = `${key}=${str}`;
+            if (regex.test(envContent)) envContent = envContent.replace(regex, line);
+            else envContent += (envContent ? '\n' : '') + line;
+            process.env[key] = str;
+        };
+        if (userName) setEnv('APP_USER_NAME', userName);
+        if (profileImageUrl) setEnv('APP_PROFILE_IMAGE_URL', profileImageUrl);
+        fs.writeFileSync(envPath, envContent.trim() + '\n');
+    } catch (e) {
+        console.warn('[preferences] updateBrandingFromProfile:', e.message);
+    }
+}
+
 // PUT /api/preferences
 export async function updatePreferences(req, res) {
     try {
@@ -121,14 +148,31 @@ export async function updatePreferences(req, res) {
             auto_approval_threshold,
         });
 
-        // Rescore asynchronously — don't block the HTTP response
-        recalculateAllScores().catch(err =>
-            console.error('[preferences] Background rescore error:', err)
-        );
+        // Fetch profile name and picture from LinkedIn URL and update branding (app bar shows initials + profile image)
+        const urlToFetch = (linkedin_profile_url && typeof linkedin_profile_url === 'string') ? linkedin_profile_url.trim() : '';
+        if (urlToFetch && urlToFetch.includes('linkedin.com')) {
+            try {
+                const phantomService = (await import('../services/phantombuster.service.js')).default;
+                const scrape = await phantomService.scrapeProfile(urlToFetch);
+                if (scrape && scrape.data) {
+                    const d = scrape.data;
+                    const fullName = d.fullName || [d.firstName, d.lastName].filter(Boolean).join(' ').trim() || null;
+                    const profileImageUrl = d.profileImage || d.profileImageUrl || d.imgUrl || null;
+                    if (fullName || profileImageUrl) {
+                        await updateBrandingFromProfile(fullName || undefined, profileImageUrl || undefined);
+                    }
+                }
+            } catch (e) {
+                console.warn('[preferences] Could not fetch LinkedIn profile for branding:', e.message);
+            }
+        }
+
+        // Rescore in background so the response returns immediately and Save button stops spinning
+        recalculateAllScores().catch(err => console.error('[preferences] Background rescore error:', err));
 
         return res.json({
             success: true,
-            message: 'Preferences saved. Rescoring leads in background…',
+            message: 'Preferences saved. Tier counts are updating in the background — refresh the dashboard in a few seconds to see changes.',
         });
     } catch (err) {
         console.error('[preferences] PUT error:', err);
@@ -177,7 +221,7 @@ export async function rescoreLeads(req, res) {
 // POST /api/preferences/analyze — AI suggest tiered preferences from LinkedIn Profile URL
 // Fills Primary, Secondary, and Tertiary with 3–5 options each; no value repeated across tiers.
 const TITLE_OPTIONS = ['CEO', 'CTO', 'CFO', 'Director', 'Manager', 'VP', 'Founder', 'Head of', 'Lead', 'Engineer', 'Analyst', 'Consultant', 'Specialist'];
-const INDUSTRY_OPTIONS = [
+const INDUSTRY_OPTIONS_FALLBACK = [
     'Technology, Information and Media', 'Financial Services', 'Professional Services', 'Manufacturing', 'Retail', 'Education',
     'Hospitals and Health Care', 'Marketing & Advertising', 'Construction', 'Real Estate and Equipment Rental Services', 'Other',
 ];
@@ -257,6 +301,10 @@ export async function analyzeProfileForPreferences(req, res) {
         const profileTitle = profileMeta.title ? String(profileMeta.title).trim() : '';
         const profileIndustry = profileMeta.industry ? String(profileMeta.industry).trim() : '';
         const profileSize = profileMeta.companySize ? String(profileMeta.companySize).trim() : '';
+
+        const { getIndustryLabels } = await import('../services/industryList.service.js');
+        const industryLabels = await getIndustryLabels();
+        const INDUSTRY_OPTIONS = industryLabels.length > 0 ? industryLabels : INDUSTRY_OPTIONS_FALLBACK;
 
         // Primary: 3–5 each, starting from profile (then fill from pools)
         const primaryTitles = ensureCount(

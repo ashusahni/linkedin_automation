@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useTimeFilter } from '../context/TimeFilterContext';
 import PageGuide from './PageGuide';
 import axios from 'axios';
-import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle } from 'lucide-react';
+import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle, Columns3, GripVertical, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -35,16 +34,52 @@ import {
 } from "./ui/dropdown-menu";
 import { useToast } from './ui/toast';
 import { Skeleton, TableSkeleton } from './ui/skeleton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { FilterLogicBuilder } from './FilterLogicBuilder';
+import {
+    LEADS_TABLE_COLUMN_DEFS,
+    loadColumnPreference,
+    saveColumnPreference,
+    getLeadCellValue,
+    getDefaultColumnOrder,
+    getDefaultColumnVisibility,
+} from '../config/leadsTableColumns';
 
 const QUICK_FILTERS = [
     { id: 'ceo_saas', label: 'CEOs in SaaS', preset: { title: 'CEO', industry: 'SaaS' }, icon: Target },
     { id: 'cto_tech', label: 'CTOs in Tech', preset: { title: 'CTO', industry: 'Technology' }, icon: Briefcase },
     { id: 'mkt_mgr', label: 'Marketing Managers', preset: { title: 'Marketing Manager' }, icon: Briefcase },
-    { id: 'sales_dir', label: 'Sales Directors', preset: { title: 'Sales Director' }, icon: Target }
+    { id: 'sales_dir', label: 'Sales Directors', preset: { title: 'Sales Director' }, icon: Target },
 ];
 
-export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, showBackToReview = false, applyDefaultDateRange = true } = {}) {
+/** All IANA timezones for the timezone filter dropdown (Intl.supportedValuesOf when available). */
+const TIMEZONE_OPTIONS = (() => {
+  try {
+    if (typeof Intl !== 'undefined' && Intl.supportedValuesOf && typeof Intl.supportedValuesOf('timeZone') !== 'undefined') {
+      return ['', ...Intl.supportedValuesOf('timeZone').sort()];
+    }
+  } catch (_) {}
+  // Fallback: common IANA timezones
+  return ['', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'America/Toronto', 'America/Vancouver', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Amsterdam', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland', 'UTC'];
+})();
+
+/** Map UI source filter to API param (backend supports comma-separated for IN). */
+function getSourceApiParam(source) {
+    if (!source || source === 'all') return undefined;
+    if (source === 'linkedin') return 'connections_export,search_export';
+    if (source === 'imports') return 'csv_import,excel_import';
+    return source;
+}
+
+export default function LeadsTable({
+    baseQuery = {},
+    showReviewTabs = true,
+    showBackToReview = false,
+    applyDefaultDateRange = true,
+    reviewTabs,
+    initialReviewTab: initialReviewTabProp,
+    listTitle
+} = {}) {
     const navigate = useNavigate();
     const { addToast } = useToast();
     const [leads, setLeads] = useState([]);
@@ -67,8 +102,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         industry: searchParams.get('industry') || '',
         company: '',
         connectionDegree: searchParams.get('connection_degree') || '',
+        timezone: searchParams.get('timezone') || '',
         quality: searchParams.get('quality') || '', // primary, secondary, tertiary
-        // Status and source
+        // Status and source: 'all' | 'linkedin' (Via LinkedIn) | 'imports' (Via Imports)
         status: 'all',
         source: 'all',
         // Advanced filters
@@ -79,43 +115,12 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         createdTo: searchParams.get('createdTo'),
     });
 
-    const { period, month, year } = useTimeFilter();
-
-    // Derived default dates from context if URL is empty (skip on "all leads" page so users see full list)
-    useEffect(() => {
-        if (!applyDefaultDateRange) return;
-        if (!searchParams.get('createdFrom') && !searchParams.get('createdTo')) {
-            const now = new Date();
-            let start, end;
-
-            if (period === "daily") {
-                start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-            } else if (period === "weekly") {
-                const day = now.getDay() || 7;
-                start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 1);
-                end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
-            } else if (period === "monthly") {
-                start = new Date(year, month, 1);
-                end = new Date(year, month + 1, 1);
-            } else if (period === "yearly") {
-                start = new Date(year, 0, 1);
-                end = new Date(year + 1, 0, 1);
-            }
-
-            if (start && end) {
-                const newFilters = {
-                    ...metaFilters,
-                    createdFrom: start.toISOString(),
-                    createdTo: end.toISOString(),
-                };
-                setMetaFilters(newFilters);
-                fetchLeads(false, newFilters);
-                fetchStats({ metaFilters: newFilters });
-            }
-        }
-    }, [period, month, year, searchParams, applyDefaultDateRange]);
+    // Time filter (daily/weekly/monthly/yearly) is dashboard-only; CRM/leads do not use it.
+    // Date range here comes only from URL (createdFrom/createdTo) or user-set filters.
     const [activeQuickFilters, setActiveQuickFilters] = useState([]);
+    const [quickFilterOverrides, setQuickFilterOverrides] = useState({});
+    const [editingQuickFilterId, setEditingQuickFilterId] = useState(null);
+    const [editingPresetValues, setEditingPresetValues] = useState({});
     const [showMetaFilters, setShowMetaFilters] = useState(false);
     const [expandedSections, setExpandedSections] = useState({
         quickFilters: false,
@@ -138,7 +143,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             if (metaFilters.company) conditions.push({ field: 'company', operator: 'contains', value: metaFilters.company });
             if (metaFilters.connectionDegree) conditions.push({ field: 'connection_degree', operator: 'contains', value: metaFilters.connectionDegree });
             if (metaFilters.status !== 'all') conditions.push({ field: 'status', operator: 'equals', value: metaFilters.status });
-            if (metaFilters.source !== 'all') conditions.push({ field: 'source', operator: 'equals', value: metaFilters.source });
+            if (metaFilters.source !== 'all' && metaFilters.source !== 'linkedin' && metaFilters.source !== 'imports') {
+                conditions.push({ field: 'source', operator: 'equals', value: metaFilters.source });
+            }
             if (metaFilters.hasEmail) conditions.push({ field: 'hasEmail', operator: 'is_true', value: 'true' });
             if (metaFilters.hasLinkedin) conditions.push({ field: 'hasLinkedin', operator: 'is_true', value: 'true' });
             if (metaFilters.createdFrom) conditions.push({ field: 'created_at', operator: 'after', value: metaFilters.createdFrom }); // Simplified mapping
@@ -170,8 +177,19 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         companyName: '',
     });
 
+    const isMyContactsQuery = baseQuery?.my_contacts || baseQuery?.is_priority;
+    const reviewTabOrder = ['approved', 'to_be_reviewed', 'rejected', 'imported'];
+    const enabledReviewTabs = showReviewTabs
+        ? (Array.isArray(reviewTabs) && reviewTabs.length > 0
+            ? reviewTabOrder.filter((tab) => reviewTabs.includes(tab))
+            : ['approved', 'to_be_reviewed', 'rejected'])
+        : [];
+    const initialReviewTab = initialReviewTabProp && enabledReviewTabs.includes(initialReviewTabProp)
+        ? initialReviewTabProp
+        : (enabledReviewTabs[0] || 'approved');
+
     // PHASE 4: Review Workflow State
-    const [reviewStatusTab, setReviewStatusTab] = useState('approved'); // 'approved' | 'to_be_reviewed' | 'rejected' | 'imported'
+    const [reviewStatusTab, setReviewStatusTab] = useState(initialReviewTab); // 'approved' | 'to_be_reviewed' | 'rejected' | 'imported'
     const [reviewStats, setReviewStats] = useState({
         to_be_reviewed: 0,
         approved: 0,
@@ -182,6 +200,13 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
     const [showRejectModal, setShowRejectModal] = useState(false);
     const [rejectReason, setRejectReason] = useState('');
     const [deleting, setDeleting] = useState(false);
+
+    useEffect(() => {
+        if (!showReviewTabs) return;
+        if (!enabledReviewTabs.includes(reviewStatusTab)) {
+            setReviewStatusTab(initialReviewTab);
+        }
+    }, [showReviewTabs, enabledReviewTabs.join(','), reviewStatusTab, initialReviewTab]);
 
     const handleBulkDeleteRejected = async () => {
         const isDeleteAll = selectedLeads.size === leads.length && leads.length > 0;
@@ -261,6 +286,13 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
 
     // Enrichment State
     const [enriching, setEnriching] = useState(false);
+    const [showEnrichConfirm, setShowEnrichConfirm] = useState(false);
+    const [enrichConfirmIds, setEnrichConfirmIds] = useState([]);
+
+    // Column visibility & order (Green/Yellow; persisted to localStorage)
+    const [columnOrder, setColumnOrder] = useState(() => loadColumnPreference().order);
+    const [columnVisibility, setColumnVisibility] = useState(() => loadColumnPreference().visibility);
+    const [columnPickerOpen, setColumnPickerOpen] = useState(false);
 
     // Import Leads (Phantom search-import) State
     const [importingLeads, setImportingLeads] = useState(false);
@@ -273,6 +305,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         const connectionDegree = searchParams.get('connection_degree') || '';
         const quality = searchParams.get('quality') || '';
         const industry = searchParams.get('industry') || '';
+        const timezone = searchParams.get('timezone') || '';
         const source = searchParams.get('source') || '';
         const hasContactInfo = searchParams.get('has_contact_info') === 'true';
         const createdFrom = searchParams.get('createdFrom') || '';
@@ -283,6 +316,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             connectionDegree !== metaFilters.connectionDegree ||
             quality !== (metaFilters.quality || '') ||
             industry !== (metaFilters.industry || '') ||
+            timezone !== (metaFilters.timezone || '') ||
             hasContactInfo !== metaFilters.hasContactInfo ||
             createdFrom !== (metaFilters.createdFrom || '') ||
             createdTo !== (metaFilters.createdTo || '') ||
@@ -294,6 +328,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                 connectionDegree: connectionDegree,
                 quality: quality,
                 industry: industry,
+                timezone: timezone,
                 hasContactInfo: hasContactInfo,
                 createdFrom: createdFrom,
                 createdTo: createdTo,
@@ -464,8 +499,8 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
     const fetchLeads = async (append = false, overrideFilters = null, silent = false) => {
         const filtersToUse = overrideFilters ?? metaFilters;
 
-        // My Contacts (legacy has_contact_info) — deprecated in favor of is_priority page
-        if (filtersToUse.hasContactInfo && !baseQuery?.is_priority) {
+        // Legacy has_contact_info filter is disabled on non-contacts pages
+        if (filtersToUse.hasContactInfo && !isMyContactsQuery) {
             setLeads([]);
             setPagination({ page: 1, limit: 50, total: 0 });
             setLoading(false);
@@ -493,6 +528,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             if (baseQuery?.is_priority) {
                 params.set('is_priority', 'true');
             }
+            if (baseQuery?.my_contacts) {
+                params.set('my_contacts', 'true');
+            }
 
             if (searchTerm.trim()) {
                 params.set('search', searchTerm.trim());
@@ -510,6 +548,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             if (filtersToUse.industry?.trim()) {
                 params.set('industry', filtersToUse.industry.trim());
             }
+            if (filtersToUse.timezone?.trim()) {
+                params.set('timezone', filtersToUse.timezone.trim());
+            }
             if (!baseQuery?.connection_degree && filtersToUse.connectionDegree?.trim()) {
                 if (!filtersToUse.connectionDegree.includes(',')) {
                     params.set('connection_degree', filtersToUse.connectionDegree.trim());
@@ -521,9 +562,8 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             if (filtersToUse.status && filtersToUse.status !== 'all') {
                 params.set('status', filtersToUse.status);
             }
-            if (filtersToUse.source && filtersToUse.source !== 'all') {
-                params.set('source', filtersToUse.source);
-            }
+            const sourceParam = getSourceApiParam(filtersToUse.source);
+            if (sourceParam) params.set('source', sourceParam);
             if (filtersToUse.hasEmail) {
                 params.set('hasEmail', 'true');
             }
@@ -541,10 +581,10 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             }
 
             // PHASE 4: Filter by Review Status Tab (skip when My Contacts single list)
-            if (showReviewTabs && reviewStatusTab && reviewStatusTab !== 'imported') {
+            if (showReviewTabs && enabledReviewTabs.includes(reviewStatusTab) && reviewStatusTab !== 'imported') {
                 params.set('review_status', reviewStatusTab);
             }
-            if (showReviewTabs && reviewStatusTab === 'imported') {
+            if (showReviewTabs && reviewStatusTab === 'imported' && enabledReviewTabs.includes('imported')) {
                 params.set('source', 'csv_import,excel_import');
             }
 
@@ -556,9 +596,10 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             const quickGroups = activeQuickFilters.map(id => {
                 const q = QUICK_FILTERS.find(x => x.id === id);
                 if (!q) return null;
+                const preset = quickFilterOverrides[id] ? { ...q.preset, ...quickFilterOverrides[id] } : q.preset;
                 return JSON.parse(JSON.stringify({
                     operator: 'AND',
-                    conditions: Object.entries(q.preset).map(([field, value]) => ({
+                    conditions: Object.entries(preset).filter(([, v]) => v != null && String(v).trim() !== '').map(([field, value]) => ({
                         field,
                         operator: 'contains',
                         value
@@ -678,6 +719,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             if (baseQuery?.is_priority) {
                 params.is_priority = 'true';
             }
+            if (baseQuery?.my_contacts) {
+                params.my_contacts = 'true';
+            }
 
             // Add quality filter from BOTH quick filters AND metaFilters.quality (Primary, Secondary, Tertiary)
             const qualityFromQuick = currentQuickFilters.filter(f => ['primary', 'secondary', 'tertiary'].includes(f.toLowerCase()));
@@ -695,6 +739,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             if (currentMetaFilters.title) params.title = currentMetaFilters.title;
             if (currentMetaFilters.company) params.company = currentMetaFilters.company;
             if (currentMetaFilters.location) params.location = currentMetaFilters.location;
+            if (currentMetaFilters.timezone) params.timezone = currentMetaFilters.timezone;
             if (currentMetaFilters.status !== 'all') params.status = currentMetaFilters.status;
             if (currentMetaFilters.createdFrom) params.createdFrom = currentMetaFilters.createdFrom;
             if (currentMetaFilters.createdTo) params.createdTo = currentMetaFilters.createdTo;
@@ -704,9 +749,10 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             const quickGroups = currentQuickFilters.map(id => {
                 const q = QUICK_FILTERS.find(x => x.id === id);
                 if (!q) return null;
+                const preset = quickFilterOverrides[id] ? { ...q.preset, ...quickFilterOverrides[id] } : q.preset;
                 return {
                     operator: 'AND',
-                    conditions: Object.entries(q.preset).map(([field, value]) => ({
+                    conditions: Object.entries(preset).filter(([, v]) => v != null && String(v).trim() !== '').map(([field, value]) => ({
                         field,
                         operator: 'contains',
                         value
@@ -793,6 +839,44 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         return null;
     };
 
+    // All column defs in display order (for picker); then visible subset for table (first_name always first if visible)
+    const orderedColumnDefs = (() => {
+        const order = columnOrder.filter(id => LEADS_TABLE_COLUMN_DEFS.some(c => c.id === id));
+        const missing = LEADS_TABLE_COLUMN_DEFS.filter(c => !order.includes(c.id)).map(c => c.id);
+        const fullOrder = [...order, ...missing];
+        return fullOrder.map(id => LEADS_TABLE_COLUMN_DEFS.find(c => c.id === id)).filter(Boolean);
+    })();
+    const visibleColumnDefs = (() => {
+        const visible = orderedColumnDefs.filter(def => columnVisibility[def.id] !== false);
+        const pinned = visible.filter(c => c.pinned);
+        const rest = visible.filter(c => !c.pinned);
+        return [...pinned, ...rest];
+    })();
+
+    const toggleColumnVisibility = (id) => {
+        const def = LEADS_TABLE_COLUMN_DEFS.find(c => c.id === id);
+        if (!def || def.pinned) return;
+        setColumnVisibility(prev => ({ ...prev, [id]: !prev[id] }));
+    };
+
+    const moveColumnOrder = (fromIndex, toIndex) => {
+        if (fromIndex === toIndex) return;
+        const ids = [...orderedColumnDefs.map(c => c.id)];
+        if (toIndex < 0 || toIndex >= ids.length) return;
+        const [removed] = ids.splice(fromIndex, 1);
+        ids.splice(toIndex, 0, removed);
+        setColumnOrder(ids);
+    };
+
+    const resetColumns = () => {
+        setColumnOrder(getDefaultColumnOrder());
+        setColumnVisibility(getDefaultColumnVisibility());
+    };
+
+    useEffect(() => {
+        saveColumnPreference(columnOrder, columnVisibility);
+    }, [columnOrder, columnVisibility]);
+
     const handleSearch = (e) => {
         e.preventDefault();
         fetchLeads();
@@ -806,6 +890,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             industry: '',
             company: '',
             connectionDegree: '',
+            timezone: '',
             quality: '', // Reset quality too
             status: 'all',
             source: 'all',
@@ -859,6 +944,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         if (metaFilters.industry?.trim()) n += 1;
         if (metaFilters.company?.trim()) n += 1;
         if (metaFilters.connectionDegree?.trim()) n += 1;
+        if (metaFilters.timezone?.trim()) n += 1;
         if (metaFilters.quality?.trim()) n += 1;
         if (metaFilters.status !== 'all') n += 1;
         if (metaFilters.source !== 'all') n += 1;
@@ -877,6 +963,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             metaFilters.location?.trim() ||
             metaFilters.industry?.trim() ||
             metaFilters.company?.trim() ||
+            metaFilters.timezone?.trim() ||
             metaFilters.status !== 'all' ||
             metaFilters.source !== 'all' ||
             metaFilters.hasEmail ||
@@ -975,8 +1062,10 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             if (metaFilters.industry) params.industry = metaFilters.industry;
             if (metaFilters.location) params.location = metaFilters.location;
             if (metaFilters.company) params.company = metaFilters.company;
+            if (metaFilters.timezone) params.timezone = metaFilters.timezone;
             if (metaFilters.status !== 'all') params.status = metaFilters.status;
-            if (metaFilters.source !== 'all') params.source = metaFilters.source;
+            const exportSourceParam = getSourceApiParam(metaFilters.source);
+            if (exportSourceParam) params.source = exportSourceParam;
             if (metaFilters.quality) params.quality = metaFilters.quality;
 
             const res = await axios.get('/api/leads/export', {
@@ -1036,8 +1125,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
             pollStatus();
         } catch (error) {
             console.error('Import leads error:', error);
-            const errorMsg = error.response?.data?.error || error.message || 'Failed to start import';
-            addToast(`Error: ${errorMsg}`, 'error');
+            const data = error.response?.data;
+            const errorMsg = data?.message || data?.error || error.message || 'Failed to start import';
+            addToast(errorMsg, 'error', data?.helpUrl ? { helpUrl: data.helpUrl } : {});
             setImportingLeads(false);
             setImportProgress(null);
         }
@@ -1269,16 +1359,18 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
         }
     };
 
-    const handleManualScrape = async () => {
-        const leadIds = Array.from(selectedLeads);
+    const ENRICH_DISCLAIMER = 'Our email finder tool will enrich your contacts. This will use your email credits. We recommend filtering and enriching for a set of contacts.';
+
+    const handleManualScrape = async (leadIdsOverride = null) => {
+        const leadIds = leadIdsOverride ?? Array.from(selectedLeads);
         try {
             setEnriching(true);
-            addToast(`🔍 Finding emails via Hunter.io for ${leadIds.length > 0 ? leadIds.length : 'all'} leads...`, 'info');
+            addToast(`Finding emails for ${leadIds.length} contact(s)...`, 'info');
 
             const res = await axios.post('/api/leads/hunter-email-batch', { leadIds });
 
             if (res.data.status === 'enrichment_started') {
-                addToast(res.data.message || 'Hunter.io email lookup started in background', 'success');
+                addToast(res.data.message || 'Email lookup started in background', 'success');
                 setSelectedLeads(new Set());
                 setTimeout(fetchLeads, 1500);
             } else if (res.data.success) {
@@ -1288,11 +1380,13 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                 fetchLeads();
             }
         } catch (error) {
-            console.error('Hunter email batch failed:', error);
+            console.error('Email batch failed:', error);
             const errorMsg = error.response?.data?.error || error.message || 'Email lookup failed';
             addToast(`Error: ${errorMsg}`, 'error');
         } finally {
             setEnriching(false);
+            setShowEnrichConfirm(false);
+            setEnrichConfirmIds([]);
         }
     };
 
@@ -1322,106 +1416,84 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
     };
 
     return (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* Header Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                <StatCard label="Total Leads" value={reviewStats.total || stats.totalLeads} />
-                <StatCard label="Qualified" value={reviewStats.approved} className="text-green-600" />
-                <StatCard label="Review" value={reviewStats.to_be_reviewed} className="text-yellow-600" />
-                <StatCard label="Rejected" value={reviewStats.rejected} className="text-red-600" />
-                <StatCard label="Imported" value={reviewStats.imported || 0} className="text-blue-600" />
-            </div>
+        <div className="flex flex-col flex-1 min-h-0 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {/* Header Stats: My Contacts = Total | 1st/2nd/3rd Degree | Via LinkedIn | Via Import; else = Qualified/Review/Rejected/Imported */}
+            {showReviewTabs ? (
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                    <StatCard label="Total Leads" value={reviewStats.total || stats.totalLeads} />
+                    {enabledReviewTabs.includes('approved') && (
+                        <StatCard label="Qualified" value={reviewStats.approved} className="text-green-600" />
+                    )}
+                    {enabledReviewTabs.includes('to_be_reviewed') && (
+                        <StatCard label="Review" value={reviewStats.to_be_reviewed} className="text-yellow-600" />
+                    )}
+                    {enabledReviewTabs.includes('rejected') && (
+                        <StatCard label="Rejected" value={reviewStats.rejected} className="text-red-600" />
+                    )}
+                    {enabledReviewTabs.includes('imported') && (
+                        <StatCard label="Imported" value={reviewStats.imported || 0} className="text-blue-600" />
+                    )}
+                </div>
+            ) : (
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                    <StatCard label="Total Leads" value={stats.totalLeads} />
+                    <StatCard label="First Degree" value={stats.degreeCount?.first ?? 0} />
+                    <StatCard label="Second Degree" value={stats.degreeCount?.second ?? 0} />
+                    <StatCard label="Third Degree" value={stats.degreeCount?.third ?? 0} />
+                    <StatCard label="Via LinkedIn" value={(stats.sourceCount?.connections_export || 0) + (stats.sourceCount?.search_export || 0)} />
+                    <StatCard label="Via Import" value={(stats.sourceCount?.csv_import || 0) + (stats.sourceCount?.excel_import || 0)} />
+                </div>
+            )}
 
-            {/* Network Proximity Filter Section */}
-            <div className="flex items-center py-3 px-1 gap-4 flex-wrap">
-                <div className="flex items-center">
-                    <span className="text-sm font-medium mr-2 text-muted-foreground">Network Proximity:</span>
-                    <div className="flex items-center bg-muted/40 rounded-lg p-1 border border-border/50 gap-1">
-                        {['1st', '2nd', '3rd'].map((degree) => (
-                            <button
-                                key={degree}
-                                onClick={() => toggleConnectionDegree(degree)}
-                                className={cn(
-                                    "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200",
-                                    metaFilters.connectionDegree && metaFilters.connectionDegree.split(',').includes(degree)
-                                        ? "bg-primary text-primary-foreground shadow-sm scale-105"
-                                        : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                                )}
-                            >
-                                {degree} Degree
-                            </button>
-                        ))}
+            {/* Network Proximity: only above card when Review tabs shown; when My Contacts it's inside the card below */}
+            {showReviewTabs && (
+                <div className="flex items-center py-3 px-1 gap-4 flex-wrap">
+                    <div className="flex items-center">
+                        <span className="text-sm font-medium mr-2 text-muted-foreground">Network Proximity:</span>
+                        <div className="flex items-center bg-muted/40 rounded-lg p-1 border border-border/50 gap-1">
+                            {['1st', '2nd', '3rd'].map((degree) => (
+                                <button
+                                    key={degree}
+                                    onClick={() => toggleConnectionDegree(degree)}
+                                    className={cn(
+                                        "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200",
+                                        metaFilters.connectionDegree && metaFilters.connectionDegree.split(',').includes(degree)
+                                            ? "bg-primary text-primary-foreground shadow-sm scale-105"
+                                            : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                    )}
+                                >
+                                    {degree} Degree
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2" style={{ display: 'none' }}>
+                        {/* Quick Filter Buttons (Hidden) */}
                     </div>
                 </div>
+            )}
 
-                {/* Quick Filter Buttons */}
-                {/* Quick Filter Buttons (Hidden as per request) */}
-                <div className="flex items-center gap-2" style={{ display: 'none' }}>
-                    {/*
-                    <Button
-                        variant={metaFilters.connectionDegree === '1st' ? 'default' : 'outline'}
-                        size="sm"
-                        className="gap-2 h-8 text-xs"
-                        onClick={() => {
-                            // Always set to 1st degree (don't toggle off)
-                            if (metaFilters.connectionDegree !== '1st') {
-                                toggleConnectionDegree('1st');
-                            }
-                        }}
-                    >
-                        <Users className="h-3.5 w-3.5" />
-                        My Contact
-                    </Button>
-                    <Button
-                        variant={metaFilters.connectionDegree === '2nd' ? 'default' : 'outline'}
-                        size="sm"
-                        className="gap-2 h-8 text-xs"
-                        onClick={() => {
-                            if (metaFilters.connectionDegree !== '2nd') {
-                                toggleConnectionDegree('2nd');
-                            }
-                        }}
-                    >
-                        <UserPlus className="h-3.5 w-3.5" />
-                        Prospects
-                    </Button>
-                    <Button
-                        variant={!metaFilters.connectionDegree ? 'default' : 'outline'}
-                        size="sm"
-                        className="gap-2 h-8 text-xs"
-                        onClick={() => {
-                            // Clear connection degree filter to show all via URL update
-                            const newParams = new URLSearchParams(searchParams);
-                            newParams.delete('connection_degree');
-                            setSearchParams(newParams);
-                        }}
-                    >
-                        <Network className="h-3.5 w-3.5" />
-                        All Connections
-                    </Button>
-                    */}
-                </div>
-            </div>
-
-            {/* Main Content Card */}
-            <Card className="border-border bg-card">
+            {/* Main Content Card - flex layout so table area fits viewport */}
+            <Card className="border-border bg-card flex flex-col min-h-0 flex-1">
                 <CardHeader className="pb-4">
                     <div className="flex flex-col gap-4">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                             <div>
-                                <CardTitle className="text-xl">Lead Management</CardTitle>
+                                <CardTitle className="text-xl">
+                                    {listTitle || (
+                                        reviewStatusTab === 'to_be_reviewed'
+                                            ? 'Review Leads'
+                                            : reviewStatusTab === 'rejected'
+                                                ? 'Rejected Leads'
+                                                : 'Qualified Leads'
+                                    )}
+                                </CardTitle>
                                 <CardDescription className="mt-1 flex items-center gap-2">
-                                    Manage and track your potential clients here.
+                                    Leads that have business potential.
                                     {enriching && (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-primary font-medium animate-pulse">
                                             <Loader2 className="h-3 w-3 animate-spin" />
                                             Finding emails...
-                                        </span>
-                                    )}
-                                    {usePreferences && (
-                                        <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary ring-1 ring-inset ring-primary/20">
-                                            <Target className="h-3 w-3" />
-                                            Prioritized by Preferences
                                         </span>
                                     )}
                                 </CardDescription>
@@ -1433,9 +1505,13 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                             variant="outline"
                                             size="icon"
                                             className="h-10 w-10 border-primary/50 text-primary hover:bg-primary/10 shadow-sm"
-                                            onClick={handleManualScrape}
-                                            disabled={enriching}
-                                            title="Find emails (Hunter.io)"
+                                            onClick={() => {
+                                                const ids = selectedLeads.size > 0 ? Array.from(selectedLeads) : leads.map((l) => l.id);
+                                                setEnrichConfirmIds(ids);
+                                                setShowEnrichConfirm(true);
+                                            }}
+                                            disabled={enriching || leads.length === 0}
+                                            title="Enrich emails (uses your email credits)"
                                         >
                                             <Contact className={cn("h-4 w-4", enriching && "animate-spin")} />
                                         </Button>
@@ -1459,23 +1535,94 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                         </Button>
                                     </div>
                                 )}
+                                <DropdownMenu open={columnPickerOpen} onOpenChange={setColumnPickerOpen}>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" size="icon" className="h-10 w-10 shadow-sm" title="Choose columns">
+                                            <Columns3 className="h-4 w-4" />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-72 max-h-[70vh] overflow-y-auto">
+                                        <DropdownMenuLabel className="flex items-center justify-between">
+                                            <span>Columns</span>
+                                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={resetColumns}>Reset</Button>
+                                        </DropdownMenuLabel>
+                                        <DropdownMenuSeparator />
+                                        <div className="p-2 space-y-1">
+                                            {orderedColumnDefs.map((def, idx) => (
+                                                <div key={def.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 group">
+                                                    <span
+                                                        className={cn("cursor-grab touch-none opacity-50 group-hover:opacity-100", def.pinned && "cursor-not-allowed opacity-30")}
+                                                        title={def.pinned ? "Pinned" : "Drag to reorder"}
+                                                        draggable={!def.pinned}
+                                                        onDragStart={(e) => { e.dataTransfer.setData('text/plain', idx); e.dataTransfer.effectAllowed = 'move'; }}
+                                                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                                        onDrop={(e) => {
+                                                            e.preventDefault();
+                                                            const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                                                            if (Number.isNaN(from) || from === idx) return;
+                                                            moveColumnOrder(from, idx);
+                                                        }}
+                                                    >
+                                                        <GripVertical className="h-4 w-4" />
+                                                    </span>
+                                                    {def.visibility === 'yellow' && !def.pinned ? (
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-primary h-4 w-4"
+                                                            checked={columnVisibility[def.id] !== false}
+                                                            onChange={() => toggleColumnVisibility(def.id)}
+                                                        />
+                                                    ) : (
+                                                        <span className="w-4 h-4 flex items-center justify-center text-[10px] text-muted-foreground">✓</span>
+                                                    )}
+                                                    <span className={cn("text-sm truncate flex-1", columnVisibility[def.id] === false && "opacity-60")}>{def.label}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <DropdownMenuSeparator />
+                                        <p className="text-[10px] text-muted-foreground px-2 pb-2">Drag to reorder. Toggle optional columns on/off.</p>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                                 <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
-                                        <Button variant="outline" size="icon" className="h-10 w-10 shadow-sm" title="Export Report">
-                                            <Upload className="h-4 w-4" />
+                                        <Button variant="outline" size="icon" className="h-10 w-10 shadow-sm text-foreground" title="Export Report" aria-label="Export Report">
+                                            <Download className="h-4 w-4 shrink-0" />
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
                                         <DropdownMenuItem onClick={() => handleExport('csv')} className="gap-2">
-                                            <Upload className="h-4 w-4" /> Export Report (CSV)
+                                            <Download className="h-4 w-4 shrink-0" /> Export Report (CSV)
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleExport('xlsx')} className="gap-2">
-                                            <Upload className="h-4 w-4" /> Export Report (Excel)
+                                            <Download className="h-4 w-4 shrink-0" /> Export Report (Excel)
                                         </DropdownMenuItem>
                                     </DropdownMenuContent>
                                 </DropdownMenu>
                             </div>
                         </div>
+
+                        {/* Network Proximity inside card for My Contacts */}
+                        {!showReviewTabs && (
+                            <div className="flex items-center py-2 px-0 gap-4 flex-wrap border-b border-border/50 pb-4">
+                                <span className="text-sm font-medium mr-2 text-muted-foreground">Network Proximity:</span>
+                                <div className="flex items-center bg-muted/40 rounded-lg p-1 border border-border/50 gap-1">
+                                    {['1st', '2nd', '3rd'].map((degree) => (
+                                        <button
+                                            key={degree}
+                                            onClick={() => toggleConnectionDegree(degree)}
+                                            className={cn(
+                                                "px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200",
+                                                metaFilters.connectionDegree && metaFilters.connectionDegree.split(',').includes(degree)
+                                                    ? "bg-primary text-primary-foreground shadow-sm scale-105"
+                                                    : "bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                            )}
+                                        >
+                                            {degree} Degree
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Search and Filter Bar */}
                         <div className="flex flex-col gap-3">
@@ -1551,9 +1698,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                         <button
                                             type="button"
                                             onClick={() => setExpandedSections(prev => ({ ...prev, quickFilters: !prev.quickFilters }))}
-                                            className="flex items-center justify-between w-full text-left"
+                                            className="flex items-center gap-2 text-left w-full"
                                         >
-                                            <p className="text-xs font-semibold text-foreground flex items-center gap-2">
+                                            <p className="text-xs font-semibold text-foreground">
                                                 Quick Filters
                                             </p>
                                             {expandedSections.quickFilters ? (
@@ -1563,30 +1710,121 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                             )}
                                         </button>
                                         {expandedSections.quickFilters && (
-                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
-                                                {QUICK_FILTERS.map((filter) => {
-                                                    const isActive = activeQuickFilters.includes(filter.id);
+                                            <>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
+                                                    {QUICK_FILTERS.map((filter) => {
+                                                        const isActive = activeQuickFilters.includes(filter.id);
+                                                        const effectivePreset = quickFilterOverrides[filter.id] ? { ...filter.preset, ...quickFilterOverrides[filter.id] } : filter.preset;
+                                                        const displayLabel = [effectivePreset.title, effectivePreset.industry].filter(Boolean).join(' in ') || filter.label;
 
+                                                        return (
+                                                            <div key={filter.id} className="flex items-center gap-1">
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className={cn(
+                                                                        "h-auto flex-1 flex-col items-start p-2.5 gap-1 text-xs transition-all duration-200 border min-w-0",
+                                                                        isActive
+                                                                            ? "bg-primary/10 border-primary text-primary hover:bg-primary/15 hover:border-primary ring-1 ring-primary/20"
+                                                                            : "text-muted-foreground hover:text-foreground hover:border-primary/50"
+                                                                    )}
+                                                                    onClick={() => toggleQuickFilter(filter.id)}
+                                                                >
+                                                                    <filter.icon className={cn("h-3.5 w-3.5 mb-0.5", isActive ? "text-primary" : "text-muted-foreground/70 group-hover:text-primary")} />
+                                                                    <span className={cn("font-medium truncate w-full text-left", isActive ? "text-primary" : "text-foreground")} title={displayLabel}>{displayLabel}</span>
+                                                                </Button>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setEditingQuickFilterId(filter.id);
+                                                                        const base = QUICK_FILTERS.find(x => x.id === filter.id)?.preset ?? {};
+                                                                        setEditingPresetValues(quickFilterOverrides[filter.id] ? { ...base, ...quickFilterOverrides[filter.id] } : { ...base });
+                                                                    }}
+                                                                    aria-label={`Edit ${filter.label}`}
+                                                                >
+                                                                    <Edit2 className="h-3.5 w-3.5" />
+                                                                </Button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {editingQuickFilterId != null && (() => {
+                                                    const q = QUICK_FILTERS.find(x => x.id === editingQuickFilterId);
+                                                    if (!q) return null;
                                                     return (
-                                                        <Button
-                                                            key={filter.id}
-                                                            type="button"
-                                                            variant="outline"
-                                                            size="sm"
-                                                            className={cn(
-                                                                "h-auto flex-col items-start p-2.5 gap-1 text-xs transition-all duration-200 border",
-                                                                isActive
-                                                                    ? "bg-primary/10 border-primary text-primary hover:bg-primary/15 hover:border-primary ring-1 ring-primary/20"
-                                                                    : "text-muted-foreground hover:text-foreground hover:border-primary/50"
-                                                            )}
-                                                            onClick={() => toggleQuickFilter(filter.id)}
-                                                        >
-                                                            <filter.icon className={cn("h-3.5 w-3.5 mb-0.5", isActive ? "text-primary" : "text-muted-foreground/70 group-hover:text-primary")} />
-                                                            <span className={cn("font-medium", isActive ? "text-primary" : "text-foreground")}>{filter.label}</span>
-                                                        </Button>
+                                                        <div className="mt-3 p-3 rounded-lg border border-border bg-muted/30 space-y-3">
+                                                            <p className="text-xs font-medium text-foreground">Edit &quot;{q.label}&quot;</p>
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                <div className="space-y-1">
+                                                                    <label className="text-xs text-muted-foreground">Job title</label>
+                                                                    <Input
+                                                                        className="h-8"
+                                                                        value={editingPresetValues.title ?? ''}
+                                                                        onChange={(e) => setEditingPresetValues(prev => ({ ...prev, title: e.target.value }))}
+                                                                        placeholder="e.g. CEO"
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <label className="text-xs text-muted-foreground">Industry</label>
+                                                                    <Input
+                                                                        className="h-8"
+                                                                        value={editingPresetValues.industry ?? ''}
+                                                                        onChange={(e) => setEditingPresetValues(prev => ({ ...prev, industry: e.target.value }))}
+                                                                        placeholder="e.g. SaaS"
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <label className="text-xs text-muted-foreground">Location</label>
+                                                                    <Input
+                                                                        className="h-8"
+                                                                        value={editingPresetValues.location ?? ''}
+                                                                        onChange={(e) => setEditingPresetValues(prev => ({ ...prev, location: e.target.value }))}
+                                                                        placeholder="e.g. United States"
+                                                                    />
+                                                                </div>
+                                                                <div className="space-y-1">
+                                                                    <label className="text-xs text-muted-foreground">Company</label>
+                                                                    <Input
+                                                                        className="h-8"
+                                                                        value={editingPresetValues.company ?? ''}
+                                                                        onChange={(e) => setEditingPresetValues(prev => ({ ...prev, company: e.target.value }))}
+                                                                        placeholder="e.g. Acme"
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    onClick={() => {
+                                                                        setQuickFilterOverrides(prev => ({ ...prev, [editingQuickFilterId]: { ...editingPresetValues } }));
+                                                                        setEditingQuickFilterId(null);
+                                                                        if (activeQuickFilters.includes(editingQuickFilterId)) {
+                                                                            fetchLeads();
+                                                                            if (typeof fetchStats === 'function') fetchStats();
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    Save
+                                                                </Button>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    onClick={() => { setEditingQuickFilterId(null); }}
+                                                                >
+                                                                    Cancel
+                                                                </Button>
+                                                            </div>
+                                                        </div>
                                                     );
-                                                })}
-                                            </div>
+                                                })()}
+                                            </>
                                         )}
                                     </div>
 
@@ -1665,6 +1903,21 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                                 className="h-9"
                                                             />
                                                         </div>
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                                                                <Clock className="h-3 w-3" /> Timezone
+                                                            </label>
+                                                            <select
+                                                                value={metaFilters.timezone || ''}
+                                                                onChange={(e) => setMetaFilters((f) => ({ ...f, timezone: e.target.value }))}
+                                                                className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                                            >
+                                                                <option value="">Any timezone</option>
+                                                                {TIMEZONE_OPTIONS.filter(Boolean).map((tz) => (
+                                                                    <option key={tz} value={tz}>{tz}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
@@ -1707,13 +1960,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                                 value={metaFilters.source}
                                                                 onChange={(e) => setMetaFilters((f) => ({ ...f, source: e.target.value }))}
                                                             >
-                                                                <option value="all">All Sources</option>
-                                                                {stats.sourceCount &&
-                                                                    Object.keys(stats.sourceCount).map((src) => (
-                                                                        <option key={src} value={src}>
-                                                                            {src} ({stats.sourceCount[src]})
-                                                                        </option>
-                                                                    ))}
+                                                                <option value="all">All</option>
+                                                                <option value="linkedin">Via LinkedIn</option>
+                                                                <option value="imports">Via Imports</option>
                                                             </select>
                                                         </div>
                                                     </div>
@@ -1811,49 +2060,52 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                 </div>
                             )}
                         </div>
-                    </div>
-                </CardHeader >
-                <CardContent className="pt-0">
-                    {/* Sticky Control Header: Tabs and Selection Toolbar */}
-                    <div className="sticky top-[64px] z-30 bg-background/95 backdrop-blur-md -mx-6 px-6 py-3 border-b border-border/60 transition-all duration-300">
-                        <div className="flex flex-col gap-3">
-                            {/* Review Status Tabs (hidden on My Contacts) */}
-                            {showReviewTabs && (
+
+                        {/* Qualified / Review / Rejected — below search and filter; leads table below so column headers stay visible */}
+                        <div className="border-b border-border pb-3 -mx-6 px-6 pt-2">
+                            <div className="flex flex-col gap-2">
+                                {showReviewTabs && (
                                 <div className="flex gap-2 items-center">
-                                    <div className="flex gap-2 flex-1">
-                                        <button
-                                            onClick={() => setReviewStatusTab('approved')}
-                                            className={cn(
-                                                "px-4 py-2 text-sm font-medium transition-all rounded-lg",
-                                                reviewStatusTab === 'approved'
-                                                    ? "bg-green-100 text-green-700 shadow-sm"
-                                                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                                            )}
-                                        >
-                                            🟢 Qualified Leads ({reviewStats.approved})
-                                        </button>
-                                        <button
-                                            onClick={() => setReviewStatusTab('to_be_reviewed')}
-                                            className={cn(
-                                                "px-4 py-2 text-sm font-medium transition-all rounded-lg",
-                                                reviewStatusTab === 'to_be_reviewed'
-                                                    ? "bg-yellow-100 text-yellow-700 shadow-sm"
-                                                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                                            )}
-                                        >
-                                            🟡 Review ({reviewStats.to_be_reviewed})
-                                        </button>
-                                        <button
-                                            onClick={() => setReviewStatusTab('rejected')}
-                                            className={cn(
-                                                "px-4 py-2 text-sm font-medium transition-all rounded-lg",
-                                                reviewStatusTab === 'rejected'
-                                                    ? "bg-red-100 text-red-700 shadow-sm"
-                                                    : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                                            )}
-                                        >
-                                            🔴 Rejected ({reviewStats.rejected})
-                                        </button>
+                                    <div className="flex gap-1.5 flex-1">
+                                        {enabledReviewTabs.includes('approved') && (
+                                            <button
+                                                onClick={() => setReviewStatusTab('approved')}
+                                                className={cn(
+                                                    "px-3 py-1.5 text-sm font-medium transition-all rounded-md",
+                                                    reviewStatusTab === 'approved'
+                                                        ? "bg-green-100 text-green-700 shadow-sm"
+                                                        : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                                )}
+                                            >
+                                                🟢 Qualified Leads ({reviewStats.approved})
+                                            </button>
+                                        )}
+                                        {enabledReviewTabs.includes('to_be_reviewed') && (
+                                            <button
+                                                onClick={() => setReviewStatusTab('to_be_reviewed')}
+                                                className={cn(
+                                                    "px-3 py-1.5 text-sm font-medium transition-all rounded-md",
+                                                    reviewStatusTab === 'to_be_reviewed'
+                                                        ? "bg-yellow-100 text-yellow-700 shadow-sm"
+                                                        : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                                )}
+                                            >
+                                                🟡 Review ({reviewStats.to_be_reviewed})
+                                            </button>
+                                        )}
+                                        {enabledReviewTabs.includes('rejected') && (
+                                            <button
+                                                onClick={() => setReviewStatusTab('rejected')}
+                                                className={cn(
+                                                    "px-3 py-1.5 text-sm font-medium transition-all rounded-md",
+                                                    reviewStatusTab === 'rejected'
+                                                        ? "bg-red-100 text-red-700 shadow-sm"
+                                                        : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                                )}
+                                            >
+                                                🔴 Rejected ({reviewStats.rejected})
+                                            </button>
+                                        )}
                                     </div>
                                     {/* Qualify by Niche Button */}
                                     {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && (
@@ -1873,7 +2125,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
 
                             {/* Selection Toolbar (Conditional but takes no space when empty) */}
                             {selectedLeads.size > 0 && (
-                                <div className="bg-primary/10 border border-primary/20 text-primary p-3 rounded-xl flex justify-between items-center text-sm animate-in slide-in-from-top-2 shadow-sm">
+                                <div className="bg-primary/10 border border-primary/20 text-primary p-2 rounded-lg flex justify-between items-center text-sm animate-in slide-in-from-top-2 shadow-sm">
                                     <span className="font-semibold flex items-center gap-2">
                                         <Check className="h-4 w-4" />
                                         {selectedLeads.size} leads selected
@@ -1941,9 +2193,11 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                     </div>
                                 </div>
                             )}
+                            </div>
                         </div>
                     </div>
-
+                </CardHeader >
+                <CardContent className="pt-0 flex flex-col min-h-0 flex-1 overflow-hidden">
                     {enriching && (
                         <div className="mt-4 p-4 bg-primary/10 border border-primary/20 rounded-lg animate-pulse">
                             <div className="flex items-center gap-3">
@@ -1955,11 +2209,56 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                         </div>
                     )}
 
-                    <div className="rounded-md border">
+                    {(() => {
+                        const showContact = reviewStatusTab === 'approved' || reviewStatusTab === 'imported' || reviewStatusTab === 'to_be_reviewed';
+                        const totalCols = 1 + visibleColumnDefs.length + (showContact ? 1 : 0) + 1;
+                        const renderLeadCell = (lead, def) => {
+                            const val = getLeadCellValue(lead, def.accessor);
+                            if (def.id === 'first_name') {
+                                return (
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-xs ring-2 ring-background flex-shrink-0">
+                                            {lead.profile_image ? (
+                                                <img src={lead.profile_image} alt="" className="w-full h-full rounded-full object-cover" />
+                                            ) : (lead.first_name?.charAt(0) || lead.full_name?.charAt(0) || '?')}
+                                        </div>
+                                        <span className="text-sm truncate" title={lead.first_name || ''}>{lead.first_name || '—'}</span>
+                                    </div>
+                                );
+                            }
+                            if (def.id === 'full_name') {
+                                return (
+                                    <div className="flex flex-col min-w-0">
+                                        <button onClick={() => navigate(`/leads/${lead.id}`)} className="font-semibold hover:text-primary hover:underline text-left transition-colors truncate text-sm">
+                                            {lead.full_name || 'Unknown'}
+                                        </button>
+                                        {lead.email && <span className="text-xs text-muted-foreground truncate">{lead.email}</span>}
+                                        {getTierBadge(lead)}
+                                    </div>
+                                );
+                            }
+                            if (def.id === 'linkedin_url') {
+                                return lead.linkedin_url ? (
+                                    <a href={lead.linkedin_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center w-8 h-8 rounded-full hover:bg-muted transition-colors text-[#0077b5]">
+                                        <Linkedin className="w-5 h-5" />
+                                    </a>
+                                ) : <span className="text-muted-foreground">—</span>;
+                            }
+                            if (def.id === 'company') {
+                                return lead.company && lead.company.trim() ? (
+                                    <span className="text-sm break-words" title={lead.company}>{lead.company}</span>
+                                ) : <span className="text-sm text-muted-foreground italic">—</span>;
+                            }
+                            const display = val != null && String(val).trim() !== '' ? String(val) : '—';
+                            return <span className="text-xs text-foreground break-words line-clamp-2" title={display}>{display}</span>;
+                        };
+                        return (
+                    <div className="flex-1 min-h-0 overflow-auto">
+                    <div className="rounded-md border overflow-x-auto snap-x snap-mandatory min-h-0">
                         <Table>
                             <TableHeader>
-                                <TableRow>
-                                    <TableHead className="w-[50px]">
+                                <TableRow className="border-b border-border">
+                                    <TableHead className="w-[50px] sticky left-0 z-10 bg-background border-r-2 border-border">
                                         <input
                                             type="checkbox"
                                             className="accent-primary h-4 w-4"
@@ -1967,35 +2266,39 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                             onChange={toggleSelectAll}
                                         />
                                     </TableHead>
-                                    <TableHead>Name</TableHead>
-                                    <TableHead>Company</TableHead>
-                                    <TableHead>Title</TableHead>
-
-                                    {/* Contact column visible in Approved, Review and Imported tabs */}
-                                    {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported' || reviewStatusTab === 'to_be_reviewed') && (
-                                        <TableHead className="min-w-[180px]">Contact</TableHead>
-                                    )}
-                                    <TableHead className="text-center">Profile</TableHead>
-                                    <TableHead className="text-right">Actions</TableHead>
+                                    {visibleColumnDefs.map((def) => (
+                                        <TableHead
+                                            key={def.id}
+                                            className={cn(
+                                                "text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap",
+                                                def.pinned && "sticky left-[50px] z-10 bg-background border-r-2 border-border min-w-[120px]",
+                                                !def.pinned && "snap-start"
+                                            )}
+                                        >
+                                            {def.label}
+                                        </TableHead>
+                                    ))}
+                                    {showContact && <TableHead className="min-w-[180px] snap-start">Contact</TableHead>}
+                                    <TableHead className="text-right w-[80px] snap-start">Actions</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {loading ? (
                                     <TableRow>
-                                        <TableCell colSpan={(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') ? 7 : 6} className="p-0">
-                                            <TableSkeleton rows={8} cols={(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') ? 7 : 6} />
+                                        <TableCell colSpan={totalCols} className="p-0">
+                                            <TableSkeleton rows={8} cols={totalCols} />
                                         </TableCell>
                                     </TableRow>
                                 ) : leads.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={(reviewStatusTab === 'approved' || reviewStatusTab === 'imported') ? 7 : 6} className="h-24 text-center">
+                                        <TableCell colSpan={totalCols} className="h-24 text-center">
                                             No leads found.
                                         </TableCell>
                                     </TableRow>
                                 ) : (
                                     scoredLeads.map((lead) => (
                                         <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? "selected" : undefined} className={highlightedLeads.has(lead.id) ? "notification-highlight" : ""}>
-                                            <TableCell>
+                                            <TableCell className="sticky left-0 z-10 bg-background border-r-2 border-border">
                                                 <input
                                                     type="checkbox"
                                                     className="accent-primary h-4 w-4"
@@ -2003,52 +2306,23 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                     onChange={() => toggleSelect(lead.id)}
                                                 />
                                             </TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm ring-2 ring-background">
-                                                        {lead.full_name?.charAt(0) || '?'}
-                                                    </div>
-                                                    <div className="flex flex-col min-w-0">
-                                                        <button
-                                                            onClick={() => navigate(`/leads/${lead.id}`)}
-                                                            className="font-semibold hover:text-primary hover:underline text-left transition-colors truncate"
-                                                        >
-                                                            {lead.full_name || 'Unknown'}
-                                                        </button>
-                                                        {lead.email && (
-                                                            <span className="text-xs text-muted-foreground truncate">{lead.email}</span>
-                                                        )}
-                                                        {getTierBadge(lead)}
-                                                    </div>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="min-w-[180px] max-w-[250px]">
-                                                <div className="flex flex-col">
-                                                    {lead.company && lead.company.trim() ? (
-                                                        <span className="font-semibold text-sm text-foreground break-words" title={lead.company}>
-                                                            {lead.company}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-sm text-muted-foreground italic">—</span>
+                                            {visibleColumnDefs.map((def) => (
+                                                <TableCell
+                                                    key={def.id}
+                                                    className={cn(
+                                                        "align-middle",
+                                                        def.id === 'company' && "min-w-[180px] max-w-[250px]",
+                                                        (def.id === 'headline' || def.accessor === 'title') && "min-w-[200px] max-w-[350px]",
+                                                        def.pinned && "sticky left-[50px] z-10 bg-background border-r-2 border-border min-w-[120px]",
+                                                        !def.pinned && "snap-start"
                                                     )}
-                                                    {lead.location && lead.location.trim() && (
-                                                        <span className="text-xs text-muted-foreground mt-1 break-words">
-                                                            {lead.location}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="min-w-[200px] max-w-[350px]">
-                                                <span className="text-xs text-foreground leading-relaxed line-clamp-3 break-words" title={lead.title}>
-                                                    {lead.title || '-'}
-                                                </span>
-                                            </TableCell>
-
-                                            {/* Contact column visible in Approved, Review and Imported tabs */}
-                                            {(reviewStatusTab === 'approved' || reviewStatusTab === 'imported' || reviewStatusTab === 'to_be_reviewed') && (
-                                                <TableCell className="min-w-[180px]">
+                                                >
+                                                    {renderLeadCell(lead, def)}
+                                                </TableCell>
+                                            ))}
+                                            {showContact && (
+                                                <TableCell className="min-w-[180px] snap-start">
                                                     <div className="flex flex-col gap-1.5">
-                                                        {/* Enrichment Status Indicator */}
                                                         {lead.enrichment_status && lead.enrichment_status !== 'pending' && (
                                                             <div className="mb-0.5">
                                                                 {lead.enrichment_status === 'processing' && (
@@ -2060,7 +2334,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                                 {lead.enrichment_status === 'failed' && (
                                                                     <div className="flex items-center gap-1.5 text-[10px] text-red-500 font-medium">
                                                                         <X className="h-2.5 w-2.5" />
-                                                                        Hunter Failed
+                                                                        Email lookup failed
                                                                     </div>
                                                                 )}
                                                                 {lead.enrichment_status === 'not_found' && (
@@ -2077,8 +2351,6 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                                 )}
                                                             </div>
                                                         )}
-
-                                                        {/* Email */}
                                                         {lead.email ? (
                                                             <div className="flex items-center gap-1.5 text-xs">
                                                                 <Mail className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
@@ -2090,8 +2362,25 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                                 <span>—</span>
                                                             </div>
                                                         )}
-
-                                                        {/* Phone */}
+                                                        {(!lead.email || lead.enrichment_status === 'not_found' || lead.enrichment_status === 'failed') && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-7 text-xs text-primary hover:bg-primary/10 -ml-1"
+                                                                onClick={() => {
+                                                                    setEnrichConfirmIds([lead.id]);
+                                                                    setShowEnrichConfirm(true);
+                                                                }}
+                                                                disabled={enriching || lead.enrichment_status === 'processing'}
+                                                            >
+                                                                {lead.enrichment_status === 'processing' ? (
+                                                                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                                                ) : (
+                                                                    <Contact className="h-3 w-3 mr-1" />
+                                                                )}
+                                                                Enrich
+                                                            </Button>
+                                                        )}
                                                         {lead.phone ? (
                                                             <div className="flex items-center gap-1.5 text-xs">
                                                                 <Phone className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
@@ -2106,14 +2395,7 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                                                     </div>
                                                 </TableCell>
                                             )}
-                                            <TableCell className="text-center">
-                                                {lead.linkedin_url && (
-                                                    <a href={lead.linkedin_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center justify-center w-8 h-8 rounded-full hover:bg-muted transition-colors text-[#0077b5]">
-                                                        <Linkedin className="w-5 h-5" />
-                                                    </a>
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-right">
+                                            <TableCell className="text-right snap-start">
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
                                                         <Button variant="ghost" className="h-8 w-8 p-0">
@@ -2184,6 +2466,9 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                             </TableBody>
                         </Table>
                     </div>
+                    </div>
+                        );
+                    })()}
 
                     {/* View More Button */}
                     {!loading && leads.length > 0 && hasMoreLeads() && (
@@ -2255,6 +2540,32 @@ export default function LeadsTable({ baseQuery = {}, showReviewTabs = true, show
                     </div>
                 )
             }
+
+            {/* Enrich emails: 2-step confirmation */}
+            <Dialog open={showEnrichConfirm} onOpenChange={(open) => { setShowEnrichConfirm(open); if (!open) setEnrichConfirmIds([]); }}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Enrich contacts with email?</DialogTitle>
+                        <DialogDescription asChild>
+                            <p className="text-sm text-muted-foreground pt-1">
+                                {ENRICH_DISCLAIMER}
+                            </p>
+                        </DialogDescription>
+                    </DialogHeader>
+                    <p className="text-sm font-medium py-2">
+                        Enrich {enrichConfirmIds.length} contact{enrichConfirmIds.length !== 1 ? 's' : ''}?
+                    </p>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => { setShowEnrichConfirm(false); setEnrichConfirmIds([]); }}>
+                            Cancel
+                        </Button>
+                        <Button onClick={() => handleManualScrape(enrichConfirmIds)} disabled={enriching}>
+                            {enriching ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Confirm
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* PHASE 4: Reject Modal */}
             <Dialog open={showRejectModal} onOpenChange={setShowRejectModal}>

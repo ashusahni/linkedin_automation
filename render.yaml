@@ -41,6 +41,6 @@ services:
       - key: APP_COMPANY_NAME
         value: Scottish Chemical Industries
       - key: APP_LOGO_URL
-        value: /logo.jpg
+        value: /api/settings/logo/default
       - key: APP_THEME
         value: default

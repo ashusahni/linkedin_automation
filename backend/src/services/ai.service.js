@@ -491,15 +491,19 @@ REQUIREMENTS:
     }
 
     /**
-     * Generates a thought-leadership LinkedIn post from an article.
-     * @param {Object} article - { original_title, source_url, summary }
+     * Generates a thought-leadership LinkedIn post from one or more articles.
+     * @param {Object|Object[]} articleOrArticles - Single { original_title, source_url, summary } or array of same
      * @param {Object} [options] - Optional content-engine context: { persona, industry, objective, ctaText }
      */
-    static async generateThoughtLeadershipPost(article, options = null) {
+    static async generateThoughtLeadershipPost(articleOrArticles, options = null) {
+        const isArray = Array.isArray(articleOrArticles);
+        const articles = isArray ? articleOrArticles : [articleOrArticles];
+        const article = articles[0]; // for fallback / single-article branch
+
         try {
             if (!this.isConfigured()) {
                 console.warn(`⚠️ ${AI_PROVIDER.toUpperCase()} not configured, using template`);
-                return `Interesting article: ${article.original_title}\n\n${article.source_url}\n\n#Leadership #Industry`;
+                return `Interesting article: ${article?.original_title || 'Article'}\n\n${article?.source_url || ''}\n\n#Leadership #Industry`;
             }
 
             const persona = options?.persona || '';
@@ -515,16 +519,29 @@ REQUIREMENTS:
                 if (objective) contextBlock += ` Objective: ${objective}.`;
             }
 
-            const prompt = `Write a LinkedIn post that sounds like a real person sharing their perspective—not a brand or a bot. You have actually read/understood the source and have a genuine point of view.
-
-Article/source: ${article.original_title}
+            let sourcesBlock = '';
+            if (articles.length === 1) {
+                sourcesBlock = `Article/source: ${article.original_title}
 ${article.source_url ? `URL: ${article.source_url}` : ''}
-${article.summary ? `Summary: ${article.summary}` : ''}${contextBlock}
+${article.summary ? `Summary: ${article.summary}` : ''}`;
+            } else {
+                sourcesBlock = 'You have several sources below. Write one LinkedIn post that weaves together insights from one or more of them. Reference specific articles where relevant. Do not list all URLs in the post.\n\n';
+                articles.forEach((a, i) => {
+                    sourcesBlock += `Article ${i + 1}: ${a.original_title}\n`;
+                    if (a.source_url) sourcesBlock += `URL: ${a.source_url}\n`;
+                    if (a.summary) sourcesBlock += `Summary: ${a.summary}\n`;
+                    sourcesBlock += '\n';
+                });
+            }
+
+            const prompt = `Write a LinkedIn post that sounds like a real person sharing their perspective—not a brand or a bot. You have actually read/understood the source(s) and have a genuine point of view.
+
+${sourcesBlock}${contextBlock}
 
 HUMAN VOICE RULES:
 - Write as yourself: one professional with a clear opinion. Use "I" and concrete points. No corporate filler ("leverage", "synergy", "drive value", "game-changing").
 - Vary structure: don't use the same opening every time (e.g. avoid always "I've been thinking about..."). Surprise the reader with a sharp first line when possible.
-- Be specific about the topic—reference real details from the article/source, not vague "recent developments."
+- Be specific about the topic—reference real details from the article(s)/source(s), not vague "recent developments."
 - 200-300 words. End with 3-5 relevant hashtags. No emojis in the body unless they fit naturally.
 ${ctaText ? `\nInclude this CTA naturally in the post (weave it in, don't paste at the end): ${ctaText}` : ''}
 
@@ -533,7 +550,7 @@ Output ONLY the post text. No quotes or extra formatting.`;
             return await this.callAI(prompt, 500, 0.85);
         } catch (error) {
             console.error('❌ AI Post Generation Error:', error.message);
-            return `Interesting insights from this article: ${article.original_title}\n\nRead more: ${article.source_url}\n\n#Industry #Insights`;
+            return `Interesting insights from this article: ${article?.original_title || 'Article'}\n\nRead more: ${article?.source_url || ''}\n\n#Industry #Insights`;
         }
     }
 

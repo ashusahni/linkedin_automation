@@ -103,6 +103,7 @@ export function parsePhantomResults(resultData) {
       company: r.company || r.companyName || r.currentCompany || r.organization || r.jobCompany || null,
       location: r.location || r.city || null,
       profileImage: r.profileImageUrl || r.imgUrl || r.profilePicture || null,
+      industry: r.industry || null,
       // Handle all possible connection degree field variations
       connectionDegree: r.connectionDegree || r.connection_degree || r.connectiondegree ||
         r.connection || r.degree || r.connectionLevel || r.connection_level || null,
@@ -118,6 +119,33 @@ export function parsePhantomResults(resultData) {
       if (atMatch && atMatch[1]) {
         lead.company = atMatch[1].trim();
       }
+    }
+
+    // Phantom metadata: Yellow/Red fields for grid dropdown and backend (snake_case keys)
+    const phantomMetadata = {};
+    const metaKeys = [
+      'timestamp', 'category', 'query', 'company_url', 'company_slug', 'company_id',
+      'company_2', 'company_url_2', 'job_title', 'job_date_range', 'job_title_2', 'job_date_range_2',
+      'school', 'school_degree', 'school_date_range', 'school_2', 'school_degree_2', 'school_date_range_2',
+      'search_account_full_name', 'search_account_profile_id', 'additional_info', 'vmid'
+    ];
+    const camelMap = {
+      companyUrl: 'company_url', companySlug: 'company_slug', companyId: 'company_id',
+      company2: 'company_2', companyUrl2: 'company_url_2', jobTitle: 'job_title', jobDateRange: 'job_date_range',
+      jobTitle2: 'job_title_2', jobDateRange2: 'job_date_range_2', schoolDegree: 'school_degree',
+      schoolDateRange: 'school_date_range', school2: 'school_2', schoolDegree2: 'school_degree_2',
+      schoolDateRange2: 'school_date_range_2', searchAccountFullName: 'search_account_full_name',
+      searchAccountProfileId: 'search_account_profile_id', additionalInfo: 'additional_info'
+    };
+    for (const [camel, snake] of Object.entries(camelMap)) {
+      if (r[camel] != null && r[camel] !== '') phantomMetadata[snake] = r[camel];
+    }
+    if (r.timestamp != null && r.timestamp !== '') phantomMetadata.timestamp = r.timestamp;
+    if (r.category != null && r.category !== '') phantomMetadata.category = r.category;
+    if (r.query != null && r.query !== '') phantomMetadata.query = r.query;
+    if (r.vmid != null && r.vmid !== '') phantomMetadata.vmid = r.vmid;
+    if (Object.keys(phantomMetadata).length > 0) {
+      lead.phantomMetadata = phantomMetadata;
     }
 
     return lead;

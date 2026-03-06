@@ -16,6 +16,11 @@ export default {
         extend: {
             colors: {
                 dark: { 900: '#0f172a', 800: '#1e293b', 700: '#334155' },
+                heading: {
+                    1: "hsl(var(--heading-1))",
+                    2: "hsl(var(--heading-2))",
+                },
+                separator: "hsl(var(--separator))",
                 border: "hsl(var(--border))",
                 input: "hsl(var(--input))",
                 ring: "hsl(var(--ring))",
@@ -24,9 +29,10 @@ export default {
                 primary: {
                     DEFAULT: "hsl(var(--primary))",
                     foreground: "hsl(var(--primary-foreground))",
-                    500: '#3b82f6',
-                    600: '#2563eb',
+                    500: '#663EB6',
+                    600: '#5529a0',
                 },
+                secondaryBtn: "hsl(var(--secondary-btn))",
                 secondary: {
                     DEFAULT: "hsl(var(--secondary))",
                     foreground: "hsl(var(--secondary-foreground))",
@@ -61,7 +67,14 @@ export default {
                 "3xl": "calc(var(--radius) + 16px)",
             },
             fontFamily: {
-                sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+                sans: ['Montserrat', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+                heading: ['Exo 2', 'system-ui', 'sans-serif'],
+                quote: ['Lora', 'Georgia', 'serif'],
+            },
+            fontSize: {
+                'heading-1': ['40px', { lineHeight: '1.2', fontWeight: '700' }],
+                'heading-2': ['32px', { lineHeight: '1.2', fontWeight: '700' }],
+                'quote': ['22px', { lineHeight: '1.5', fontStyle: 'italic' }],
             },
             backdropBlur: {
                 xs: '2px',

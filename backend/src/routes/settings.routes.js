@@ -11,13 +11,20 @@ const __dirname = path.dirname(__filename);
 
 import config from '../config/index.js';
 
+const DEFAULT_LOGO_FILENAME = 'Screenshot 2026-03-06 135224.png';
+const DEFAULT_LOGO_ABSOLUTE_PATH = path.join(__dirname, '..', 'config', DEFAULT_LOGO_FILENAME);
+
+const NAV_LOGO_FILENAME = 'logoSCI.jpg';
+const NAV_LOGO_ABSOLUTE_PATH = path.join(__dirname, '..', 'config', NAV_LOGO_FILENAME);
+
 // Get branding / profile for dashboard welcome (user name, company, logo, profile image, theme)
 router.get('/branding', (req, res) => {
     try {
         const branding = {
-            userName: process.env.APP_USER_NAME || config.branding.userName || 'Rishab',
+            userName: process.env.APP_USER_NAME || config.branding.userName || '',
             companyName: process.env.APP_COMPANY_NAME || config.branding.companyName || 'Scottish Chemical Industries',
-            logoUrl: process.env.APP_LOGO_URL || config.branding.logoUrl || '/logo.jpg',
+            logoUrl: process.env.APP_LOGO_URL || config.branding.logoUrl || '/api/settings/logo/default',
+            navLogoUrl: process.env.APP_NAV_LOGO_URL || config.branding.navLogoUrl || '/api/settings/logo/nav',
             profileImageUrl: process.env.APP_PROFILE_IMAGE_URL || config.branding.profileImageUrl || '',
             theme: process.env.APP_THEME || config.branding.theme || 'default',
             linkedinAccountName: process.env.LINKEDIN_ACCOUNT_NAME || '',
@@ -27,6 +34,32 @@ router.get('/branding', (req, res) => {
     } catch (error) {
         console.error('Error getting branding:', error);
         res.status(500).json({ error: 'Failed to get branding' });
+    }
+});
+
+// Serve the built-in default logo image (small icon left of Kinnote)
+router.get('/logo/default', (req, res) => {
+    try {
+        if (!fs.existsSync(DEFAULT_LOGO_ABSOLUTE_PATH)) {
+            return res.status(404).json({ error: 'Default logo not found' });
+        }
+        return res.sendFile(DEFAULT_LOGO_ABSOLUTE_PATH);
+    } catch (error) {
+        console.error('Error serving default logo:', error);
+        return res.status(500).json({ error: 'Failed to load default logo' });
+    }
+});
+
+// Serve the nav logo (below header, on top of navbar)
+router.get('/logo/nav', (req, res) => {
+    try {
+        if (!fs.existsSync(NAV_LOGO_ABSOLUTE_PATH)) {
+            return res.status(404).json({ error: 'Nav logo not found' });
+        }
+        return res.sendFile(NAV_LOGO_ABSOLUTE_PATH);
+    } catch (error) {
+        console.error('Error serving nav logo:', error);
+        return res.status(500).json({ error: 'Failed to load nav logo' });
     }
 });
 

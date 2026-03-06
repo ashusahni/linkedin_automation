@@ -10,18 +10,28 @@ const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/', color: '#6366f1' },
     { id: 'search', label: 'Lead Search', icon: Search, path: '/search', color: '#0ea5e9' },
     {
-        id: 'leads',
-        label: 'Leads',
+        id: 'crm',
+        label: 'CRM',
         icon: Users,
-        path: '/leads',
+        path: '/my-contacts',
         color: '#10b981',
         children: [
             { id: 'my-contacts', label: 'My Contacts', path: '/my-contacts' },
-            { id: 'connections', label: 'Connections', path: '/connections' },
+            { id: 'connections', label: 'Review Leads', path: '/connections' },
             { id: 'prospects', label: 'Prospects', path: '/prospects' },
         ],
     },
-    { id: 'campaigns', label: 'Campaigns', icon: Megaphone, path: '/campaigns', color: '#f59e0b' },
+    {
+        id: 'campaigns',
+        label: 'Campaigns',
+        icon: Megaphone,
+        path: '/campaigns',
+        color: '#f59e0b',
+        children: [
+            { id: 'campaigns-linkedin', label: 'LinkedIn', path: '/campaigns' },
+            { id: 'campaigns-email', label: 'Email', path: '/campaigns/email' },
+        ],
+    },
     { id: 'content', label: 'Content Engine', icon: Newspaper, path: '/content', color: '#a855f7' },
     { id: 'settings', label: 'Settings', icon: Settings, path: '/settings', color: '#64748b' },
 ];
@@ -65,7 +75,8 @@ export default function DashboardLayout() {
         const storedTheme = localStorage.getItem('theme-mode');
         if (storedTheme === 'light') return false;
         if (storedTheme === 'dark') return true;
-        return document.documentElement.classList.contains('dark');
+        // Default to dark for better overall UX and reduced eye strain
+        return true;
     });
     const [branding, setBranding] = useState({ userName: '', companyName: '', logoUrl: '', profileImageUrl: '', theme: 'default', linkedinAccountName: '' });
 
@@ -104,14 +115,26 @@ export default function DashboardLayout() {
         return () => window.removeEventListener('ui-preferences-updated', syncPreferences);
     }, []);
 
-    const displayName = branding.userName || branding.companyName || 'there';
-
     const getInitials = (name) => {
         if (!name || name === 'there') return 'JD';
-        const parts = name.trim().split(/\s+/);
-        if (parts.length === 1) return parts[0][0].toUpperCase();
+        const parts = String(name).trim().split(/\s+/);
+        if (parts.length === 1) return (parts[0][0] || 'U').toUpperCase();
         return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     };
+
+    // Show initials (e.g. RK) when we have first + last name; otherwise show full name or company
+    const nameForDisplay = branding.userName || branding.companyName || '';
+    const displayName = (nameForDisplay.trim().split(/\s+/).length >= 2)
+        ? getInitials(nameForDisplay)
+        : (nameForDisplay || 'there');
+    // Logo shown in nav section below (e.g. Scottish / nav logo)
+    const navLogoSrc = branding.navLogoUrl || '/api/settings/logo/nav';
+    const [navLogoFailed, setNavLogoFailed] = useState(false);
+    const logoFallbackSrc = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"/>');
+
+    useEffect(() => {
+        setNavLogoFailed(false);
+    }, [branding.navLogoUrl]);
 
     const initials = getInitials(branding.userName || branding.companyName);
 
@@ -128,7 +151,7 @@ export default function DashboardLayout() {
 
     return (
         <TimeFilterProvider>
-            <div className="min-h-screen bg-background flex text-foreground" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+            <div className="min-h-screen bg-background flex text-foreground font-sans">
                 {/* ── Aurora background ── */}
                 <div className="aurora-bg" aria-hidden="true" />
                 <div className="dot-grid fixed inset-0 -z-[1] pointer-events-none" aria-hidden="true" />
@@ -136,43 +159,38 @@ export default function DashboardLayout() {
                 {/* ── Sidebar ── */}
                 <aside
                     className={cn(
-                        "fixed h-full z-30 flex flex-col transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                        "fixed h-full z-30 flex flex-col transition-all duration-300 ease-out",
                         sidebarOpen ? "w-[240px]" : "w-[68px]"
                     )}
                 >
                     {/* Sidebar inner (glassmorphism applied via global CSS) */}
                     <div className="flex flex-col h-full">
 
-                        {/* ── Logo area ── */}
+                        {/* ── Logo area (Kinnote text only; no graphic logo) ── */}
                         <div className={cn(
                             "flex items-center border-b border-border/40 overflow-hidden transition-all duration-300",
-                            sidebarOpen ? "h-[64px] px-5 gap-3" : "h-[64px] px-0 justify-center"
+                            sidebarOpen ? "h-[64px] px-5" : "h-[64px] px-0 justify-center"
                         )}>
-                            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-lg shadow-primary/30 shrink-0 select-none border border-primary/20">
-                                <span className="font-extrabold text-primary-foreground text-sm tracking-tight">LF</span>
-                            </div>
-                            {sidebarOpen && (
-                                <div className="flex flex-col justify-center overflow-hidden select-none">
-                                    <div className="flex items-baseline gap-[2px]">
-                                        <span className="font-black text-[18px] tracking-tight text-foreground leading-none">
-                                            Lead
-                                        </span>
-                                        <span className="font-black text-[18px] text-primary tracking-tight leading-none bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/70">
-                                            Forge
-                                        </span>
-                                    </div>
-                                    <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground mt-[2px] ml-[1px]">
-                                        Workspace
+                            {sidebarOpen ? (
+                                <div className="flex flex-col justify-center overflow-hidden select-none min-w-0">
+                                    <span className="font-heading font-black text-[20px] tracking-tight leading-none bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
+                                        Kinnote
+                                    </span>
+                                    <span className="text-[10px] font-medium text-muted-foreground mt-1.5 leading-tight">
+                                        <span className="block">Better conversations</span>
+                                        <span className="block">by design.</span>
                                     </span>
                                 </div>
+                            ) : (
+                                <span className="font-heading font-black text-xl tracking-tight bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">K</span>
                             )}
                         </div>
 
                         {/* ── Nav ── */}
                         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-3">
                             {sidebarOpen && (
-                                <div className="mb-4 flex justify-center">
-                                    <img src="/logo.jpg" alt="Scottish Chemical Industries" className="h-12 w-auto max-w-full object-contain" />
+                                <div className="mb-4 flex justify-center px-2">
+                                    <img src={navLogoFailed ? logoFallbackSrc : navLogoSrc} alt="Kinnote" className="h-14 w-auto max-w-[200px] object-contain" onError={() => setNavLogoFailed(true)} />
                                 </div>
                             )}
 
@@ -368,7 +386,7 @@ export default function DashboardLayout() {
                                 {sidebarOpen && (
                                     <div className="flex-1 min-w-0">
                                         <p className="font-semibold text-sm truncate">{displayName}</p>
-                                        <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">{branding.companyName || 'Scottish Chemical Industries'}</p>
+                                        <p className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">{branding.companyName || 'Kinnote'}</p>
                                     </div>
                                 )}
                             </div>
@@ -378,7 +396,7 @@ export default function DashboardLayout() {
 
                 {/* ── Main Content ── */}
                 <main className={cn(
-                    "flex-1 flex flex-col min-h-screen transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                    "flex-1 flex flex-col min-h-screen transition-all duration-300 ease-out",
                     sidebarOpen ? "ml-[240px]" : "ml-[68px]"
                 )}>
                     {/* ── Top Header ── */}
@@ -437,16 +455,16 @@ export default function DashboardLayout() {
                                             {branding.linkedinAccountName}
                                         </span>
                                     ) : (
-                                        <span className="text-[11px] text-muted-foreground mt-0.5">Analytics & Outreach</span>
+                                        <span className="text-[11px] text-muted-foreground mt-0.5">Better conversations, by design.</span>
                                     )}
                                 </div>
                             </div>
                         </div>
                     </header>
 
-                    {/* ── Page Content ── */}
-                    <div className="flex-1 p-6 md:p-8 max-w-[1440px] mx-auto w-full">
-                        <div className="page-enter">
+                    {/* ── Page Content ── (min-h-0 so flex child can shrink; overflow-auto so content scrolls within viewport) */}
+                    <div className="flex-1 min-h-0 overflow-auto p-6 md:p-8 max-w-[1440px] mx-auto w-full flex flex-col">
+                        <div className="page-enter flex flex-col flex-1 min-h-0">
                             <Outlet />
                         </div>
                     </div>

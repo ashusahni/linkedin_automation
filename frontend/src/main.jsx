@@ -42,12 +42,13 @@ function ErrorHandler({ children }) {
                 if (!error.config?.skipGlobalErrorHandler) {
                     // Don't show errors for 401/403 (auth) - let components handle those
                     if (error.response?.status !== 401 && error.response?.status !== 403) {
-                        // Format error message
+                        // Format error message (skip status prefix when we have a friendly message + link)
+                        const helpUrl = error.response?.data?.helpUrl;
                         let displayMessage = errorMessage;
-                        if (error.response?.status) {
+                        if (error.response?.status && !helpUrl) {
                             displayMessage = `[${error.response.status}] ${errorMessage}`;
                         }
-                        addToast(displayMessage, 'error');
+                        addToast(displayMessage, 'error', helpUrl ? { helpUrl } : {});
                     }
                 }
 

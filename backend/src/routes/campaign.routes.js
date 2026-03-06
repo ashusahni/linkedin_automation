@@ -15,6 +15,7 @@ import {
     updateSequenceStep,
     deleteSequenceStep,
     getCampaignLeads,
+    sendApprovedEmails,
     bulkEnrichAndGenerate,
     generateGmailDrafts,
     pauseCampaign,
@@ -37,6 +38,7 @@ router.get('/:id', getCampaignById);
 router.put('/:id', updateCampaign);
 router.post('/:id/duplicate', duplicateCampaign);
 router.get('/:id/leads', getCampaignLeads);
+router.post('/:id/send-approved-emails', sendApprovedEmails);
 router.post('/:id/leads', addLeadsToCampaign);
 router.delete('/:id/leads', removeLeadsFromCampaign);
 router.post('/:id/launch', launchCampaign);

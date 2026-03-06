@@ -1,353 +1,181 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { parse } from 'csv-parse/sync';
+/**
+ * industryHierarchy.service.js
+ *
+ * Uses linkedin_industry_code_v2_all_eng.json (via industryList) to assign
+ * primary/secondary/tertiary by comparing user profile industry to lead industry.
+ * - Primary (hot): same top-level and same or no subcategory.
+ * - Secondary (warm): same top-level, different subcategory.
+ * - Tertiary (cold): different top-level.
+ */
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getIndustryList } from './industryList.service.js';
+import { INDUSTRY_KEYWORDS } from '../config/industries.js';
+import { SUB_INDUSTRY_KEYWORDS } from '../config/industries.js';
 
-class IndustryHierarchyService {
-    constructor() {
-        this.hierarchyMap = new Map();
-        this.industryData = [];
-        this.loaded = false;
-    }
-
-    /**
-   * Load and parse the CSV file on startup
-   */
-    async loadIndustryData() {
-        if (this.loaded) return;
-
-        try {
-            const csvPath = path.join(__dirname, '../data/linkedin_industry_code_v2_all_eng.csv');
-            const fileContent = fs.readFileSync(csvPath, 'utf-8');
-
-            const records = parse(fileContent, {
-                columns: false,
-                skip_empty_lines: true,
-                relax_column_count: true
-            });
-
-            // First pass: collect all records
-            const allRecords = [];
-            for (const record of records) {
-                const [code, name, hierarchyPath, description] = record;
-
-                // Parse hierarchy path (e.g., "Education > Higher Education")
-                const pathParts = hierarchyPath.split('>').map(p => p.trim());
-                const topLevelIndustry = pathParts[0];
-                const level = pathParts.length;
-
-                allRecords.push({
-                    code,
-                    name,
-                    hierarchyPath,
-                    pathParts,
-                    topLevelIndustry,
-                    level,
-                    description,
-                    isTopLevel: level === 1,
-                    parent: level > 1 ? pathParts[level - 2] : null
-                });
-            }
-
-            // Second pass: build hierarchy map
-            for (const record of allRecords) {
-                const { topLevelIndustry, level, name, code, hierarchyPath, description } = record;
-
-                // Initialize top-level industry if not exists
-                if (!this.hierarchyMap.has(topLevelIndustry)) {
-                    this.hierarchyMap.set(topLevelIndustry, {
-                        name: topLevelIndustry,
-                        code: null,
-                        subIndustries: [],
-                        jobRoles: new Set(),
-                        metadataTags: new Set()
-                    });
-                }
-
-                const topLevel = this.hierarchyMap.get(topLevelIndustry);
-
-                // Set the code for top-level industry
-                if (level === 1) {
-                    topLevel.code = code;
-                }
-
-                // Add ALL sub-industries (level 2+) that belong to this top-level industry
-                if (level > 1) {
-                    topLevel.subIndustries.push({
-                        name,
-                        code,
-                        level,
-                        parent: record.pathParts[level - 2],
-                        fullPath: hierarchyPath,
-                        pathParts: record.pathParts
-                    });
-                }
-
-                // Extract and aggregate job roles and metadata
-                const jobRoles = this.extractJobRoles(description);
-                const metadataTags = this.extractMetadataTags(name, description);
-
-                jobRoles.forEach(role => topLevel.jobRoles.add(role));
-                metadataTags.forEach(tag => topLevel.metadataTags.add(tag));
-
-                // Store in industryData for reference
-                this.industryData.push({
-                    ...record,
-                    jobRoles,
-                    metadataTags
-                });
-            }
-
-            // Convert Sets to Arrays for JSON serialization
-            for (const [key, value] of this.hierarchyMap.entries()) {
-                value.jobRoles = Array.from(value.jobRoles);
-                value.metadataTags = Array.from(value.metadataTags);
-
-                // Sort sub-industries by level and name for better display
-                value.subIndustries.sort((a, b) => {
-                    if (a.level !== b.level) return a.level - b.level;
-                    return a.name.localeCompare(b.name);
-                });
-            }
-
-            this.loaded = true;
-            console.log(`✅ Loaded ${this.industryData.length} industries into hierarchy`);
-            console.log(`📊 Top-level industries: ${this.hierarchyMap.size}`);
-
-            // Debug: Log sample subtags for Education
-            const educationData = this.hierarchyMap.get('Education');
-            if (educationData) {
-                console.log(`📚 Education has ${educationData.subIndustries.length} sub-industries`);
-            }
-        } catch (error) {
-            console.error('❌ Error loading industry data:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Extract job roles from description text
-     */
-    extractJobRoles(description) {
-        const roles = [];
-        const roleKeywords = [
-            'manager', 'director', 'engineer', 'analyst', 'consultant', 'specialist',
-            'coordinator', 'administrator', 'technician', 'developer', 'designer',
-            'officer', 'executive', 'supervisor', 'associate', 'assistant'
-        ];
-
-        const lowerDesc = description.toLowerCase();
-        roleKeywords.forEach(keyword => {
-            if (lowerDesc.includes(keyword)) {
-                roles.push(keyword.charAt(0).toUpperCase() + keyword.slice(1));
-            }
-        });
-
-        return roles;
-    }
-
-    /**
-     * Extract metadata tags from name and description
-     */
-    extractMetadataTags(name, description) {
-        const tags = [];
-        const text = `${name} ${description}`.toLowerCase();
-
-        // Common metadata categories
-        const tagPatterns = {
-            'B2B': /\b(business-to-business|b2b|enterprise|commercial)\b/,
-            'B2C': /\b(consumer|retail|individual|personal)\b/,
-            'Technology': /\b(software|hardware|digital|tech|IT|computer)\b/,
-            'Healthcare': /\b(health|medical|hospital|clinical|patient)\b/,
-            'Finance': /\b(financial|banking|investment|insurance)\b/,
-            'Manufacturing': /\b(manufactur|production|industrial|factory)\b/,
-            'Services': /\b(service|consulting|support|assistance)\b/,
-            'Education': /\b(education|training|learning|academic)\b/,
-            'Government': /\b(government|public|federal|state|municipal)\b/,
-            'Nonprofit': /\b(nonprofit|non-profit|charitable|foundation)\b/
-        };
-
-        for (const [tag, pattern] of Object.entries(tagPatterns)) {
-            if (pattern.test(text)) {
-                tags.push(tag);
-            }
-        }
-
-        return tags;
-    }
-
-    /**
-     * Get full hierarchy structure
-     */
-    getFullHierarchy() {
-        if (!this.loaded) {
-            throw new Error('Industry data not loaded. Call loadIndustryData() first.');
-        }
-
-        return Object.fromEntries(this.hierarchyMap);
-    }
-
-    /**
-     * Get subtags for a specific industry
-     */
-    getSubtags(industryName) {
-        if (!this.loaded) {
-            throw new Error('Industry data not loaded. Call loadIndustryData() first.');
-        }
-
-        const industry = this.hierarchyMap.get(industryName);
-        if (!industry) {
-            return null;
-        }
-
-        return {
-            industry: industryName,
-            subIndustries: industry.subIndustries,
-            jobRoles: industry.jobRoles,
-            metadataTags: industry.metadataTags
-        };
-    }
-
-    /**
-     * Get all top-level industries
-     */
-    getTopLevelIndustries() {
-        if (!this.loaded) {
-            throw new Error('Industry data not loaded. Call loadIndustryData() first.');
-        }
-
-        return Array.from(this.hierarchyMap.keys()).sort();
-    }
-
-    /**
-     * Calculate priority score for an industry based on profile
-     */
-    calculatePriorityScore(industryName, profile, leadCount) {
-        if (!profile) return Math.log(leadCount + 1);
-
-        const profileIndustry = (profile.industry || '').toLowerCase();
-        const profileTitle = (profile.title || '').toLowerCase();
-        const profileCompany = (profile.company || '').toLowerCase();
-        const industry = this.hierarchyMap.get(industryName);
-
-        if (!industry) return Math.log(leadCount + 1);
-
-        let score = 0;
-
-        // 1. Direct industry name match (weight: 10)
-        const industryLower = industryName.toLowerCase();
-        if (profileIndustry && industryLower.includes(profileIndustry)) {
-            score += 10;
-        }
-
-        // 2. Sub-industry match (weight: 8)
-        if (profileIndustry || profileCompany) {
-            const matchingSubIndustries = industry.subIndustries.filter(sub => {
-                const subName = sub.name.toLowerCase();
-                return (profileIndustry && subName.includes(profileIndustry)) ||
-                    (profileCompany && subName.includes(profileCompany));
-            });
-            if (matchingSubIndustries.length > 0) {
-                score += 8;
-            }
-        }
-
-        // 3. Company-based industry inference (weight: 7)
-        // e.g., "Scottish Chemical Industries" should match "Manufacturing"
-        if (profileCompany) {
-            const companyIndustryKeywords = {
-                'Manufacturing': ['chemical', 'industries', 'manufacturing', 'industrial', 'materials', 'production'],
-                'Technology': ['tech', 'software', 'digital', 'systems', 'solutions'],
-                'Finance': ['bank', 'capital', 'financial', 'investment'],
-                'Healthcare': ['health', 'medical', 'pharma', 'clinical'],
-                'Consulting': ['consulting', 'advisory', 'partners'],
-                'Retail': ['retail', 'commerce', 'store'],
-                'Education': ['education', 'university', 'academy', 'learning']
-            };
-
-            const keywords = companyIndustryKeywords[industryName] || [];
-            if (keywords.some(kw => profileCompany.includes(kw))) {
-                score += 7;
-            }
-        }
-
-        // 4. Job role/title match (weight: 5)
-        if (profileTitle) {
-            const matchingRoles = industry.jobRoles.filter(role =>
-                profileTitle.includes(role.toLowerCase()) ||
-                role.toLowerCase().includes(profileTitle)
-            );
-            if (matchingRoles.length > 0) {
-                score += 5;
-            }
-        }
-
-        // 5. Metadata tag match (weight: 4)
-        if (profile.metadata && profile.metadata.length > 0) {
-            const profileTags = new Set((profile.metadata || []).map(t => t.toLowerCase()));
-            const matchingTags = industry.metadataTags.filter(tag =>
-                profileTags.has(tag.toLowerCase())
-            );
-            score += matchingTags.length * 4;
-        }
-
-        // 6. Semantic similarity for common patterns
-        // Director -> Management-heavy industries
-        if (profileTitle.includes('director') || profileTitle.includes('manager')) {
-            const managementIndustries = ['Consulting', 'Finance', 'Professional Services', 'Management'];
-            if (managementIndustries.some(ind => industryName.includes(ind))) {
-                score += 3;
-            }
-        }
-
-        // 7. Add logarithmic count component (weight: 1-3)
-        // This ensures industries with more leads still get some priority
-        score += Math.log(leadCount + 1);
-
-        return score;
-    }
-
-    /**
-     * Sort industries by priority score
-     */
-    sortIndustriesByPriority(industryCounts, profile, preferenceMode = false) {
-        const industries = Object.entries(industryCounts).map(([name, count]) => ({
-            name,
-            count,
-            score: this.calculatePriorityScore(name, profile, count)
-        }));
-
-        // Custom priority: Marketing & Advertising first, then Manufacturing, then by count
-        industries.sort((a, b) => {
-            const aLower = a.name.toLowerCase();
-            const bLower = b.name.toLowerCase();
-
-            // Priority 1: Marketing & Advertising (exact match or contains 'marketing')
-            const aIsMarketing = aLower.includes('marketing') || aLower.includes('advertising');
-            const bIsMarketing = bLower.includes('marketing') || bLower.includes('advertising');
-            if (aIsMarketing && !bIsMarketing) return -1;
-            if (!aIsMarketing && bIsMarketing) return 1;
-
-            // Priority 2: Manufacturing
-            const aIsManufacturing = aLower.includes('manufacturing');
-            const bIsManufacturing = bLower.includes('manufacturing');
-            if (aIsManufacturing && !bIsManufacturing) return -1;
-            if (!aIsManufacturing && bIsManufacturing) return 1;
-
-            // Priority 3: Sort by count (descending)
-            return b.count - a.count;
-        });
-
-        console.log('📊 Sorted industries (top 5):', industries.slice(0, 5).map(i => i.name));
-
-        return industries;
-    }
+function normalise(str = '') {
+  return str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-// Singleton instance
-const industryHierarchyService = new IndustryHierarchyService();
+/** Distinct top-level industry names from the JSON list. */
+let topLevelCache = null;
 
-export default industryHierarchyService;
+export async function getTopLevelIndustries() {
+  if (topLevelCache) return topLevelCache;
+  const list = await getIndustryList();
+  const set = new Set(list.map((i) => i.top_level_industry).filter(Boolean));
+  topLevelCache = [...set].sort();
+  return topLevelCache;
+}
+
+/**
+ * Resolve lead company+title to top-level industry (same as preferenceScoring).
+ * Returns top-level name from INDUSTRY_KEYWORDS or null.
+ */
+export function resolveLeadTopLevel(company = '', title = '') {
+  const text = normalise(`${company} ${title}`);
+  for (const [industry, keywords] of Object.entries(INDUSTRY_KEYWORDS || {})) {
+    if (keywords.some((k) => text.includes(normalise(k)))) return industry;
+  }
+  return null;
+}
+
+/**
+ * Resolve lead to sub-industry within a top-level (from SUB_INDUSTRY_KEYWORDS).
+ * Returns sub name (e.g. "Chemical Manufacturing") or null.
+ */
+export function resolveLeadSubIndustry(company = '', title = '', topLevel) {
+  if (!topLevel || !SUB_INDUSTRY_KEYWORDS[topLevel]) return null;
+  const text = normalise(`${company} ${title}`);
+  for (const sub of SUB_INDUSTRY_KEYWORDS[topLevel]) {
+    if (sub.keywords.some((k) => text.includes(normalise(k)))) return sub.name;
+  }
+  return null;
+}
+
+/**
+ * Map a profile industry label (e.g. "Chemical Manufacturing", "Manufacturing") to top-level.
+ * Uses industry list: find item whose label or hierarchy contains the given label.
+ */
+export async function getTopLevelFromIndustryLabel(label) {
+  if (!label || typeof label !== 'string') return null;
+  const list = await getIndustryList();
+  const n = normalise(label);
+  // Exact or contains match on label/name
+  for (const item of list) {
+    const itemLabel = normalise(item.label || item.name || '');
+    if (itemLabel === n || itemLabel.includes(n) || n.includes(itemLabel)) return item.top_level_industry || null;
+  }
+  // Hierarchy contains the label (e.g. "Manufacturing > Chemical Manufacturing")
+  for (const item of list) {
+    const hierarchy = normalise(item.hierarchy || '');
+    if (hierarchy.includes(n)) return item.top_level_industry || null;
+  }
+  return null;
+}
+
+/**
+ * Map a profile industry label to sub_category (second-level) when possible.
+ */
+export async function getSubCategoryFromIndustryLabel(label) {
+  if (!label || typeof label !== 'string') return null;
+  const list = await getIndustryList();
+  const n = normalise(label);
+  for (const item of list) {
+    const itemLabel = normalise(item.label || item.name || '');
+    if (itemLabel === n || itemLabel.includes(n) || n.includes(itemLabel)) return item.sub_category || null;
+  }
+  for (const item of list) {
+    const hierarchy = normalise(item.hierarchy || '');
+    if (hierarchy.includes(n)) return item.sub_category || null;
+  }
+  return null;
+}
+
+/**
+ * Get tier from hierarchy comparison.
+ * - primary: same top-level and (same sub or either missing)
+ * - secondary: same top-level, different sub
+ * - tertiary: different top-level
+ */
+export function getTierFromHierarchy(userTopLevel, userSub, leadTopLevel, leadSub) {
+  if (!userTopLevel || !leadTopLevel) return 'tertiary';
+  const sameTop = normalise(String(userTopLevel)) === normalise(String(leadTopLevel));
+  if (!sameTop) return 'tertiary';
+
+  if (!userSub && !leadSub) return 'primary';
+  if (!userSub || !leadSub) return 'primary'; // one missing => treat as same
+  const sameSub = normalise(String(userSub)) === normalise(String(leadSub));
+  return sameSub ? 'primary' : 'secondary';
+}
+
+// --- Default export for server.js and industry.routes.js ---
+
+let fullHierarchyCache = null;
+let listCache = null;
+
+async function loadIndustryData() {
+  const list = await getIndustryList();
+  listCache = list;
+  topLevelCache = null;
+  await getTopLevelIndustries();
+  fullHierarchyCache = null;
+}
+
+function getFullHierarchy() {
+  if (fullHierarchyCache) return fullHierarchyCache;
+  if (!listCache) return {};
+  const map = {};
+  for (const item of listCache) {
+    const top = item.top_level_industry || item.hierarchy?.split('>')[0]?.trim();
+    if (!top) continue;
+    if (!map[top]) map[top] = [];
+    const sub = item.sub_category || (item.hierarchy?.split('>').map((p) => p.trim()).filter(Boolean)[1]);
+    if (sub && !map[top].includes(sub)) map[top].push(sub);
+  }
+  fullHierarchyCache = map;
+  return map;
+}
+
+function getSubtags(industry) {
+  if (!listCache) return null;
+  const norm = normalise(String(industry));
+  const items = listCache.filter(
+    (i) => (i.top_level_industry && normalise(i.top_level_industry) === norm) || (i.hierarchy && normalise(i.hierarchy.split('>')[0] || '') === norm)
+  );
+  if (items.length === 0) return null;
+  return items.map((i) => ({ name: i.label || i.name, code: i.code, hierarchy: i.hierarchy, sub_category: i.sub_category }));
+}
+
+function getTopLevelIndustriesSync() {
+  return topLevelCache || [];
+}
+
+function sortIndustriesByPriority(industryCounts, profile, preferenceMode) {
+  const entries = Object.entries(industryCounts || {}).map(([name, count]) => ({ name, count: Number(count) || 0 }));
+  if (!profile || !preferenceMode) {
+    return entries.sort((a, b) => b.count - a.count).map((e) => ({ ...e, score: e.count }));
+  }
+  const userIndustry = profile.industry || profile.title || profile.company || '';
+  let userTop = null;
+  for (const [top, keywords] of Object.entries(INDUSTRY_KEYWORDS || {})) {
+    if (keywords.some((k) => normalise(userIndustry).includes(normalise(k)))) {
+      userTop = top;
+      break;
+    }
+  }
+  const scored = entries.map((e) => {
+    const leadTop = resolveLeadTopLevel('', e.name);
+    const same = userTop && leadTop && normalise(String(userTop)) === normalise(String(leadTop));
+    const score = (same ? 2 : 1) * e.count;
+    return { ...e, score };
+  });
+  return scored.sort((a, b) => b.score - a.score);
+}
+
+export default {
+  loadIndustryData,
+  getFullHierarchy,
+  getSubtags,
+  getTopLevelIndustries: getTopLevelIndustriesSync,
+  sortIndustriesByPriority,
+};

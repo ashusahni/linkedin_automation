@@ -1,11 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Play, Sparkles, Upload, FileText, X, Info } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useToast } from '../components/ui/toast';
-import PageGuide from '../components/PageGuide';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
@@ -42,6 +41,9 @@ export default function LeadSearchPage() {
     const [importType, setImportType] = useState('csv');
     const fileInputRef = useRef(null);
 
+    // 1st degree (Phantom) import stats for widget: { saved, totalLeads, timestamp }
+    const [firstDegreeImportStats, setFirstDegreeImportStats] = useState(null);
+
     const handleSearch = async (e) => {
         if (e && e.preventDefault) e.preventDefault();
         setLoading(true);
@@ -65,16 +67,39 @@ export default function LeadSearchPage() {
             const backend = err.response?.data;
             const errorMsg = (backend && (backend.message || backend.error)) || err.message || 'Failed to search leads';
             const errorCode = backend?.code;
+            const helpUrl = backend?.helpUrl || null;
             setError({
                 message: errorMsg,
                 code: errorCode || null,
                 tips: backend?.tips || null,
+                helpUrl,
             });
-            addToast(errorCode ? `[${errorCode}] ${errorMsg}` : errorMsg, 'error');
+            addToast(errorCode ? `[${errorCode}] ${errorMsg}` : errorMsg, 'error', helpUrl ? { helpUrl } : {});
         } finally {
             setLoading(false);
         }
     };
+
+    // Fetch latest 1st degree import stats when "Import My Connections" is selected
+    useEffect(() => {
+        if (importSource !== 'connections_export') {
+            setFirstDegreeImportStats(null);
+            return;
+        }
+        axios.get('/api/leads/imports?limit=50')
+            .then((res) => {
+                const rows = res.data || [];
+                const last = rows.find((r) => r.source === 'connections_export');
+                if (last) {
+                    setFirstDegreeImportStats({
+                        saved: last.saved ?? 0,
+                        totalLeads: last.total_leads ?? 0,
+                        timestamp: last.timestamp,
+                    });
+                }
+            })
+            .catch(() => {});
+    }, [importSource]);
 
     const handleFileSelect = (type) => {
         setImportType(type);
@@ -138,7 +163,7 @@ export default function LeadSearchPage() {
                             Lead Search
                         </h1>
                         <p className="text-muted-foreground mt-1 text-sm md:text-base max-w-2xl">
-                            Run advanced data strategies to import leads directly into the system. Power your campaigns with AI-driven signals.
+                            Import new leads based on your criteria
                         </p>
                     </div>
                 </div>
@@ -191,6 +216,20 @@ export default function LeadSearchPage() {
                                 ))}
                             </div>
 
+                            {importSource === 'connections_export' && firstDegreeImportStats && (
+                                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+                                    <span className="font-medium tabular-nums">
+                                        {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st Degree connections have been imported as of{' '}
+                                        {firstDegreeImportStats.timestamp
+                                            ? new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, {
+                                                dateStyle: 'medium',
+                                                timeStyle: 'short',
+                                            })
+                                            : '—'}
+                                    </span>
+                                </div>
+                            )}
+
                             <div className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t border-border/50 gap-4">
                                 <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
                                     <Sparkles className="w-3.5 h-3.5 text-primary" />
@@ -227,7 +266,7 @@ export default function LeadSearchPage() {
                             </span>
                         </CardTitle>
                         <CardDescription className="text-sm">
-                            Upload your existing contacts from CSV or Excel files directly into LeadForge.
+                            Upload your existing contacts from CSV or Excel files directly into Kinnote.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="pt-6">
@@ -357,15 +396,26 @@ export default function LeadSearchPage() {
                             <CardContent>
                                 <div className="bg-destructive/10 p-5 rounded-xl border border-destructive/20 backdrop-blur-md">
                                     <p className="text-sm font-semibold text-destructive-foreground mb-3 flex items-start gap-2">
-                                        {error.code && <span className="font-mono text-[10px] bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full mt-0.5">{error.code}</span>}
                                         <span className="leading-snug">{error.message || 'An unknown error occurred while searching leads.'}</span>
                                     </p>
                                     {error.tips && Array.isArray(error.tips) && (
                                         <div className="mt-4 pt-4 border-t border-destructive/20">
-                                            <p className="text-xs font-semibold text-destructive/80 uppercase tracking-wider mb-2">Troubleshooting Tips</p>
+                                            <p className="text-xs font-semibold text-destructive/80 uppercase tracking-wider mb-2">What you can do</p>
                                             <ul className="list-disc list-inside space-y-1.5 text-sm text-muted-foreground">
                                                 {error.tips.map((tip, idx) => <li key={idx} className="leading-relaxed">{tip}</li>)}
                                             </ul>
+                                        </div>
+                                    )}
+                                    {error.helpUrl && (
+                                        <div className="mt-4 pt-4 border-t border-destructive/20">
+                                            <a
+                                                href={error.helpUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"
+                                            >
+                                                Reconnect your account
+                                            </a>
                                         </div>
                                     )}
                                 </div>
@@ -373,8 +423,6 @@ export default function LeadSearchPage() {
                         </Card>
                     </motion.div>
                 )}
-
-                <PageGuide pageKey="search" />
             </div>
         </TooltipProvider>
     );

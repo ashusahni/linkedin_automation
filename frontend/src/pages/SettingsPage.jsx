@@ -30,6 +30,7 @@ import {
   Brain,
   Sparkles,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import PageGuide from "../components/PageGuide";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,15 @@ import {
   CardFooter,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "../components/ui/toast";
 
 const SettingsPage = () => {
@@ -105,6 +115,7 @@ const SettingsPage = () => {
   });
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [analyzingProfile, setAnalyzingProfile] = useState(false);
+  const [industryList, setIndustryList] = useState([]);
 
 
 
@@ -280,8 +291,20 @@ const SettingsPage = () => {
       }
     };
 
+    const fetchIndustryList = async () => {
+      try {
+        const res = await axios.get("/api/industry/list");
+        if (res.data?.success && Array.isArray(res.data.data)) {
+          setIndustryList(res.data.data);
+        }
+      } catch (e) {
+        console.error("Failed to load industry list", e);
+      }
+    };
+
     fetchSettings();
     fetchPreferences();
+    fetchIndustryList();
   }, [addToast]);
 
 
@@ -374,10 +397,10 @@ const SettingsPage = () => {
         preference_tiers: preferences.preference_tiers,
         preference_active: preferences.preference_active,
       });
-      addToast("Preferences saved. Leads are being rescored — dashboard Primary/Secondary/Tertiary counts will update in a few seconds.", "success");
+      addToast("Preferences saved. Redirecting to dashboard — refresh in a few seconds to see updated tier counts.", "success");
+      window.location.href = "/";
     } catch (error) {
-      addToast("Failed to save preferences", "error");
-    } finally {
+      addToast(error.response?.data?.error || "Failed to save preferences", "error");
       setPreferencesSaving(false);
     }
   };
@@ -1082,11 +1105,11 @@ const SettingsPage = () => {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="user-name" className="flex items-center gap-2">
-                  <User className="w-4 h-4" /> Display name (e.g. Rishab)
+                  <User className="w-4 h-4" /> Display name (initials e.g. RK or full name)
                 </Label>
                 <Input
                   id="user-name"
-                  placeholder="Rishab"
+                  placeholder="RK or Full Name"
                   value={branding.userName}
                   onChange={(e) =>
                     setBranding({ ...branding, userName: e.target.value })
@@ -1122,7 +1145,7 @@ const SettingsPage = () => {
                 <Input
                   id="profile-url"
                   type="url"
-                  placeholder="https://..."
+                  placeholder="https://... or set via Save Preferences (LinkedIn profile URL)"
                   value={branding.profileImageUrl}
                   onChange={(e) =>
                     setBranding({
@@ -1131,6 +1154,7 @@ const SettingsPage = () => {
                     })
                   }
                 />
+                <p className="text-[10px] text-muted-foreground">Filled automatically when you Save preferences with a LinkedIn profile URL below.</p>
               </div>
             </div>
             <div className="space-y-2">
@@ -1262,15 +1286,27 @@ const SettingsPage = () => {
                   Analyze
                 </Button>
               </div>
-              <p className="text-[10px] text-muted-foreground">Profile URL is required for Save. Analyze fills Primary, Secondary, and Tertiary with 3–5 options each (no duplicates). Edit if needed, then Save.</p>
+              <p className="text-[10px] text-muted-foreground">Profile URL is required for Save. Analyze fills Primary, Secondary, and Tertiary with 3–5 options each (no duplicates). When you Save, the app will use this profile to set your display (initials from first + last name) and LinkedIn profile picture in the app bar.</p>
             </div>
             {(() => {
               const TITLE_OPTIONS = ["CEO", "CTO", "CFO", "Director", "Manager", "VP", "Founder", "Head of", "Lead", "Engineer", "Analyst", "Consultant", "Specialist"];
-              const INDUSTRY_OPTIONS = [
+              const INDUSTRY_OPTIONS_FALLBACK = [
                 "Technology, Information and Media", "Financial Services", "Professional Services", "Manufacturing", "Retail", "Education",
                 "Hospitals and Health Care", "Marketing & Advertising", "Construction", "Real Estate and Equipment Rental Services", "Other"
               ];
               const SIZE_OPTIONS = ["1-10", "11-50", "51-200", "201-500", "500+"];
+              const groupedIndustries = (() => {
+                if (!industryList.length) return [];
+                const byTop = new Map();
+                for (const ind of industryList) {
+                  const top = ind.top_level_industry || ind.name || "Other";
+                  if (!byTop.has(top)) byTop.set(top, []);
+                  byTop.get(top).push({ ...ind, label: ind.name || ind.label || "" });
+                }
+                return Array.from(byTop.entries())
+                  .map(([topLevel, industries]) => ({ topLevel, industries }))
+                  .sort((a, b) => (a.topLevel || "").localeCompare(b.topLevel || ""));
+              })();
               const addPick = (key, tier, value) => {
                 if (!value) return;
                 const t = preferences.preference_tiers?.[tier] || {};
@@ -1307,7 +1343,7 @@ const SettingsPage = () => {
                 const industries = Array.isArray(t.industries) ? t.industries : [];
                 const sizes = Array.isArray(t.company_sizes) ? t.company_sizes : [];
                 const titleOpts = [...new Set([...TITLE_OPTIONS, ...titles])];
-                const industryOpts = [...new Set([...INDUSTRY_OPTIONS, ...industries])];
+                const industryOpts = [...new Set([...INDUSTRY_OPTIONS_FALLBACK, ...industries])];
                 const sizeOpts = [...new Set([...SIZE_OPTIONS, ...sizes])];
                 const selectClass = "h-8 w-full text-xs rounded-md border border-input bg-background px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
                 return (
@@ -1336,16 +1372,54 @@ const SettingsPage = () => {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[11px] text-muted-foreground block">Industries</Label>
-                        <select
-                          value=""
-                          onChange={(e) => { addPick("industries", tier, e.target.value); e.target.value = ""; }}
-                          className={selectClass}
-                        >
-                          <option value="">Add industry…</option>
-                          {industryOpts.filter((o) => !industries.includes(o)).map((opt) => (
-                            <option key={opt} value={opt}>{opt.length > 28 ? opt.slice(0, 28) + "…" : opt}</option>
-                          ))}
-                        </select>
+                        {groupedIndustries.length > 0 ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button type="button" variant="outline" className="h-8 w-full justify-between text-xs font-normal border-input bg-background px-2 py-1">
+                                <span className="text-muted-foreground">Add industry…</span>
+                                <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="max-h-[min(70vh,400px)] overflow-y-auto min-w-[220px]">
+                              {groupedIndustries.map((group) => {
+                                const available = group.industries.filter((ind) => !industries.includes(ind.label));
+                                if (available.length === 0) return null;
+                                return (
+                                  <DropdownMenuSub key={group.topLevel}>
+                                    <DropdownMenuSubTrigger className="text-xs">{group.topLevel}</DropdownMenuSubTrigger>
+                                    <DropdownMenuSubContent className="max-h-[min(60vh,320px)] overflow-y-auto">
+                                      {group.industries.map((ind) => {
+                                        const label = ind.label || ind.name || "";
+                                        const already = industries.includes(label);
+                                        return (
+                                          <DropdownMenuItem
+                                            key={ind.code || label}
+                                            className="text-xs"
+                                            disabled={already || industries.length >= 5}
+                                            onSelect={() => !already && industries.length < 5 && addPick("industries", tier, label)}
+                                          >
+                                            {label.length > 44 ? label.slice(0, 44) + "…" : label}
+                                          </DropdownMenuItem>
+                                        );
+                                      })}
+                                    </DropdownMenuSubContent>
+                                  </DropdownMenuSub>
+                                );
+                              })}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : (
+                          <select
+                            value=""
+                            onChange={(e) => { addPick("industries", tier, e.target.value); e.target.value = ""; }}
+                            className={selectClass}
+                          >
+                            <option value="">Add industry…</option>
+                            {industryOpts.filter((o) => !industries.includes(o)).map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        )}
                         {industries.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {industries.map((v) => (
@@ -1379,7 +1453,7 @@ const SettingsPage = () => {
                 );
               });
             })()}
-            <p className="text-[10px] text-muted-foreground">Rescore runs on save. My Contacts = Primary + Secondary tiers.</p>
+            <p className="text-[10px] text-muted-foreground">Primary / Secondary / Tertiary here are linked to the dashboard: leads matching each section’s titles, industries, and size are counted in that tier. Save updates all lead tiers and redirects to the dashboard.</p>
           </CardContent>
           <CardFooter>
             <Button onClick={savePreferences} disabled={preferencesSaving} className="gap-2">

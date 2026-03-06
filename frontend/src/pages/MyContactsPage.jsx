@@ -1,15 +1,16 @@
 import LeadsTable from '../components/LeadsTable';
 
 /**
- * My Contacts = AI high-priority leads (is_priority = true).
- * Single list, no Review/Qualified/Rejected tabs. Search, filters, Add to Campaign, Enrich & Personalize, Back to Review.
+ * My Contacts = only highly prioritized leads matching your profile (Primary tier via industry / URL).
+ * No duplicates (deduped by LinkedIn URL then email). Single list; Back to Review available.
  */
 export default function MyContactsPage() {
   return (
     <LeadsTable
-      baseQuery={{ is_priority: true }}
+      baseQuery={{ my_contacts: true }}
       showReviewTabs={false}
       showBackToReview={true}
+      listTitle="My Contacts"
     />
   );
 }

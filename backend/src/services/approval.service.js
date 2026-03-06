@@ -53,6 +53,29 @@ export const ApprovalService = {
         return result.rows;
     },
 
+    // Get approved items (optionally filtered by campaign); for email campaigns only email/gmail step types
+    async getApprovedItems(campaignId = null, emailOnly = false) {
+        let query = `
+            SELECT aq.*, l.first_name, l.last_name, l.company, l.title, l.linkedin_url, l.email, c.name as campaign_name
+            FROM approval_queue aq
+            JOIN campaign_leads cl ON aq.campaign_id = cl.campaign_id AND aq.lead_id = cl.lead_id
+            JOIN leads l ON cl.lead_id = l.id
+            JOIN campaigns c ON aq.campaign_id = c.id
+            WHERE aq.status = 'approved'
+        `;
+        const params = [];
+        if (emailOnly) {
+            query += " AND aq.step_type IN ('email', 'gmail_outreach')";
+        }
+        if (campaignId) {
+            query += ' AND aq.campaign_id = $1';
+            params.push(campaignId);
+        }
+        query += ' ORDER BY aq.updated_at DESC';
+        const result = await pool.query(query, params);
+        return result.rows;
+    },
+
     // Edit approval content
     async editContent(id, newContent) {
         const result = await pool.query(
