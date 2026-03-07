@@ -70,7 +70,10 @@ export default function EmailCampaignsPage() {
     const fetchCampaigns = () => {
         setLoadingCampaigns(true);
         axios.get('/api/campaigns')
-            .then((r) => setCampaigns(Array.isArray(r.data) ? r.data : []))
+            .then((r) => {
+                const d = r.data;
+                setCampaigns(Array.isArray(d) ? d : (d?.campaigns ?? []));
+            })
             .catch(() => setCampaigns([]))
             .finally(() => setLoadingCampaigns(false));
     };
@@ -139,7 +142,10 @@ export default function EmailCampaignsPage() {
         setApproveModalApprovingAll(false);
         setLoadingCampaigns(true);
         axios.get(buildCampaignsQuery())
-            .then((r) => setCampaigns(Array.isArray(r.data) ? r.data : []))
+            .then((r) => {
+                const d = r.data;
+                setCampaigns(Array.isArray(d) ? d : (d?.campaigns ?? []));
+            })
             .catch(() => {})
             .finally(() => setLoadingCampaigns(false));
     };

@@ -10,6 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 import config from '../config/index.js';
+import AIService, { getClaudeModel } from '../services/ai.service.js';
 
 const DEFAULT_LOGO_FILENAME = 'Screenshot 2026-03-06 135224.png';
 const DEFAULT_LOGO_ABSOLUTE_PATH = path.join(__dirname, '..', 'config', DEFAULT_LOGO_FILENAME);
@@ -117,7 +118,7 @@ router.get('/', async (req, res) => {
                 openaiApiKey: process.env.OPENAI_API_KEY ? maskKey(process.env.OPENAI_API_KEY) : '',
                 openaiModel: process.env.OPENAI_MODEL || 'gpt-4o',
                 anthropicApiKey: process.env.ANTHROPIC_API_KEY ? maskKey(process.env.ANTHROPIC_API_KEY) : '',
-                claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5'
+                claudeModel: getClaudeModel()
             },
             email: {
                 provider: process.env.EMAIL_PROVIDER || 'sendgrid',
@@ -331,7 +332,7 @@ router.post('/test/claude', async (req, res) => {
                 'content-type': 'application/json'
             },
             body: JSON.stringify({
-                model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5',
+                model: getClaudeModel(),
                 max_tokens: 10,
                 messages: [{ role: 'user', content: 'Hi' }]
             })

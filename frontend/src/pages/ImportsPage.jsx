@@ -1,9 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
-import { FileText, Download, RefreshCw, Database, Upload, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
+import { FileText, Download, RefreshCw, Database, Upload, CheckCircle2, AlertCircle, Trash2, FileSpreadsheet } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu';
 import {
     Table,
     TableBody,
@@ -49,22 +56,25 @@ export default function ImportsPage() {
         if (!file) return;
 
         // Validate file type
-        if (!file.name.endsWith('.csv')) {
+        const isCsv = file.name.toLowerCase().endsWith('.csv');
+        const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+        if (!isCsv && !isExcel) {
             setUploadResult({
                 success: false,
-                message: 'Please upload a CSV file'
+                message: 'Please upload a CSV or Excel file (.csv, .xlsx, .xls)'
             });
             return;
         }
 
         const formData = new FormData();
-        formData.append('csvFile', file);
+        formData.append(isCsv ? 'csvFile' : 'excelFile', file);
 
         try {
             setUploading(true);
             setUploadResult(null);
 
-            const res = await axios.post('/api/leads/import-csv', formData, {
+            const endpoint = isCsv ? '/api/leads/import-csv' : '/api/leads/import-excel';
+            const res = await axios.post(endpoint, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data'
                 }
@@ -81,7 +91,7 @@ export default function ImportsPage() {
         } catch (error) {
             console.error('Upload failed:', error);
 
-            let errorMessage = 'Failed to upload CSV file';
+            let errorMessage = 'Failed to upload file';
 
             if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
                 errorMessage = '❌ Backend server is not running! Please start it with: cd backend && npm run dev';
@@ -93,7 +103,8 @@ export default function ImportsPage() {
 
             setUploadResult({
                 success: false,
-                message: errorMessage
+                message: errorMessage,
+                summary: error.response?.data?.summary
             });
         } finally {
             setUploading(false);
@@ -156,11 +167,11 @@ export default function ImportsPage() {
                         Track data imports and system operations
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".csv"
+                        accept=".csv,.xlsx,.xls"
                         onChange={handleFileUpload}
                         className="hidden"
                     />
@@ -173,6 +184,26 @@ export default function ImportsPage() {
                         <Upload className="h-4 w-4" />
                         {uploading ? 'Uploading...' : 'Data Import'}
                     </Button>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="outline" className="gap-2" title="Download template with required columns">
+                                <Download className="h-4 w-4" />
+                                Template
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem asChild>
+                                <a href={`/api/leads/import-template?format=csv`} download="leads_import_template.csv">
+                                    <FileText className="h-4 w-4 mr-2" /> CSV
+                                </a>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild>
+                                <a href={`/api/leads/import-template?format=xlsx`} download="leads_import_template.xlsx">
+                                    <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel
+                                </a>
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                     <Button
                         onClick={handleDeleteCSVLeads}
                         disabled={deleting}
@@ -184,6 +215,9 @@ export default function ImportsPage() {
                     </Button>
                     <Button onClick={fetchImports} variant="outline" className="gap-2">
                         <RefreshCw className="h-4 w-4" /> Refresh
+                    </Button>
+                    <Button variant="outline" asChild className="gap-2">
+                        <Link to="/imported-leads">View imported leads</Link>
                     </Button>
                 </div>
             </div>
@@ -208,7 +242,20 @@ export default function ImportsPage() {
                                         <p>✓ Saved: {uploadResult.summary.saved}</p>
                                         <p>⊘ Duplicates: {uploadResult.summary.duplicates}</p>
                                         {uploadResult.summary.errors > 0 && (
-                                            <p>⚠ Errors: {uploadResult.summary.errors}</p>
+                                            <>
+                                                <p>⚠ Errors: {uploadResult.summary.errors}</p>
+                                                {uploadResult.summary.errorDetails?.length > 0 && (
+                                                    <ul className="list-disc list-inside mt-1 text-amber-700 dark:text-amber-300">
+                                                        {uploadResult.summary.errorDetails.slice(0, 5).map((d, i) => (
+                                                            <li key={i}>{d.reason}</li>
+                                                        ))}
+                                                        {uploadResult.summary.errorDetails.length > 5 && (
+                                                            <li>… and {uploadResult.summary.errorDetails.length - 5} more</li>
+                                                        )}
+                                                    </ul>
+                                                )}
+                                                <p className="text-xs mt-1">Required: <strong>linkedin_url</strong> in each row. Use the template below.</p>
+                                            </>
                                         )}
                                     </div>
                                 )}

@@ -10,6 +10,7 @@ import DashboardPage from './pages/DashboardPage';
 import ConnectionsPage from './pages/ConnectionsPage';
 import ProspectsPage from './pages/ProspectsPage';
 import MyContactsPage from './pages/MyContactsPage';
+import ImportedLeadsPage from './pages/ImportedLeadsPage';
 import LeadDetailPage from './pages/LeadDetailPage';
 import LeadSearchPage from './pages/LeadSearchPage';
 import LeadImportPage from './pages/LeadImportPage';
@@ -31,6 +32,7 @@ function App() {
                 <Route path="connections" element={<ConnectionsPage />} />
                 <Route path="prospects" element={<ProspectsPage />} />
                 <Route path="my-contacts" element={<MyContactsPage />} />
+                <Route path="imported-leads" element={<ImportedLeadsPage />} />
                 <Route path="leads" element={<RedirectLeadsToMyContacts />} />
                 <Route path="leads/:id" element={<LeadDetailPage />} />
                 <Route path="campaigns" element={<CampaignsPage />} />

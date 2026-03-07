@@ -3,8 +3,9 @@ import pool from "../db.js";
 import { parse } from 'csv-parse/sync';
 import fs from 'fs';
 import { INDUSTRY_KEYWORDS } from '../config/industries.js';
-import { matchesUserNiche } from '../services/lead.service.js';
+import { saveLead, matchesUserNiche } from '../services/lead.service.js';
 import { NotificationService } from '../services/notification.service.js';
+import { appendCampaignLinksToMessage, campaignHasLinksToAppend } from '../services/campaignMessageLink.service.js';
 
 // ============================================================================
 // CONTACT SCRAPING INTEGRATION (PHASE 6)
@@ -164,7 +165,9 @@ export async function getLeads(req, res) {
       hasLinkedin,
       has_contact_info, // My Contacts filter: leads with email OR phone
       is_priority,      // My Contacts page: AI high-priority leads only
-      my_contacts,      // My Contacts page: priority + qualified from connections/prospects
+      my_contacts,      // My Contacts page: priority 1st+2nd degree only
+      review_leads,     // Review Leads: non-priority leads (not 1st/2nd)
+      prospects,        // Prospects: leads in campaign (any campaign_leads row — pending, sent, replied, etc.)
       search,
       title,
       location,
@@ -244,9 +247,20 @@ export async function getLeads(req, res) {
       if (is_priority === "true") {
         conditionClauses.push(`is_priority = TRUE`);
       }
-      // My Contacts: only highly prioritized, profile-matched leads (Primary tier via industry / URL profile)
+      // My Contacts: priorities = 1st + 2nd connection only (Primary tier via industry / URL profile)
       if (my_contacts === "true") {
         conditionClauses.push(`is_priority = TRUE`);
+        conditionClauses.push(`(connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%')`);
+      }
+
+      // Review Leads: all leads EXCEPT My Contacts (exclude is_priority + 1st/2nd degree so they appear in My Contacts only)
+      if (review_leads === "true") {
+        conditionClauses.push(`NOT (is_priority = TRUE AND (connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%'))`);
+      }
+
+      // Prospects: leads that are in a campaign (pending, sent, replied, etc.) — any campaign_leads row
+      if (prospects === "true") {
+        conditionClauses.push(`id IN (SELECT lead_id FROM campaign_leads)`);
       }
 
       // Lead Search–style meta filters (same fields as Lead Search page)
@@ -660,7 +674,9 @@ export async function getStats(req, res) {
       createdTo,
       source,
       is_priority,
-      my_contacts
+      my_contacts,
+      review_leads,
+      prospects
     } = req.query;
 
     const params = [];
@@ -669,9 +685,16 @@ export async function getStats(req, res) {
     if (is_priority === "true") {
       whereConditions.push(`is_priority = TRUE`);
     }
-    // My Contacts: only highly prioritized, profile-matched leads (Primary tier)
+    // My Contacts: priorities = 1st + 2nd connection only
     if (my_contacts === "true") {
       whereConditions.push(`is_priority = TRUE`);
+      whereConditions.push(`(connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%')`);
+    }
+    if (review_leads === "true") {
+      whereConditions.push(`NOT (is_priority = TRUE AND (connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%'))`);
+    }
+    if (prospects === "true") {
+      whereConditions.push(`id IN (SELECT lead_id FROM campaign_leads)`);
     }
 
     // Re-use logic from getLeads for building whereConditions
@@ -1171,8 +1194,8 @@ export async function bulkEnrichAndPersonalize(req, res) {
       }
     }
 
-    // Fetch campaign details for context
-    const campaignResult = await pool.query('SELECT goal, type, description, target_audience FROM campaigns WHERE id = $1', [campaignId]);
+    // Fetch campaign details for context (include settings for registration link)
+    const campaignResult = await pool.query('SELECT * FROM campaigns WHERE id = $1', [campaignId]);
     const campaign = campaignResult.rows[0] || null;
     const campaignContext = campaign ? {
       goal: campaign.goal,
@@ -1264,7 +1287,7 @@ export async function bulkEnrichAndPersonalize(req, res) {
         console.log(`   🤖 Generating AI message (stepType: ${stepType})...`);
         let personalizedMessage;
         try {
-          const options = campaignContext ? { campaign: campaignContext } : {};
+          const options = campaignContext ? { campaign: campaignContext, linkWillBeAppended: campaign ? campaignHasLinksToAppend(campaign) : false } : {};
           options.batchContext = { index: index + 1, total: leads.length };
           if (enrichmentData) {
             if (stepType === 'connection_request') {
@@ -1295,14 +1318,15 @@ export async function bulkEnrichAndPersonalize(req, res) {
           personalizedMessage = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
         }
 
-        console.log(`   📝 Message generated (${personalizedMessage.length} chars)`);
+        const finalMessage = campaign ? appendCampaignLinksToMessage(personalizedMessage, campaign, { stepType }) : personalizedMessage;
+        console.log(`   📝 Message generated (${finalMessage.length} chars)`);
 
         // STEP 3: Add to approval queue
         const queueResult = await ApprovalService.addToQueue(
           parseInt(campaignId),
           lead.id,
           stepType,
-          personalizedMessage
+          finalMessage
         );
 
         if (!queueResult || !queueResult.id) {
@@ -1346,6 +1370,105 @@ function safeTruncate(value, maxLength) {
   return str.length > maxLength ? str.slice(0, maxLength) : str;
 }
 
+/** Get value from CSV/Excel record by trying multiple key variants (handles BOM-prefixed headers). */
+function getRecordVal(record, primaryKey, alternates = []) {
+  if (!record || typeof record !== 'object') return null;
+  const keys = [primaryKey, '\uFEFF' + primaryKey, ...alternates];
+  for (const k of keys) {
+    const v = record[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+  }
+  return null;
+}
+
+/** Normalize connection_degree from CSV/Excel to 1st, 2nd, 3rd (or null). */
+function normalizeConnectionDegree(value) {
+  if (value === null || value === undefined) return null;
+  const v = String(value).trim().toLowerCase();
+  if (!v) return null;
+  if (/^1(st)?$|first/.test(v)) return '1st';
+  if (/^2(nd)?$|second/.test(v)) return '2nd';
+  if (/^3(rd)?$|third/.test(v)) return '3rd';
+  return null;
+}
+
+/** Treat linkedin_url as URL: coerce to string, trim, add https:// if it looks like a path (so CSV/Excel "text" or link both work). */
+function normalizeLinkedInUrl(value) {
+  if (value === null || value === undefined) return null;
+  const v = String(value).trim();
+  if (!v) return null;
+  const lower = v.toLowerCase();
+  if (lower.startsWith('http://') || lower.startsWith('https://')) return v;
+  if (lower.includes('linkedin.com')) return `https://${v.replace(/^\s*\/\//i, '')}`;
+  return v;
+}
+
+/** Template columns for CSV/Excel import (matches import logic and leads functionality). */
+const IMPORT_TEMPLATE_HEADERS = [
+  'linkedin_url',
+  'full_name',
+  'first_name',
+  'last_name',
+  'title',
+  'company',
+  'location',
+  'email',
+  'phone',
+  'connection_degree'
+];
+
+/** Example row for template (connection_degree: 1st, 2nd, or 3rd). */
+const IMPORT_TEMPLATE_EXAMPLE_ROW = [
+  'https://www.linkedin.com/in/jane-doe/',
+  'Jane Doe',
+  'Jane',
+  'Doe',
+  'Product Manager',
+  'Acme Inc',
+  'San Francisco CA',
+  'jane@example.com',
+  '+1234567890',
+  '2nd'
+];
+
+// GET /api/leads/import-template?format=csv|xlsx
+export async function getImportTemplate(req, res) {
+  try {
+    const format = (req.query.format || 'csv').toLowerCase();
+    const isExcel = format === 'xlsx' || format === 'xls';
+
+    if (isExcel) {
+      let xlsx;
+      try {
+        const module = await import('xlsx');
+        xlsx = module.default || module;
+      } catch (e) {
+        return res.status(500).json({ error: 'Excel support unavailable. Use format=csv to download CSV template.' });
+      }
+      const ws = xlsx.utils.aoa_to_sheet([IMPORT_TEMPLATE_HEADERS, IMPORT_TEMPLATE_EXAMPLE_ROW]);
+      const wb = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(wb, ws, 'Leads');
+      const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="leads_import_template.xlsx"');
+      return res.send(buffer);
+    }
+
+    // CSV
+    const csvLine = (row) => row.map((cell) => {
+      const s = String(cell ?? '');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+    }).join(',');
+    const csv = [csvLine(IMPORT_TEMPLATE_HEADERS), csvLine(IMPORT_TEMPLATE_EXAMPLE_ROW)].join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="leads_import_template.csv"');
+    return res.send('\uFEFF' + csv);
+  } catch (err) {
+    console.error('getImportTemplate error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 // POST /api/leads/import-csv
 export async function importLeadsFromCSV(req, res) {
   try {
@@ -1353,14 +1476,18 @@ export async function importLeadsFromCSV(req, res) {
       return res.status(400).json({ error: "No CSV file uploaded" });
     }
 
-    // Read the uploaded CSV file
-    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    // Read the uploaded CSV file and strip BOM (Excel/Windows often add UTF-8 BOM; otherwise first column becomes "\uFEFFlinkedin_url")
+    let fileContent = fs.readFileSync(req.file.path, 'utf8');
+    if (fileContent.charCodeAt(0) === 0xFEFF) {
+      fileContent = fileContent.slice(1);
+    }
 
     // Parse CSV
     const records = parse(fileContent, {
       columns: true,
       skip_empty_lines: true,
-      trim: true
+      trim: true,
+      relax_column_count: true
     });
 
     if (records.length === 0) {
@@ -1374,73 +1501,57 @@ export async function importLeadsFromCSV(req, res) {
     let errors = 0;
     const errorDetails = [];
 
-    // Process each record
     for (const record of records) {
       try {
-        // Map CSV columns to database fields (flexible mapping)
-        const leadData = {
-          full_name: record.full_name || record.fullName || record.name || record['Full Name'] || null,
-          first_name: record.first_name || record.firstName || record['First Name'] || null,
-          last_name: record.last_name || record.lastName || record['Last Name'] || null,
-          title: record.title || record.jobTitle || record['Job Title'] || null,
-          company: record.company || record.companyName || record['Company'] || null,
-          location: record.location || record.Location || null,
-          linkedin_url: record.linkedin_url || record.linkedinUrl || record.profileUrl || record['LinkedIn URL'] || null,
-          email: record.email || record.Email || null,
-          phone: record.phone || record.Phone || null,
-          source: record.source || 'csv_import',
-          status: 'new'
-        };
+        const full_name = getRecordVal(record, 'full_name', ['fullName', 'name', 'Full Name']) ?? record.full_name ?? record.fullName ?? record.name ?? record['Full Name'] ?? null;
+        const first_name = getRecordVal(record, 'first_name', ['firstName', 'First Name']) ?? record.first_name ?? record.firstName ?? record['First Name'] ?? null;
+        const last_name = getRecordVal(record, 'last_name', ['lastName', 'Last Name']) ?? record.last_name ?? record.lastName ?? record['Last Name'] ?? null;
+        const title = getRecordVal(record, 'title', ['jobTitle', 'Job Title']) ?? record.title ?? record.jobTitle ?? record['Job Title'] ?? null;
+        const company = getRecordVal(record, 'company', ['companyName', 'Company']) ?? record.company ?? record.companyName ?? record['Company'] ?? null;
+        const location = getRecordVal(record, 'location', ['Location']) ?? record.location ?? record.Location ?? null;
+        let linkedin_url = getRecordVal(record, 'linkedin_url', ['linkedinUrl', 'profileUrl', 'LinkedIn URL']) ?? record.linkedin_url ?? record.linkedinUrl ?? record.profileUrl ?? record['LinkedIn URL'] ?? null;
+        linkedin_url = normalizeLinkedInUrl(linkedin_url);
+        const email = getRecordVal(record, 'email', ['Email']) ?? record.email ?? record.Email ?? null;
+        const phone = getRecordVal(record, 'phone', ['Phone']) ?? record.phone ?? record.Phone ?? null;
 
-        // Skip if no meaningful data
-        if (!leadData.full_name && !leadData.first_name && !leadData.linkedin_url) {
+        if (!full_name && !first_name && !linkedin_url) {
           errors++;
-          errorDetails.push({ row: record, reason: 'Missing required fields (name or LinkedIn URL)' });
+          errorDetails.push({ row: record, reason: 'Missing required fields (need at least full_name, first_name, or linkedin_url)' });
           continue;
         }
 
-        // Check if lead matches user's niche for auto-qualification
-        const leadForNicheCheck = { company: leadData.company, title: leadData.title };
-        const matchesNiche = await matchesUserNiche(leadForNicheCheck);
-        const reviewStatus = matchesNiche ? 'approved' : 'to_be_reviewed';
+        // linkedin_url required for deduplication; skip row if missing
+        if (!linkedin_url || !String(linkedin_url).trim()) {
+          errors++;
+          errorDetails.push({ row: record, reason: 'linkedin_url is required for import (used for deduplication)' });
+          continue;
+        }
 
-        // Apply DB-safe truncation to respect column sizes
-        const values = [
-          safeTruncate(leadData.full_name, 255),      // full_name VARCHAR(255)
-          safeTruncate(leadData.first_name, 100),     // first_name VARCHAR(100)
-          safeTruncate(leadData.last_name, 100),      // last_name VARCHAR(100)
-          safeTruncate(leadData.title, 255),          // title VARCHAR(255)
-          safeTruncate(leadData.company, 255),        // company VARCHAR(255)
-          safeTruncate(leadData.location, 255),       // location VARCHAR(255)
-          safeTruncate(leadData.linkedin_url, 500),   // linkedin_url VARCHAR(500)
-          safeTruncate(leadData.email, 255),          // email VARCHAR(255)
-          safeTruncate(leadData.phone, 50),           // phone VARCHAR(50)
-          safeTruncate(leadData.source, 100),         // source VARCHAR(100)
-          leadData.status,                            // status VARCHAR(50) default 'new'
-          reviewStatus                                // review_status VARCHAR(50)
-        ];
-
-        // Try to insert, handle duplicates
-        const result = await pool.query(
-          `INSERT INTO leads (
-            full_name, first_name, last_name, title, company, 
-            location, linkedin_url, email, phone, source, status, review_status
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          ON CONFLICT (linkedin_url) DO NOTHING
-          RETURNING id`,
-          values
+        const connectionDegree = normalizeConnectionDegree(
+          getRecordVal(record, 'connection_degree', ['connectionDegree', 'Connection Degree', 'connection degree']) ?? record.connection_degree ?? record.connectionDegree ?? record['Connection Degree'] ?? null
         );
 
-        if (result.rows.length > 0) {
-          saved++;
-        } else {
-          duplicates++;
-        }
+        const lead = {
+          linkedinUrl: safeTruncate(linkedin_url, 500),
+          firstName: safeTruncate(first_name, 100),
+          lastName: safeTruncate(last_name, 100),
+          fullName: safeTruncate(full_name, 255) || (first_name && last_name ? `${first_name} ${last_name}`.trim() : first_name || last_name),
+          title: safeTruncate(title, 255),
+          company: safeTruncate(company, 255),
+          location: safeTruncate(location, 255),
+          email: safeTruncate(email, 255),
+          phone: safeTruncate(phone, 50),
+          source: record.source || 'csv_import',
+          connectionDegree: connectionDegree,
+        };
+
+        const inserted = await saveLead(lead);
+        if (inserted) saved++;
+        else duplicates++;
       } catch (err) {
         errors++;
         errorDetails.push({ row: record, reason: err.message });
-        console.error('Error inserting lead:', err.message);
+        console.error('Error inserting lead from CSV:', err.message);
       }
     }
 
@@ -1529,69 +1640,52 @@ export async function importLeadsFromExcel(req, res) {
     let errors = 0;
     const errorDetails = [];
 
-    // Process each record
     for (const record of records) {
       try {
-        // Map Excel columns to database fields (flexible mapping with fallbacks)
-        const leadData = {
-          full_name: record.full_name || record.fullName || record.full_name || record.name || record.Name || record['Full Name'] || record['full name'] || null,
-          first_name: record.first_name || record.firstName || record['First Name'] || record['first name'] || null,
-          last_name: record.last_name || record.lastName || record['Last Name'] || record['last name'] || null,
-          title: record.title || record.jobTitle || record['Job Title'] || record['title'] || record['JobTitle'] || null,
-          company: record.company || record.companyName || record['Company'] || record['company'] || record['CompanyName'] || null,
-          location: record.location || record.Location || record['location'] || null,
-          linkedin_url: record.linkedin_url || record.linkedinUrl || record.profileUrl || record['LinkedIn URL'] || record['Profile URL'] || record['linkedin'] || null,
-          email: record.email || record.Email || record['email'] || null,
-          phone: record.phone || record.Phone || record['phone'] || record['Phone Number'] || null,
-          source: record.source || 'excel_import',
-          status: 'new'
-        };
+        const full_name = getRecordVal(record, 'full_name', ['fullName', 'name', 'Name', 'Full Name', 'full name']) ?? record.full_name ?? record.fullName ?? record.name ?? record.Name ?? record['Full Name'] ?? null;
+        const first_name = getRecordVal(record, 'first_name', ['firstName', 'First Name', 'first name']) ?? record.first_name ?? record.firstName ?? record['First Name'] ?? null;
+        const last_name = getRecordVal(record, 'last_name', ['lastName', 'Last Name', 'last name']) ?? record.last_name ?? record.lastName ?? record['Last Name'] ?? null;
+        const title = getRecordVal(record, 'title', ['jobTitle', 'Job Title', 'JobTitle']) ?? record.title ?? record.jobTitle ?? record['Job Title'] ?? null;
+        const company = getRecordVal(record, 'company', ['companyName', 'Company', 'CompanyName']) ?? record.company ?? record.companyName ?? record['Company'] ?? null;
+        const location = getRecordVal(record, 'location', ['Location', 'location']) ?? record.location ?? record.Location ?? null;
+        let linkedin_url = getRecordVal(record, 'linkedin_url', ['linkedinUrl', 'profileUrl', 'LinkedIn URL', 'Profile URL', 'linkedin']) ?? record.linkedin_url ?? record.linkedinUrl ?? record.profileUrl ?? record['LinkedIn URL'] ?? record['Profile URL'] ?? null;
+        linkedin_url = normalizeLinkedInUrl(linkedin_url);
+        const email = getRecordVal(record, 'email', ['Email', 'email']) ?? record.email ?? record.Email ?? null;
+        const phone = getRecordVal(record, 'phone', ['Phone', 'phone', 'Phone Number']) ?? record.phone ?? record.Phone ?? record['Phone Number'] ?? null;
 
-        // Skip if no meaningful data
-        if (!leadData.full_name && !leadData.first_name && !leadData.linkedin_url) {
+        if (!full_name && !first_name && !linkedin_url) {
           errors++;
-          errorDetails.push({ row: record, reason: 'Missing required fields (name or LinkedIn URL)' });
+          errorDetails.push({ row: record, reason: 'Missing required fields (need at least full_name, first_name, or linkedin_url)' });
           continue;
         }
 
-        // Check if lead matches user's niche for auto-qualification
-        const leadForNicheCheck = { company: leadData.company, title: leadData.title };
-        const matchesNiche = await matchesUserNiche(leadForNicheCheck);
-        const reviewStatus = matchesNiche ? 'approved' : 'to_be_reviewed';
+        if (!linkedin_url || !String(linkedin_url).trim()) {
+          errors++;
+          errorDetails.push({ row: record, reason: 'linkedin_url is required for import (used for deduplication)' });
+          continue;
+        }
 
-        // Apply DB-safe truncation to respect column sizes
-        const values = [
-          safeTruncate(leadData.full_name, 255),
-          safeTruncate(leadData.first_name, 100),
-          safeTruncate(leadData.last_name, 100),
-          safeTruncate(leadData.title, 255),
-          safeTruncate(leadData.company, 255),
-          safeTruncate(leadData.location, 255),
-          safeTruncate(leadData.linkedin_url, 500),
-          safeTruncate(leadData.email, 255),
-          safeTruncate(leadData.phone, 50),
-          safeTruncate(leadData.source, 100),
-          leadData.status,
-          reviewStatus
-        ];
-
-        // Try to insert, handle duplicates
-        const result = await pool.query(
-          `INSERT INTO leads (
-            full_name, first_name, last_name, title, company, 
-            location, linkedin_url, email, phone, source, status, review_status
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          ON CONFLICT (linkedin_url) DO NOTHING
-          RETURNING id`,
-          values
+        const connectionDegree = normalizeConnectionDegree(
+          getRecordVal(record, 'connection_degree', ['connectionDegree', 'Connection Degree', 'connection degree']) ?? record.connection_degree ?? record.connectionDegree ?? record['Connection Degree'] ?? null
         );
 
-        if (result.rows.length > 0) {
-          saved++;
-        } else {
-          duplicates++;
-        }
+        const lead = {
+          linkedinUrl: safeTruncate(linkedin_url, 500),
+          firstName: safeTruncate(first_name, 100),
+          lastName: safeTruncate(last_name, 100),
+          fullName: safeTruncate(full_name, 255) || (first_name && last_name ? `${first_name} ${last_name}`.trim() : first_name || last_name),
+          title: safeTruncate(title, 255),
+          company: safeTruncate(company, 255),
+          location: safeTruncate(location, 255),
+          email: safeTruncate(email, 255),
+          phone: safeTruncate(phone, 50),
+          source: record.source || 'excel_import',
+          connectionDegree: connectionDegree,
+        };
+
+        const inserted = await saveLead(lead);
+        if (inserted) saved++;
+        else duplicates++;
       } catch (err) {
         errors++;
         errorDetails.push({ row: record, reason: err.message });
@@ -2003,6 +2097,47 @@ export async function moveToReview(req, res) {
   }
 }
 
+/** Run qualify-by-niche on server start (no HTTP). Used by server.js. */
+export async function runQualifyByNicheOnStartup() {
+  try {
+    const leadsResult = await pool.query(
+      `SELECT id, company, title, review_status FROM leads WHERE review_status = $1`,
+      ['to_be_reviewed']
+    );
+    if (leadsResult.rows.length === 0) return { qualified: 0, total: 0 };
+
+    const leadsToQualify = [];
+    for (const lead of leadsResult.rows) {
+      const matchesNiche = await matchesUserNiche({ company: lead.company, title: lead.title });
+      if (matchesNiche) leadsToQualify.push(lead.id);
+    }
+    if (leadsToQualify.length === 0) return { qualified: 0, total: leadsResult.rows.length };
+
+    const currentLeads = await pool.query(
+      `SELECT id, review_status FROM leads WHERE id = ANY($1)`,
+      [leadsToQualify]
+    );
+    await pool.query(
+      `UPDATE leads 
+       SET review_status = 'approved', is_priority = TRUE,
+           approved_at = CASE WHEN approved_at IS NULL THEN CURRENT_TIMESTAMP ELSE approved_at END,
+           approved_by = NULL, rejected_reason = NULL, rejected_at = NULL, rejected_by = NULL
+       WHERE id = ANY($1)`,
+      [leadsToQualify]
+    );
+    for (const lead of currentLeads.rows) {
+      if (lead.review_status !== 'approved') {
+        await logStatusChange(lead.id, lead.review_status, 'approved', null, 'Auto-qualified by niche (server startup)');
+      }
+    }
+    console.log(`🎯 Startup: Qualified ${leadsToQualify.length} lead(s) matching profile niche`);
+    return { qualified: leadsToQualify.length, total: leadsResult.rows.length };
+  } catch (err) {
+    console.error('❌ Qualify by niche (startup) error:', err);
+    return { qualified: 0, total: 0 };
+  }
+}
+
 // POST /api/leads/qualify-by-niche
 // Qualify all leads that match the user's profile niche
 export async function qualifyLeadsByNiche(req, res) {
@@ -2093,6 +2228,7 @@ export async function getReviewStats(req, res) {
   try {
     const {
       connection_degree,
+      review_leads,
       quality,
       quality_score,
       industry,
@@ -2108,8 +2244,12 @@ export async function getReviewStats(req, res) {
     const params = [];
     let whereConditions = [];
 
-    // Connection Degree Filter (Support comma-separated e.g. "2nd,3rd")
-    if (connection_degree && connection_degree.trim()) {
+    // Review Leads: all leads except My Contacts (exclude is_priority + 1st/2nd)
+    if (review_leads === "true") {
+      whereConditions.push(`NOT (is_priority = TRUE AND (connection_degree ILIKE '%1st%' OR connection_degree ILIKE '%2nd%'))`);
+    }
+    // Connection Degree Filter (Support comma-separated e.g. "2nd,3rd") — skip when review_leads
+    else if (connection_degree && connection_degree.trim()) {
       const degrees = connection_degree.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
       if (degrees.length > 0) {
         const degreeClauses = degrees.map((_, i) => `connection_degree ILIKE $${params.length + i + 1}`);

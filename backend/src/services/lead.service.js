@@ -117,8 +117,8 @@ export async function saveLead(lead) {
 
   const query = `
     INSERT INTO leads
-    (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, source, connection_degree, review_status, preference_score, preference_tier, is_priority, phantom_metadata)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+    (linkedin_url, first_name, last_name, full_name, title, company, location, profile_image, email, phone, source, connection_degree, review_status, preference_score, preference_tier, is_priority, phantom_metadata)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
     ON CONFLICT (linkedin_url) DO UPDATE SET
       first_name = COALESCE(EXCLUDED.first_name, leads.first_name),
       last_name = COALESCE(EXCLUDED.last_name, leads.last_name),
@@ -127,6 +127,8 @@ export async function saveLead(lead) {
       company = COALESCE(EXCLUDED.company, leads.company),
       location = COALESCE(EXCLUDED.location, leads.location),
       profile_image = COALESCE(EXCLUDED.profile_image, leads.profile_image),
+      email = COALESCE(EXCLUDED.email, leads.email),
+      phone = COALESCE(EXCLUDED.phone, leads.phone),
       connection_degree = EXCLUDED.connection_degree,
       review_status = EXCLUDED.review_status,
       preference_score = EXCLUDED.preference_score,
@@ -147,6 +149,8 @@ export async function saveLead(lead) {
     safeTruncate(lead.company, 255),
     safeTruncate(lead.location, 255),
     safeTruncate(lead.profileImage, 500),
+    safeTruncate(lead.email, 255),
+    safeTruncate(lead.phone, 50),
     safeTruncate(lead.source, 100),
     safeTruncate(lead.connectionDegree || lead.connection_degree, 50),
     safeTruncate(initialReviewStatus, 50),

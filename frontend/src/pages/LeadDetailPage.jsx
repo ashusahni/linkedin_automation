@@ -42,7 +42,10 @@ export default function LeadDetailPage() {
 
     useEffect(() => {
         if (gmailDraft) {
-            axios.get('/api/campaigns').then(res => setCampaigns(Array.isArray(res.data) ? res.data : [])).catch(() => setCampaigns([]));
+            axios.get('/api/campaigns').then(res => {
+                const d = res.data;
+                setCampaigns(Array.isArray(d) ? d : (d?.campaigns ?? []));
+            }).catch(() => setCampaigns([]));
         }
     }, [gmailDraft]);
 

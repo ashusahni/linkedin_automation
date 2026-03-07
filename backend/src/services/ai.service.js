@@ -11,6 +11,24 @@ function getProvider() {
 // Keep a readable alias for logging at startup
 const AI_PROVIDER = getProvider();
 
+/** Valid Claude model IDs (Anthropic). Deprecated/typo ones map to fallback. */
+const CLAUDE_VALID_MODELS = new Set([
+    'claude-sonnet-4-5', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-opus-4-6',
+    'claude-sonnet-4', 'claude-opus-4', 'claude-haiku-4-5', 'claude-opus-4-1'
+]);
+const CLAUDE_DEPRECATED_OR_TYPO = /claude-3-5-sonnet|claude-3-5-sonnnet|claude-3-7-sonnet|claude-3-5-haiku/i;
+function getClaudeModel() {
+    const raw = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5';
+    const normalized = (raw || '').trim();
+    if (!normalized) return 'claude-sonnet-4-5';
+    if (CLAUDE_VALID_MODELS.has(normalized)) return normalized;
+    if (CLAUDE_DEPRECATED_OR_TYPO.test(normalized)) {
+        console.warn(`   ⚠️ Claude model "${normalized}" is deprecated or invalid; using claude-sonnet-4-5`);
+        return 'claude-sonnet-4-5';
+    }
+    return normalized;
+}
+
 // Initialize OpenAI client
 // Initialize OpenAI client
 const openaiKey = process.env.OPENAI_API_KEY || '';
@@ -40,7 +58,7 @@ console.log(`   Primary Provider: ${AI_PROVIDER.toUpperCase()}`);
 
 if (anthropic) {
     console.log(`   ✅ Claude API Key loaded`);
-    console.log(`   Model: ${process.env.CLAUDE_MODEL || 'claude-sonnet-4-5'}`);
+    console.log(`   Model: ${getClaudeModel()}`);
 } else {
     console.log('   ⚪ Claude not configured');
 }
@@ -93,7 +111,7 @@ class AIService {
             if (provider === 'claude') {
                 if (!anthropic) throw new Error('Claude not configured');
                 console.log('   📡 Calling Claude API...');
-                const model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5';
+                const model = getClaudeModel();
                 const response = await anthropic.messages.create({
                     model: model,
                     max_tokens: maxTokens,
@@ -228,7 +246,17 @@ class AIService {
                 if (campaign.target_audience) {
                     campaignContext += `\n- Target Audience: ${campaign.target_audience}`;
                 }
-                console.log(`      Campaign context: ${campaign.goal || 'N/A'} - ${campaign.type || 'N/A'}`);
+                // Any campaign type: when a link will be appended, tell AI not to include URL and to use soft CTA
+                const linkWillBeAppended = options.linkWillBeAppended === true;
+                if (linkWillBeAppended) {
+                    campaignContext += `\n- IMPORTANT: The system will append a link at the end of your message. Do NOT include the URL in your message. End with a soft CTA like "Link below", "Details below", or "Happy to send the link."`;
+                }
+                // Event/Webinar: also ask for invite/registration-style message
+                const isEventOrWebinarConn = ['event_promotion', 'webinar'].includes(String(campaign.goal || '')) || ['event', 'webinar'].includes(String(campaign.type || ''));
+                if (isEventOrWebinarConn) {
+                    campaignContext += `\n- This is an EVENT/WEBINAR campaign: write an invitation or registration-style message (e.g. roundtable, webinar, event).`;
+                }
+                console.log(`      Campaign context: ${campaign.goal || 'N/A'} - ${campaign.type || 'N/A'}${linkWillBeAppended ? ' (link will be appended)' : ''}`);
             }
 
             const toneInstructions = {
@@ -270,7 +298,7 @@ PERSONALIZATION: TONE ${toneInstructions[tone] || toneInstructions.professional}
 RULES:
 1. One CONCRETE detail from their profile (quote from bio, specific post topic, or real role/company). If you mention a post or "product update", do NOT start the message with it—weave it in later or open with something else (question, role, company, or a different angle).
 2. Why them—in one or two sentences. Then a brief, low-key ask. No over-the-top closing. Last sentence must be different from generic "Let me know if you're up for a chat" / "Would love to chat more."
-3. ${campaign ? 'Weave in campaign goal only if it fits naturally.' : ''}
+3. ${campaign ? (options.linkWillBeAppended ? 'A link will be appended after your message—do not include the URL; end with a soft CTA (e.g. "Link below"). ' : '') + (['event_promotion', 'webinar'].includes(String(campaign.goal || '')) || ['event', 'webinar'].includes(String(campaign.type || '')) ? 'This is an event/webinar campaign: write an invite-style message.' : 'Weave in campaign goal only if it fits naturally.') : ''}
 4. NO emojis. Output the FULL message as the reader will see it—no "Hi [Name]," prefix, no quotes.`;
 
             console.log(`   📡 Calling ${AI_PROVIDER.toUpperCase()} (tone=${tone}, length=${length}, focus=${focus})...`);
@@ -399,6 +427,14 @@ RULES:
                 if (campaign.target_audience) {
                     campaignContext += `\n- Target Audience: ${campaign.target_audience}`;
                 }
+                const linkWillBeAppendedFollowUp = options.linkWillBeAppended === true;
+                if (linkWillBeAppendedFollowUp) {
+                    campaignContext += `\n- IMPORTANT: The system will append a link at the end of your message. Do NOT include the URL in your message. End with a soft CTA like "Link below" or "Details below."`;
+                }
+                const isEventOrWebinarFollowUp = ['event_promotion', 'webinar'].includes(String(campaign.goal || '')) || ['event', 'webinar'].includes(String(campaign.type || ''));
+                if (isEventOrWebinarFollowUp) {
+                    campaignContext += `\n- This is an EVENT/WEBINAR campaign: write an invitation or registration-style message.`;
+                }
                 console.log(`      Campaign context: ${campaign.goal || 'N/A'} - ${campaign.type || 'N/A'}`);
             }
 
@@ -440,7 +476,7 @@ PERSONALIZATION: TONE ${toneInstructions[tone] || toneInstructions.professional}
 REQUIREMENTS:
 1. One SPECIFIC detail from their profile or activity. If you mention a post or "product update", do NOT start the message with it—weave it in later or open with a question, their role, or a different angle. Never "your recent post" without saying what it was.
 2. Add a genuine point or value tied to that detail. Sound like you've thought about them.
-3. ${campaign ? 'Tie to campaign only if natural.' : ''}
+3. ${campaign ? (options.linkWillBeAppended ? 'A link will be appended after your message—do not include the URL; end with a soft CTA. ' : '') + (['event_promotion', 'webinar'].includes(String(campaign.goal || '')) || ['event', 'webinar'].includes(String(campaign.type || '')) ? 'This is an event/webinar campaign: write an invite-style message.' : 'Tie to campaign only if natural.') : ''}
 4. Vary structure and closing: different first sentence, different last sentence. Short sentences ok. Fragments ok. NO emojis.
 5. Output the FULL message as sent—no "Hi [Name]," prefix, no quotes.`;
 
@@ -797,4 +833,5 @@ OUTPUT FORMAT (strict):
     }
 }
 
+export { getClaudeModel };
 export default AIService;

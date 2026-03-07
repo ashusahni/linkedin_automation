@@ -37,27 +37,38 @@ function ErrorHandler({ children }) {
                     error.message ||
                     'An unexpected error occurred';
 
+                const isNetworkUnreachable =
+                    error.code === 'ERR_NETWORK' ||
+                    (error.request && error.request.status === 0) ||
+                    error.message === 'Network Error';
+
                 // Log to console only when not skipped (e.g. notification poll uses skipGlobalErrorHandler to avoid noise)
                 if (!error.config?.skipGlobalErrorHandler) {
-                    console.error('🔴 API Error:', {
-                        url: error.config?.url,
-                        method: error.config?.method,
-                        status: error.response?.status,
-                        message: errorMessage,
-                        fullError: error
-                    });
+                    if (isNetworkUnreachable) {
+                        const base = error.config?.baseURL || 'backend';
+                        console.error('🔴 API Error: Cannot reach server. Is it running?', base);
+                    } else {
+                        console.error('🔴 API Error:', {
+                            url: error.config?.url,
+                            method: error.config?.method,
+                            status: error.response?.status,
+                            message: errorMessage,
+                            fullError: error
+                        });
+                    }
                 }
 
                 // Show error in UI (only if not already handled by component)
                 if (!error.config?.skipGlobalErrorHandler) {
                     // Don't show errors for 401/403 (auth) - let components handle those
                     if (error.response?.status !== 401 && error.response?.status !== 403) {
-                        // Format error message (skip status prefix when we have a friendly message + link)
+                        // For network errors, show a single friendly message (pages like Dashboard may show their own)
+                        const displayMessage = isNetworkUnreachable
+                            ? `Cannot reach server. Make sure the backend is running (${error.config?.baseURL || 'check port'}).`
+                            : (error.response?.status && !error.response?.data?.helpUrl
+                                ? `[${error.response.status}] ${errorMessage}`
+                                : errorMessage);
                         const helpUrl = error.response?.data?.helpUrl;
-                        let displayMessage = errorMessage;
-                        if (error.response?.status && !helpUrl) {
-                            displayMessage = `[${error.response.status}] ${errorMessage}`;
-                        }
                         addToast(displayMessage, 'error', helpUrl ? { helpUrl } : {});
                     }
                 }

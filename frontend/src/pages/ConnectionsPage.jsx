@@ -1,15 +1,16 @@
 import LeadsTable from '../components/LeadsTable';
 
 /**
- * Review Leads (1st degree). Only Review and Rejected tabs; qualified leads appear in My Contacts.
- * Base query: connection_degree = '1st'. Tabs: Review (default), Rejected.
+ * Review Leads = all leads except those in My Contacts (priority + 1st/2nd degree).
+ * Tabs: Review (default), Rejected. No default date range so all leads are visible.
  */
 export default function ConnectionsPage() {
   return (
     <LeadsTable
-      baseQuery={{ connection_degree: '1st' }}
+      baseQuery={{ review_leads: true }}
       showReviewTabs={true}
       showBackToReview={false}
+      applyDefaultDateRange={false}
       reviewTabs={['to_be_reviewed', 'rejected']}
       initialReviewTab="to_be_reviewed"
       listTitle="Review Leads"

@@ -1,7 +1,7 @@
 import pool from "../db.js";
 import { NotificationService } from "../services/notification.service.js";
 import emailService from "../services/email.service.js";
-import { appendCampaignLinksToMessage } from "../services/campaignMessageLink.service.js";
+import { appendCampaignLinksToMessage, campaignHasLinksToAppend } from "../services/campaignMessageLink.service.js";
 
 // Allowed automation step types for sequences.
 // These MUST stay in sync with:
@@ -29,7 +29,7 @@ export async function getCampaigns(req, res) {
         const { goal, type, status, priority, tag, createdFrom, createdTo } = req.query;
         let query = `
             SELECT c.*, 
-            (SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id) as lead_count,
+            (SELECT COUNT(DISTINCT cl.lead_id) FROM campaign_leads cl WHERE cl.campaign_id = c.id) as lead_count,
             (SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id AND cl.status IN ('sent', 'replied', 'completed')) as sent_count,
             (SELECT COUNT(*) FROM campaign_leads cl WHERE cl.campaign_id = c.id AND cl.status = 'replied') as replied_count,
             (SELECT COUNT(*) FROM sequences s WHERE s.campaign_id = c.id AND s.type IN ('email','gmail_outreach')) as email_steps_count,
@@ -49,13 +49,14 @@ export async function getCampaigns(req, res) {
         query += ` ORDER BY c.created_at DESC`;
         const result = await pool.query(query, params);
         const rows = result.rows.map(row => {
-            const total = parseInt(row.lead_count) || 0;
+            const total = parseInt(row.lead_count, 10) || 0;
             const sent = parseInt(row.sent_count) || 0;
             const replied = parseInt(row.replied_count) || 0;
             const emailStepsCount = parseInt(row.email_steps_count) || 0;
             const approvedEmailCount = parseInt(row.approved_email_count) || 0;
             return {
                 ...row,
+                lead_count: total,
                 progress: total > 0 ? Math.round((sent / total) * 100) : 0,
                 response_rate: sent > 0 ? Math.round((replied / sent) * 100) : 0,
                 email_steps_count: emailStepsCount,
@@ -63,7 +64,10 @@ export async function getCampaigns(req, res) {
                 approved_email_count: approvedEmailCount
             };
         });
-        return res.json(rows);
+        // Total distinct leads in any campaign (for summary card; avoids double-counting leads in multiple campaigns)
+        const totalResult = await pool.query(`SELECT COUNT(DISTINCT lead_id)::int AS total FROM campaign_leads`);
+        const totalLeadsInCampaigns = totalResult.rows[0]?.total ?? 0;
+        return res.json({ campaigns: rows, totalLeadsInCampaigns });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -1624,11 +1628,12 @@ export async function bulkEnrichAndGenerate(req, res) {
                     let personalizedMessage;
                     try {
                         const batchContext = { index: index + 1, total: leadsWithLinkedIn.length };
+                        const aiOptions = { campaign: campaignContext, batchContext, linkWillBeAppended: campaignHasLinksToAppend(campaign) };
                         if (enrichmentData) {
                             if (stepType === 'connection_request') {
-                                personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, { campaign: campaignContext, batchContext });
+                                personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, aiOptions);
                             } else {
-                                personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], { campaign: campaignContext, batchContext });
+                                personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], aiOptions);
                             }
                         } else {
                             personalizedMessage = await AIService.generatePersonalizedMessage(
@@ -1636,7 +1641,7 @@ export async function bulkEnrichAndGenerate(req, res) {
                                 '',
                                 stepType,
                                 campaignContext,
-                                { batchContext }
+                                { batchContext, linkWillBeAppended: campaignHasLinksToAppend(campaign) }
                             );
                         }
                     } catch (aiError) {
@@ -1655,8 +1660,9 @@ export async function bulkEnrichAndGenerate(req, res) {
                         personalizedMessage = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
                     }
 
-                    console.log(`   📝 Message generated (${personalizedMessage.length} chars)`);
-                    console.log(`      Preview: "${personalizedMessage.substring(0, 60)}..."`);
+                    const finalMessage = appendCampaignLinksToMessage(personalizedMessage, campaign, { stepType });
+                    console.log(`   📝 Message generated (${finalMessage.length} chars)`);
+                    console.log(`      Preview: "${finalMessage.substring(0, 60)}..."`);
 
                     // STEP 3: Add to approval queue
                     console.log(`   💾 Step 3: Adding to approval queue...`);
@@ -1664,7 +1670,7 @@ export async function bulkEnrichAndGenerate(req, res) {
                         parseInt(id),
                         lead.id,
                         stepType,
-                        personalizedMessage
+                        finalMessage
                     );
 
                     if (!queueResult || !queueResult.id) {
@@ -1806,7 +1812,7 @@ export async function generateGmailDrafts(req, res) {
         const { leadIds } = req.body || {};
 
         const campaignRes = await pool.query(
-            'SELECT id, goal, type, description, target_audience FROM campaigns WHERE id = $1',
+            'SELECT * FROM campaigns WHERE id = $1',
             [campaignId]
         );
         if (campaignRes.rows.length === 0) {
@@ -1907,11 +1913,12 @@ export async function generateGmailDrafts(req, res) {
             if (existingLinkedIn.rows.length === 0 && lead.linkedin_url) {
                 try {
                     let personalizedMessage;
+                    const aiOptions = { campaign: campaignContext, batchContext, linkWillBeAppended: campaignHasLinksToAppend(campaign) };
                     if (enrichmentData) {
                         if (linkedinStepType === 'connection_request') {
-                            personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, { campaign: campaignContext, batchContext });
+                            personalizedMessage = await AIService.generateConnectionRequest(lead, enrichmentData, aiOptions);
                         } else {
-                            personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], { campaign: campaignContext, batchContext });
+                            personalizedMessage = await AIService.generateFollowUpMessage(lead, enrichmentData, [], aiOptions);
                         }
                     } else {
                         personalizedMessage = await AIService.generatePersonalizedMessage(
@@ -1925,7 +1932,8 @@ export async function generateGmailDrafts(req, res) {
                     if (!personalizedMessage || personalizedMessage.trim().length === 0) {
                         personalizedMessage = `Your work at ${lead.company || 'your company'} caught my eye—would like to connect.`;
                     }
-                    await ApprovalService.addToQueue(campaignId, lead.id, linkedinStepType, personalizedMessage);
+                    const finalLinkedInMessage = appendCampaignLinksToMessage(personalizedMessage, campaign, { stepType: linkedinStepType });
+                    await ApprovalService.addToQueue(campaignId, lead.id, linkedinStepType, finalLinkedInMessage);
                     linkedinGenerated++;
                     await new Promise(r => setTimeout(r, 800));
                 } catch (err) {

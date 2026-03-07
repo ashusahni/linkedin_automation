@@ -73,9 +73,9 @@ function goalLabel(goal) {
 }
 
 // ── Stat Card ────────────────────────────────────────────────────────────────
-function StatCard({ label, value, accent, icon: Icon, suffix = '', pulse = false }) {
+function StatCard({ label, value, accent, icon: Icon, suffix = '', pulse = false, title }) {
     return (
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} title={title}>
             <Card className="relative border border-border/40 bg-card/60 backdrop-blur-xl overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
                 <div className="absolute inset-0 opacity-40" style={{ background: `radial-gradient(circle at top right, ${accent}20, transparent 65%)` }} />
                 <CardContent className="p-5 relative z-10">
@@ -255,6 +255,7 @@ export default function CampaignsPage() {
     const navigate = useNavigate();
     const { addToast } = useToast();
     const [campaigns, setCampaigns] = useState([]);
+    const [totalLeadsInCampaigns, setTotalLeadsInCampaigns] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -306,12 +307,18 @@ export default function CampaignsPage() {
             setLoading(true);
 
             const res = await axios.get('/api/campaigns');
-            setCampaigns(Array.isArray(res.data) ? res.data : []);
+            const data = res.data;
+            const list = Array.isArray(data) ? data : (data?.campaigns ?? []);
+            setCampaigns(list);
+            if (data && typeof data.totalLeadsInCampaigns === 'number') {
+                setTotalLeadsInCampaigns(data.totalLeadsInCampaigns);
+            }
         } catch (err) {
             const errorMsg = err.response?.data?.error || err.message || 'Could not load campaigns';
             addToast(`Error: ${errorMsg}`, 'error');
             setError(errorMsg);
             setCampaigns([]);
+            setTotalLeadsInCampaigns(null);
         } finally {
             setLoading(false);
         }
@@ -400,7 +407,7 @@ export default function CampaignsPage() {
         total: campaigns.length,
         active: campaigns.filter(c => c.status === 'active').length,
         draft: campaigns.filter(c => c.status === 'draft').length,
-        totalLeads: campaigns.reduce((sum, c) => sum + (c.lead_count || 0), 0),
+        totalLeadsInCampaigns: totalLeadsInCampaigns ?? campaigns.reduce((sum, c) => sum + (c.lead_count || 0), 0),
     };
 
     const hasActiveFilters = filterStatus !== 'all' || filterGoal !== 'all' || filterType !== 'all';
@@ -511,10 +518,10 @@ export default function CampaignsPage() {
 
                 {/* ── Stat Cards ─────────────────────────────────────────── */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <StatCard label="Total" value={stats.total} accent="#6366f1" icon={Megaphone} />
-                    <StatCard label="Active" value={stats.active} accent="#10b981" icon={Zap} pulse />
-                    <StatCard label="Draft" value={stats.draft} accent="#f59e0b" icon={Clock} />
-                    <StatCard label="Leads Generated" value={Number(stats.totalLeads).toLocaleString()} accent="#8b5cf6" icon={Users} />
+                    <StatCard label="Total" value={stats.total} accent="#6366f1" icon={Megaphone} title="Total campaigns" />
+                    <StatCard label="Active" value={stats.active} accent="#10b981" icon={Zap} pulse title="Campaigns currently running" />
+                    <StatCard label="Draft" value={stats.draft} accent="#f59e0b" icon={Clock} title="Draft campaigns" />
+                    <StatCard label="Leads in campaigns" value={Number(stats.totalLeadsInCampaigns).toLocaleString()} accent="#8b5cf6" icon={Users} title="Total leads assigned across all campaigns" />
                 </div>
 
                 {/* ── Campaign Filters ────────────────────────────────── */}

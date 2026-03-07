@@ -1,3 +1,4 @@
+import "./env-loader.js"; // Load .env first from backend/, parent, or cwd so keys work on every device
 import "./config/index.js"; // 👈 This loads environment variables and config
 import app from "./app.js";
 import config from "./config/index.js";
@@ -5,6 +6,7 @@ import { initScheduler } from "./services/scheduler.service.js";
 import { initContentSheetSync } from "./services/contentSheetSync.service.js";
 import { runMigrations } from "./db/migrations.js";
 import { recalculateAllScores } from "./services/preferenceScoring.service.js";
+import { runQualifyByNicheOnStartup } from "./controllers/lead.controller.js";
 import logger from "./utils/logger.js";
 import industryHierarchyService from "./services/industryHierarchy.service.js";
 import { ensureNotificationsTable } from "./db/ensure_notifications.js"; // 👈 Explicit fix for notifications
@@ -68,6 +70,11 @@ async function init() {
   recalculateAllScores()
     .then((r) => { if (r.updated > 0) logger.info(`📊 Default tiers applied to ${r.updated} leads`); })
     .catch((err) => logger.warn("Default tier run failed (non-fatal):", err.message));
+
+  // Qualify-by-niche: auto-qualify to_be_reviewed leads matching profile niche on server start
+  runQualifyByNicheOnStartup()
+    .then((r) => { if (r.qualified > 0) logger.info(`🎯 Qualify-by-niche (startup): ${r.qualified}/${r.total} leads qualified`); })
+    .catch((err) => logger.warn("Qualify-by-niche startup failed (non-fatal):", err.message));
 
   app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);

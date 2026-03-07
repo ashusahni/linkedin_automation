@@ -1,19 +1,75 @@
 /**
  * Centralized Configuration Management
- * 
+ *
  * This module exports all configuration values for the application.
  * It loads environment variables and provides typed access to config.
  */
 
-// Load environment variables
+/**
+ * Centralized Configuration Management
+ *
+ * This module exports all configuration values for the application.
+ * Loads .env from multiple locations so it works on every device and deployment:
+ * same keys work in production and locally regardless of where you run npm run dev.
+ */
+
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+// Build a list of candidate .env paths in priority order (first found wins).
+const backendRoot = path.resolve(__dirname, "../..");
+const cwd = process.cwd();
+
+function* envSearchPaths() {
+  // 1) Backend folder (when running from backend/ or linkedin_automation/)
+  yield path.join(backendRoot, ".env");
+  // 2) Parent of backend (e.g. linkedin_automation/.env)
+  yield path.join(backendRoot, "..", ".env");
+  // 3) Current working directory (e.g. if you run from repo root or anywhere)
+  yield path.join(cwd, ".env");
+  // 4) Walk up from cwd and look for .env in each parent (handles workspace root or nested runs)
+  let dir = cwd;
+  for (let i = 0; i < 10 && dir; i++) {
+    const p = path.join(dir, ".env");
+    yield p;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+}
+
+let loadedPath = null;
+const seen = new Set();
+for (const envPath of envSearchPaths()) {
+  const normalized = path.normalize(envPath);
+  if (seen.has(normalized)) continue;
+  seen.add(normalized);
+  if (fs.existsSync(normalized)) {
+    const result = dotenv.config({ path: normalized, override: false });
+    if (result.parsed && Object.keys(result.parsed).length > 0) {
+      loadedPath = normalized;
+      break;
+    }
+  }
+}
+
+if (loadedPath) {
+  try {
+    console.log(`✅ Loaded .env from: ${path.relative(cwd, loadedPath) || path.basename(loadedPath)}`);
+  } catch {
+    console.log(`✅ Loaded .env from: ${loadedPath}`);
+  }
+} else {
+  dotenv.config();
+  if (!process.env.DATABASE_HOST && !process.env.PORT) {
+    console.warn("⚠️  No .env file found. Searched: backend/, parent, cwd, and parents of cwd. Add a .env (e.g. in backend/ or project root) with your keys.");
+  }
+}
 import databaseConfig from './database.js';
 import constants from './constants.js';
 

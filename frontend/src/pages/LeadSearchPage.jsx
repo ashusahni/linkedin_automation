@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
-import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Play, Sparkles, Upload, FileText, X, Info } from 'lucide-react';
+import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Play, Sparkles, Upload, FileText, X, Info, Download } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -136,10 +137,18 @@ export default function LeadSearchPage() {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
 
+            const summary = res.data.summary || {};
+            let message = 'Import completed successfully!';
+            if (summary.errors > 0) {
+                message = summary.saved > 0
+                    ? `Import completed with ${summary.errors} row(s) skipped.`
+                    : 'Import finished with errors — see reasons below.';
+            }
+
             setUploadResult({
-                success: true,
-                message: 'Import completed successfully!',
-                summary: res.data.summary,
+                success: summary.errors === 0,
+                message,
+                summary,
             });
         } catch (err) {
             console.error('Upload failed:', err);
@@ -152,6 +161,30 @@ export default function LeadSearchPage() {
             setUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
+    };
+
+    const handleDownloadTemplate = (format) => {
+        const f = format || 'csv';
+        const url = `/api/leads/import-template?format=${f}`;
+        fetch(url)
+            .then((res) => {
+                if (!res.ok) throw new Error(res.statusText);
+                return res.blob();
+            })
+            .then((blob) => {
+                const filename = f === 'xlsx' ? 'leads_import_template.xlsx' : 'leads_import_template.csv';
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(a.href);
+                addToast(`Downloaded ${filename}`, 'success');
+            })
+            .catch((err) => {
+                addToast(err.message || 'Failed to download template', 'error');
+            });
     };
 
     return (
@@ -274,7 +307,29 @@ export default function LeadSearchPage() {
                             <p className="text-sm text-muted-foreground w-full sm:w-auto">
                                 Support for standard CSV and Excel formats.
                             </p>
-                            <div className="flex items-center w-full sm:w-auto justify-end">
+                            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            size="default"
+                                            className="gap-2 border-primary/20 hover:bg-primary/5 font-medium"
+                                        >
+                                            <Download className="h-4 w-4" />
+                                            Download template
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-[200px]">
+                                        <DropdownMenuItem onClick={() => handleDownloadTemplate('csv')} className="gap-2 cursor-pointer">
+                                            <FileText className="h-4 w-4" />
+                                            <span>CSV template</span>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => handleDownloadTemplate('xlsx')} className="gap-2 cursor-pointer">
+                                            <FileText className="h-4 w-4 text-green-600" />
+                                            <span>Excel template</span>
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                                 <input
                                     ref={fileInputRef}
                                     type="file"
@@ -308,37 +363,76 @@ export default function LeadSearchPage() {
                             </div>
                         </div>
 
-                        {/* Upload Result Alert */}
+                        {/* Upload Result Alert - dynamic summary after CSV/Excel import */}
                         {uploadResult && (
                             <div
                                 className={cn(
-                                    "w-full animate-in slide-in-from-top-2 fade-in duration-300 rounded-lg border p-4 shadow-sm mt-4",
-                                    uploadResult.success ? "bg-green-50/50 border-green-200" : "bg-red-50/50 border-red-200"
+                                    "w-full animate-in slide-in-from-top-2 fade-in duration-300 rounded-xl border-2 p-5 shadow-sm mt-4",
+                                    uploadResult.success ? "bg-green-50/50 dark:bg-green-950/20 border-green-300 dark:border-green-700" : "bg-red-50/50 dark:bg-red-950/20 border-red-300 dark:border-red-700"
                                 )}
                             >
                                 <div className="flex items-start gap-3">
                                     {uploadResult.success ? (
-                                        <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5" />
+                                        <CheckCircle2 className="h-6 w-6 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
                                     ) : (
-                                        <AlertCircle className="h-5 w-5 text-red-600 mt-0.5" />
+                                        <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
                                     )}
-                                    <div className="flex-1">
-                                        <div className="flex items-center justify-between">
-                                            <p className={cn("font-medium text-sm", uploadResult.success ? "text-green-800" : "text-red-800")}>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <p className={cn("font-semibold text-base", uploadResult.success ? "text-green-800 dark:text-green-200" : "text-red-800 dark:text-red-200")}>
                                                 {uploadResult.message}
                                             </p>
-                                            <button onClick={() => setUploadResult(null)} className="text-muted-foreground hover:text-foreground">
+                                            <button onClick={() => setUploadResult(null)} className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5" aria-label="Dismiss">
                                                 <X className="h-4 w-4" />
                                             </button>
                                         </div>
                                         {uploadResult.summary && (
-                                            <div className="mt-2 text-xs text-green-700 grid grid-cols-2 sm:grid-cols-4 gap-4">
-                                                <p><strong>Leads:</strong> {uploadResult.summary.totalLeads}</p>
-                                                <p><strong>Saved:</strong> {uploadResult.summary.saved}</p>
-                                                <p><strong>Duplicates:</strong> {uploadResult.summary.duplicates}</p>
+                                            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                                <div className="rounded-lg bg-green-100/80 dark:bg-green-900/30 border border-green-200 dark:border-green-800 p-3">
+                                                    <div className="text-2xl font-bold text-green-800 dark:text-green-200 tabular-nums">{uploadResult.summary.saved}</div>
+                                                    <div className="text-xs font-medium text-green-700 dark:text-green-300 mt-0.5">Imported</div>
+                                                </div>
+                                                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3">
+                                                    <div className="text-2xl font-bold text-amber-800 dark:text-amber-200 tabular-nums">{uploadResult.summary.duplicates}</div>
+                                                    <div className="text-xs font-medium text-amber-700 dark:text-amber-300 mt-0.5">Duplicates avoided</div>
+                                                </div>
+                                                <div className="rounded-lg bg-muted/60 border border-border p-3">
+                                                    <div className="text-2xl font-bold tabular-nums">{uploadResult.summary.totalLeads}</div>
+                                                    <div className="text-xs font-medium text-muted-foreground mt-0.5">In file</div>
+                                                </div>
                                                 {uploadResult.summary.errors > 0 && (
-                                                    <p><strong>Errors:</strong> {uploadResult.summary.errors}</p>
+                                                    <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 p-3">
+                                                        <div className="text-2xl font-bold text-red-800 dark:text-red-200 tabular-nums">{uploadResult.summary.errors}</div>
+                                                        <div className="text-xs font-medium text-red-700 dark:text-red-300 mt-0.5">Errors</div>
+                                                    </div>
                                                 )}
+                                            </div>
+                                        )}
+                                        {uploadResult.summary?.errors > 0 && Array.isArray(uploadResult.summary.errorDetails) && uploadResult.summary.errorDetails.length > 0 && (
+                                            <div className="mt-4 rounded-lg bg-red-50/80 dark:bg-red-950/30 border border-red-200 dark:border-red-800 p-4">
+                                                <p className="text-xs font-semibold text-red-800 dark:text-red-200 uppercase tracking-wider mb-2">Why some rows failed</p>
+                                                <ul className="space-y-1.5 text-sm text-red-700 dark:text-red-300">
+                                                    {uploadResult.summary.errorDetails.slice(0, 5).map((detail, idx) => (
+                                                        <li key={idx} className="flex flex-col gap-0.5">
+                                                            <span className="font-medium">{detail.reason}</span>
+                                                            {detail.row && (detail.row.linkedin_url || detail.row.full_name || detail.row.first_name) && (
+                                                                <span className="text-xs opacity-90 truncate">
+                                                                    Row: {detail.row.full_name || detail.row.first_name || detail.row.linkedin_url || '—'}
+                                                                </span>
+                                                            )}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                                {uploadResult.summary.errorDetails.length > 5 && (
+                                                    <p className="text-xs text-red-600 dark:text-red-400 mt-2">+ {uploadResult.summary.errorDetails.length - 5} more</p>
+                                                )}
+                                            </div>
+                                        )}
+                                        {uploadResult.success && uploadResult.summary?.saved > 0 && (
+                                            <div className="mt-4 pt-4 border-t border-green-200/60 dark:border-green-800/60">
+                                                <Link to="/imported-leads" className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-700 dark:text-green-300 hover:text-green-800 dark:hover:text-green-200 underline underline-offset-2">
+                                                    View imported leads →
+                                                </Link>
                                             </div>
                                         )}
                                     </div>

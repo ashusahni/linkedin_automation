@@ -1,17 +1,17 @@
 import LeadsTable from '../components/LeadsTable';
 
 /**
- * Prospects = 2nd & 3rd degree workflow.
- * Only Review and Rejected tabs; qualified leads live in My Contacts (no Qualified tab here).
+ * Prospects = leads that are in a campaign (pending to campaign or already in a campaign).
+ * Shows any lead that has at least one campaign_leads row (any status). Response logic can be added later.
+ * Single tab only; no review or reject. Leads appear here when added to any campaign (response logic can be added later).
  */
 export default function ProspectsPage() {
   return (
     <LeadsTable
-      baseQuery={{ connection_degree: '2nd,3rd' }}
-      showReviewTabs={true}
+      baseQuery={{ prospects: true }}
+      showReviewTabs={false}
       showBackToReview={false}
-      reviewTabs={['to_be_reviewed', 'rejected']}
-      initialReviewTab="to_be_reviewed"
+      listTitle="Prospects"
     />
   );
 }

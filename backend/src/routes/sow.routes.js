@@ -2,6 +2,7 @@ import express from 'express';
 import { ContentService } from '../services/content.service.js';
 import { ConnectionService } from '../services/connection.service.js';
 import { ApprovalService } from '../services/approval.service.js';
+import { appendCampaignLinksToMessage, campaignHasLinksToAppend } from '../services/campaignMessageLink.service.js';
 import {
     ContentSourceService,
     CtaTemplateService,
@@ -343,16 +344,18 @@ router.post('/approvals/:id/regenerate', async (req, res) => {
         );
         const enrichment = enrichmentResult.rows[0] || null;
 
-        // Fetch campaign context if available
+        // Fetch campaign context if available (include settings for registration link)
         let campaignContext = null;
+        let campaign = null;
         if (approval.campaign_id) {
-            const campaignResult = await pool.query('SELECT goal, type, description, target_audience FROM campaigns WHERE id = $1', [approval.campaign_id]);
+            const campaignResult = await pool.query('SELECT * FROM campaigns WHERE id = $1', [approval.campaign_id]);
             if (campaignResult.rows.length > 0) {
+                campaign = campaignResult.rows[0];
                 campaignContext = {
-                    goal: campaignResult.rows[0].goal,
-                    type: campaignResult.rows[0].type,
-                    description: campaignResult.rows[0].description,
-                    target_audience: campaignResult.rows[0].target_audience
+                    goal: campaign.goal,
+                    type: campaign.type,
+                    description: campaign.description,
+                    target_audience: campaign.target_audience
                 };
             }
         }
@@ -362,6 +365,7 @@ router.post('/approvals/:id/regenerate', async (req, res) => {
         if (length) options.length = length;
         if (focus) options.focus = focus;
         if (campaignContext) options.campaign = campaignContext;
+        if (campaign) options.linkWillBeAppended = campaignHasLinksToAppend(campaign);
 
         let content;
         if (approval.step_type === 'connection_request') {
@@ -371,6 +375,10 @@ router.post('/approvals/:id/regenerate', async (req, res) => {
             content = JSON.stringify({ subject: draft.subject, body: draft.body });
         } else {
             content = await AIService.generateFollowUpMessage(lead, enrichment, [], options);
+        }
+
+        if (campaign && (approval.step_type === 'connection_request' || approval.step_type === 'message')) {
+            content = appendCampaignLinksToMessage(content, campaign, { stepType: approval.step_type });
         }
 
         await ApprovalService.editContent(id, content);
@@ -434,20 +442,23 @@ router.post('/approvals/bulk-personalize', async (req, res) => {
                 );
                 const enrichment = enrichmentResult.rows[0] || null;
 
-                // Fetch campaign context if available
+                // Fetch campaign context if available (full row for link append + linkWillBeAppended flag)
                 let campaignContext = null;
+                let campaignRow = null;
                 if (approval.campaign_id) {
-                    const campaignResult = await pool.query('SELECT goal, type, description, target_audience FROM campaigns WHERE id = $1', [approval.campaign_id]);
+                    const campaignResult = await pool.query('SELECT * FROM campaigns WHERE id = $1', [approval.campaign_id]);
                     if (campaignResult.rows.length > 0) {
+                        campaignRow = campaignResult.rows[0];
                         campaignContext = {
-                            goal: campaignResult.rows[0].goal,
-                            type: campaignResult.rows[0].type,
-                            description: campaignResult.rows[0].description,
-                            target_audience: campaignResult.rows[0].target_audience
+                            goal: campaignRow.goal,
+                            type: campaignRow.type,
+                            description: campaignRow.description,
+                            target_audience: campaignRow.target_audience
                         };
                     }
                 }
                 if (campaignContext) options.campaign = campaignContext;
+                if (campaignRow) options.linkWillBeAppended = campaignHasLinksToAppend(campaignRow);
 
                 // Generate personalized content
                 let content;
@@ -460,7 +471,10 @@ router.post('/approvals/bulk-personalize', async (req, res) => {
                     content = await AIService.generateFollowUpMessage(lead, enrichment, [], options);
                 }
 
-                // Update approval with new content
+                // Append campaign registration link for LinkedIn steps
+                if (campaignRow && (approval.step_type === 'connection_request' || approval.step_type === 'message')) {
+                    content = appendCampaignLinksToMessage(content, campaignRow, { stepType: approval.step_type });
+                }
                 await ApprovalService.editContent(approval.id, content);
 
                 regenerated.push({

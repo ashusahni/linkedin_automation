@@ -17,8 +17,9 @@ const navItems = [
         color: '#10b981',
         children: [
             { id: 'my-contacts', label: 'My Contacts', path: '/my-contacts' },
-            { id: 'connections', label: 'Review Leads', path: '/connections' },
             { id: 'prospects', label: 'Prospects', path: '/prospects' },
+            { id: 'imported-leads', label: 'Imported Leads', path: '/imported-leads' },
+            { id: 'connections', label: 'Review Leads', path: '/connections' },
         ],
     },
     {

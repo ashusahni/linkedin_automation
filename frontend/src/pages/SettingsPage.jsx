@@ -87,9 +87,10 @@ const SettingsPage = () => {
   ];
   const CLAUDE_MODELS = [
     { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 (recommended)' },
-    { value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet' },
-    { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
-    { value: 'claude-3-sonnet-20240229', label: 'Claude 3 Sonnet' },
+    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { value: 'claude-opus-4-5', label: 'Claude Opus 4.5' },
+    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+    { value: 'claude-sonnet-4', label: 'Claude Sonnet 4' },
   ];
 
   // Dynamic labels for cards (strip " (recommended)" for display)

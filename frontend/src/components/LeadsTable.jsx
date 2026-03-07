@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTimeFilter } from '../context/TimeFilterContext';
 import PageGuide from './PageGuide';
 import axios from 'axios';
-import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle, Columns3, GripVertical, Clock } from 'lucide-react';
+import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle, Columns3, GripVertical, Clock, FileText, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -47,6 +47,7 @@ import {
 } from '../config/leadsTableColumns';
 
 const QUICK_FILTERS = [
+    { id: 'imported_only', label: 'Via Import only', preset: {}, icon: Upload },
     { id: 'ceo_saas', label: 'CEOs in SaaS', preset: { title: 'CEO', industry: 'SaaS' }, icon: Target },
     { id: 'cto_tech', label: 'CTOs in Tech', preset: { title: 'CTO', industry: 'Technology' }, icon: Briefcase },
     { id: 'mkt_mgr', label: 'Marketing Managers', preset: { title: 'Marketing Manager' }, icon: Briefcase },
@@ -79,7 +80,8 @@ export default function LeadsTable({
     applyDefaultDateRange = true,
     reviewTabs,
     initialReviewTab: initialReviewTabProp,
-    listTitle
+    listTitle,
+    showImportedStats = false
 } = {}) {
     const navigate = useNavigate();
     const { addToast } = useToast();
@@ -88,6 +90,7 @@ export default function LeadsTable({
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [stats, setStats] = useState({ totalLeads: 0, statusCount: {}, sourceCount: {} });
+    const [lastImportLog, setLastImportLog] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0 });
 
@@ -162,7 +165,7 @@ export default function LeadsTable({
     const [expandedSections, setExpandedSections] = useState({
         quickFilters: false,
         leadInformation: false,
-        statusSource: false,
+        statusSource: true, // expanded by default so Source (e.g. Via Import) is visible
         advancedOptions: false,
     });
 
@@ -215,7 +218,7 @@ export default function LeadsTable({
     });
 
     const isMyContactsQuery = baseQuery?.my_contacts || baseQuery?.is_priority;
-    const reviewTabOrder = ['approved', 'to_be_reviewed', 'rejected', 'imported'];
+    const reviewTabOrder = ['all', 'approved', 'to_be_reviewed', 'rejected', 'imported'];
     const enabledReviewTabs = showReviewTabs
         ? (Array.isArray(reviewTabs) && reviewTabs.length > 0
             ? reviewTabOrder.filter((tab) => reviewTabs.includes(tab))
@@ -377,6 +380,10 @@ export default function LeadsTable({
             if (quality) {
                 setActiveQuickFilters([quality]);
             }
+            // When landing with source=imports, switch to Imported tab so list and tab match
+            if (source === 'imports' && showReviewTabs && enabledReviewTabs.includes('imported')) {
+                setReviewStatusTab('imported');
+            }
 
             // Trigger fetch with new filters immediately
             fetchLeads(false, newFilters);
@@ -497,7 +504,8 @@ export default function LeadsTable({
     const fetchCampaigns = async () => {
         try {
             const res = await axios.get('/api/campaigns');
-            setCampaigns(res.data);
+            const data = res.data;
+            setCampaigns(Array.isArray(data) ? data : (data?.campaigns ?? []));
         } catch (e) {
             console.error("Failed to fetch campaigns", e);
             const errorMsg = e.response?.data?.error || e.message || 'Failed to load campaigns';
@@ -602,6 +610,15 @@ export default function LeadsTable({
             if (baseQuery?.my_contacts) {
                 params.set('my_contacts', 'true');
             }
+            if (baseQuery?.review_leads) {
+                params.set('review_leads', 'true');
+            }
+            if (baseQuery?.prospects) {
+                params.set('prospects', 'true');
+            }
+            if (baseQuery?.source) {
+                params.set('source', baseQuery.source);
+            }
 
             if (searchTerm.trim()) {
                 params.set('search', searchTerm.trim());
@@ -635,6 +652,10 @@ export default function LeadsTable({
             }
             const sourceParam = getSourceApiParam(filtersToUse.source);
             if (sourceParam) params.set('source', sourceParam);
+            // Quick filter "Via Import only" forces source to csv_import,excel_import
+            if (activeQuickFilters.includes('imported_only')) {
+                params.set('source', 'csv_import,excel_import');
+            }
             if (filtersToUse.hasEmail) {
                 params.set('hasEmail', 'true');
             }
@@ -644,15 +665,17 @@ export default function LeadsTable({
             if (filtersToUse.hasContactInfo) {
                 params.set('has_contact_info', 'true');
             }
-            if (filtersToUse.createdFrom) {
+            // When showing Imported tab, do NOT filter by date so all CSV/Excel imports are visible
+            const isImportedTab = showReviewTabs && reviewStatusTab === 'imported' && enabledReviewTabs.includes('imported');
+            if (!isImportedTab && filtersToUse.createdFrom) {
                 params.set('createdFrom', filtersToUse.createdFrom);
             }
-            if (filtersToUse.createdTo) {
+            if (!isImportedTab && filtersToUse.createdTo) {
                 params.set('createdTo', filtersToUse.createdTo);
             }
 
             // PHASE 4: Filter by Review Status Tab (skip when My Contacts single list)
-            if (showReviewTabs && enabledReviewTabs.includes(reviewStatusTab) && reviewStatusTab !== 'imported') {
+            if (showReviewTabs && enabledReviewTabs.includes(reviewStatusTab) && reviewStatusTab !== 'imported' && reviewStatusTab !== 'all') {
                 params.set('review_status', reviewStatusTab);
             }
             if (showReviewTabs && reviewStatusTab === 'imported' && enabledReviewTabs.includes('imported')) {
@@ -664,19 +687,23 @@ export default function LeadsTable({
 
             // 1. Convert Quick Filters to Groups (OR logic between presets)
             // Use JSON.parse(JSON.stringify(...)) to deep copy to avoid mutation issues when appending conditions
-            const quickGroups = activeQuickFilters.map(id => {
-                const q = QUICK_FILTERS.find(x => x.id === id);
-                if (!q) return null;
-                const preset = quickFilterOverrides[id] ? { ...q.preset, ...quickFilterOverrides[id] } : q.preset;
-                return JSON.parse(JSON.stringify({
-                    operator: 'AND',
-                    conditions: Object.entries(preset).filter(([, v]) => v != null && String(v).trim() !== '').map(([field, value]) => ({
-                        field,
-                        operator: 'contains',
-                        value
-                    }))
-                }));
-            }).filter(Boolean);
+            // Skip 'imported_only' — it only sets source param above, no conditions
+            const quickGroups = activeQuickFilters
+                .filter(id => id !== 'imported_only')
+                .map(id => {
+                    const q = QUICK_FILTERS.find(x => x.id === id);
+                    if (!q) return null;
+                    const preset = quickFilterOverrides[id] ? { ...q.preset, ...quickFilterOverrides[id] } : q.preset;
+                    return JSON.parse(JSON.stringify({
+                        operator: 'AND',
+                        conditions: Object.entries(preset).filter(([, v]) => v != null && String(v).trim() !== '').map(([field, value]) => ({
+                            field,
+                            operator: 'contains',
+                            value
+                        }))
+                    }));
+                })
+                .filter(g => g && g.conditions && g.conditions.length > 0);
 
             // 2. Combine with Manual Advanced Logic
             let manualGroups = [];
@@ -793,6 +820,15 @@ export default function LeadsTable({
             if (baseQuery?.my_contacts) {
                 params.my_contacts = 'true';
             }
+            if (baseQuery?.review_leads) {
+                params.review_leads = 'true';
+            }
+            if (baseQuery?.prospects) {
+                params.prospects = 'true';
+            }
+            if (baseQuery?.source) {
+                params.source = baseQuery.source;
+            }
 
             // Add quality filter from BOTH quick filters AND metaFilters.quality (Primary, Secondary, Tertiary)
             const qualityFromQuick = currentQuickFilters.filter(f => ['primary', 'secondary', 'tertiary'].includes(f.toLowerCase()));
@@ -846,20 +882,24 @@ export default function LeadsTable({
 
 
             const [statsRes, reviewRes] = await Promise.all([
-                // /stats endpoint is for overall system stats (Total Leads, etc). 
-                // If we want THAT to be filtered too, we need to pass params there as well.
-                // But usually "Total Database" stats might be separate.
-                // The user specifically asked for "Qualified Leads, Review, and Rejected tabs" 
-                // which come from /review-stats.
-                axios.get('/api/leads/stats'), // Keeping global stats global for now, or should they filter too?
-                // "All counts across the system must reflect the filtered dataset only" -> implies global stats too?
-                // Let's stick to review-stats first as that's the explicit tab request.
+                axios.get('/api/leads/stats', { params }),
                 axios.get('/api/leads/review-stats', { params })
             ]);
 
             setStats(statsRes.data);
             if (reviewRes.data?.reviewStats) {
                 setReviewStats(reviewRes.data.reviewStats);
+            }
+            if (showImportedStats) {
+                try {
+                    const importsRes = await axios.get('/api/leads/imports', { params: { limit: 20 } });
+                    const rows = importsRes.data || [];
+                    const fileImports = rows.filter((r) => r.source === 'csv_import' || r.source === 'excel_import');
+                    const latest = fileImports[0] || null;
+                    setLastImportLog(latest);
+                } catch (e) {
+                    console.error('Failed to fetch import log', e);
+                }
             }
         } catch (error) {
             console.error("Failed to fetch stats", error);
@@ -1505,6 +1545,11 @@ export default function LeadsTable({
                         <StatCard label="Imported" value={reviewStats.imported || 0} className="text-blue-600" />
                     )}
                 </div>
+            ) : showImportedStats ? (
+                <ImportedStatsSection
+                    stats={stats}
+                    lastImportLog={lastImportLog}
+                />
             ) : (
                 <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                     <StatCard label="Total Leads" value={stats.totalLeads} />
@@ -2138,6 +2183,19 @@ export default function LeadsTable({
                                 {showReviewTabs && (
                                 <div className="flex gap-2 items-center">
                                     <div className="flex gap-1.5 flex-1">
+                                        {enabledReviewTabs.includes('all') && (
+                                            <button
+                                                onClick={() => setReviewStatusTab('all')}
+                                                className={cn(
+                                                    "px-3 py-1.5 text-sm font-medium transition-all rounded-md",
+                                                    reviewStatusTab === 'all'
+                                                        ? "bg-slate-100 text-slate-700 shadow-sm"
+                                                        : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                                                )}
+                                            >
+                                                All ({reviewStats.total ?? 0})
+                                            </button>
+                                        )}
                                         {enabledReviewTabs.includes('approved') && (
                                             <button
                                                 onClick={() => setReviewStatusTab('approved')}
@@ -2178,8 +2236,8 @@ export default function LeadsTable({
                                             </button>
                                         )}
                                     </div>
-                                    {/* Qualify by Niche Button */}
-                                    {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && (
+                                    {/* Qualify by Niche Button — hidden on Review Leads page (runs automatically on server start) */}
+                                    {(reviewStatusTab === 'to_be_reviewed' || reviewStatusTab === 'imported') && !baseQuery?.review_leads && (
                                         <Button
                                             size="sm"
                                             variant="outline"
@@ -2202,25 +2260,35 @@ export default function LeadsTable({
                                         {selectedLeads.size} leads selected
                                     </span>
                                     <div className="flex gap-2">
-                                        {/* Bulk Actions available in all tabs for efficiency */}
-                                        <Button size="sm" variant="default" onClick={() => {
-                                            setShowCampaignModal(true);
-                                        }}>
-                                            Add to Campaign
-                                        </Button>
+                                        {/* On Review Leads page: only Move to Contacts, Reject, Cancel. No Add to Campaign, Single Qualify, Set Tier */}
+                                        {!baseQuery?.review_leads && (
+                                            <Button size="sm" variant="default" onClick={() => {
+                                                setShowCampaignModal(true);
+                                            }}>
+                                                Add to Campaign
+                                            </Button>
+                                        )}
 
                                         {reviewStatusTab === 'to_be_reviewed' && (
                                             <>
-                                                <Button size="sm" variant="outline" className="bg-background" onClick={handleBulkApprove}>
-                                                    ✅ Single Qualify
-                                                </Button>
+                                                {!baseQuery?.review_leads && (
+                                                    <Button size="sm" variant="outline" className="bg-background" onClick={handleBulkApprove}>
+                                                        ✅ Single Qualify
+                                                    </Button>
+                                                )}
+                                                {baseQuery?.review_leads && (
+                                                    <Button size="sm" variant="default" className="gap-2" onClick={handleBulkApprove} title="Move selected leads to My Contacts">
+                                                        <UserPlus className="h-4 w-4" />
+                                                        Move to Contacts
+                                                    </Button>
+                                                )}
                                                 <Button size="sm" variant="destructive" onClick={() => setShowRejectModal(true)}>
                                                     ❌ Reject
                                                 </Button>
                                             </>
                                         )}
 
-                                        {reviewStatusTab !== 'rejected' && (
+                                        {reviewStatusTab !== 'rejected' && !baseQuery?.review_leads && (
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <Button size="sm" variant="outline" className="bg-background">
@@ -2706,6 +2774,95 @@ export default function LeadsTable({
 
             <PageGuide pageKey="leads" />
         </div >
+    );
+}
+
+function relativeTime(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    const now = new Date();
+    const sec = Math.floor((now - date) / 1000);
+    if (sec < 60) return 'just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const d = Math.floor(hr / 24);
+    if (d < 7) return `${d}d ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+}
+
+function ImportedStatsSection({ stats, lastImportLog }) {
+    const total = stats?.totalLeads ?? 0;
+    const fromCsv = stats?.sourceCount?.csv_import ?? 0;
+    const fromExcel = stats?.sourceCount?.excel_import ?? 0;
+    const saved = lastImportLog?.saved ?? 0;
+    const duplicates = lastImportLog?.duplicates ?? 0;
+
+    return (
+        <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+                <Card className="border-primary/20 bg-primary/5">
+                    <CardContent className="p-5">
+                        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
+                            <Users className="h-4 w-4 text-primary" />
+                            Total imported
+                        </div>
+                        <div className="text-2xl font-bold text-primary tabular-nums">{total}</div>
+                        <p className="text-xs text-muted-foreground mt-1">Leads in this list</p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-5">
+                        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
+                            <FileText className="h-4 w-4" />
+                            From CSV
+                        </div>
+                        <div className="text-2xl font-bold tabular-nums">{fromCsv}</div>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-5">
+                        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
+                            <FileText className="h-4 w-4 text-green-600" />
+                            From Excel
+                        </div>
+                        <div className="text-2xl font-bold tabular-nums">{fromExcel}</div>
+                    </CardContent>
+                </Card>
+                <Card className="border-amber-200/50 dark:border-amber-500/20 bg-amber-50/30 dark:bg-amber-950/20">
+                    <CardContent className="p-5">
+                        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
+                            <ShieldCheck className="h-4 w-4 text-amber-600" />
+                            Duplicates avoided
+                        </div>
+                        <div className="text-2xl font-bold text-amber-700 dark:text-amber-400 tabular-nums">{lastImportLog ? duplicates : '—'}</div>
+                        {lastImportLog && (
+                            <p className="text-xs text-muted-foreground mt-1">In last import</p>
+                        )}
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardContent className="p-5">
+                        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
+                            <Clock className="h-4 w-4" />
+                            Last import
+                        </div>
+                        {lastImportLog ? (
+                            <>
+                                <div className="text-lg font-semibold tabular-nums">{saved} saved</div>
+                                {duplicates > 0 && (
+                                    <p className="text-xs text-muted-foreground mt-0.5">{duplicates} duplicates skipped</p>
+                                )}
+                                <p className="text-xs text-muted-foreground mt-1">{relativeTime(lastImportLog.timestamp)}</p>
+                            </>
+                        ) : (
+                            <p className="text-sm text-muted-foreground">No imports yet</p>
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
+        </div>
     );
 }
 

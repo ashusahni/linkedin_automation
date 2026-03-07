@@ -30,6 +30,11 @@ function extractCampaignUrls(campaign = {}) {
     return deduped;
 }
 
+/** Returns true if this campaign has any link that will be appended to messages (registration_link or URLs in description). */
+export function campaignHasLinksToAppend(campaign = {}) {
+    return extractCampaignUrls(campaign).length > 0;
+}
+
 function buildLinkBlock(urls = [], campaignType = '') {
     if (!urls.length) return '';
     const firstLineLabel = (campaignType === 'event' || campaignType === 'webinar') ? 'Registration' : 'Link';

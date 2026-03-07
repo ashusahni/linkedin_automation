@@ -8,6 +8,7 @@ import {
     getStats,
     getImports,
     importLeads,
+    getImportTemplate,
     importLeadsFromCSV,
     importLeadsFromExcel,
     deleteCSVLeads,
@@ -50,6 +51,7 @@ router.post("/", createLead);
 router.get("/search", searchLeads);
 router.get("/stats", getStats);
 router.get("/imports", getImports);
+router.get("/import-template", getImportTemplate);
 router.get("/export", exportLeads);
 router.get("/enriched", getEnrichedLeads);
 router.get("/:id", getLeadById);
