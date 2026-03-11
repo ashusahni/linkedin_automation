@@ -211,9 +211,19 @@ export async function getLeads(req, res) {
         params.push(source);
       }
     }
+    // CRM Status filter: new = last imported (not in any campaign), contacted = in campaign, replied = campaign_leads.status = 'replied'
     if (status && status !== 'all') {
-      conditionClauses.push(`status = $${params.length + 1}`);
-      params.push(status);
+      const statusLower = String(status).toLowerCase();
+      if (statusLower === 'new') {
+        conditionClauses.push(`id NOT IN (SELECT lead_id FROM campaign_leads)`);
+      } else if (statusLower === 'contacted') {
+        conditionClauses.push(`id IN (SELECT lead_id FROM campaign_leads)`);
+      } else if (statusLower === 'replied') {
+        conditionClauses.push(`id IN (SELECT lead_id FROM campaign_leads WHERE status = 'replied')`);
+      } else {
+        conditionClauses.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
     }
     if (review_status && review_status !== 'all' && !quality) {
       conditionClauses.push(`review_status = $${params.length + 1}`);

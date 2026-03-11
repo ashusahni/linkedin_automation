@@ -166,17 +166,21 @@ function CampaignCard({ campaign, index, onNavigate, onDuplicate, onLaunch, onPa
                                         className={cn("gap-2 text-xs", launchDisabled && "opacity-60 pointer-events-none")}
                                         disabled={launchDisabled}
                                     >
-                                        <Play className="h-3.5 w-3.5" /> {launchDisabled ? 'Launch (limit reached)' : 'Launch'}
+                                        <Play className="h-3.5 w-3.5" /> {launchDisabled ? 'Launch again (limit reached)' : (campaign.launched_at ? 'Launch again' : 'Launch')}
                                     </DropdownMenuItem>
                                 )}
-                                {campaign.status === 'active' && (
-                                    <DropdownMenuItem onClick={(e) => onPause(campaign.id, e)} className="gap-2 text-xs">
-                                        <Pause className="h-3.5 w-3.5" /> Pause
+                                {campaign.status === 'completed' && (
+                                    <DropdownMenuItem
+                                        onClick={(e) => !launchDisabled && onLaunch(campaign.id, e)}
+                                        className={cn("gap-2 text-xs", launchDisabled && "opacity-60 pointer-events-none")}
+                                        disabled={launchDisabled}
+                                    >
+                                        <Play className="h-3.5 w-3.5" /> {launchDisabled ? 'Launch again (limit reached)' : 'Launch again'}
                                     </DropdownMenuItem>
                                 )}
                                 {campaign.status === 'paused' && (
                                     <DropdownMenuItem onClick={(e) => onResume(campaign.id, e)} className="gap-2 text-xs">
-                                        <Play className="h-3.5 w-3.5" /> Resume
+                                        <Play className="h-3.5 w-3.5" /> Launch again
                                     </DropdownMenuItem>
                                 )}
                                 <DropdownMenuSeparator />
@@ -378,13 +382,13 @@ export default function CampaignsPage() {
 
     const pauseCampaign = async (id, e) => {
         e.stopPropagation();
-        try { await axios.post(`/api/campaigns/${id}/pause`); addToast('Campaign paused', 'success'); fetchCampaigns(); }
+        try { await axios.put(`/api/campaigns/${id}/pause`); addToast('Campaign paused', 'success'); fetchCampaigns(); }
         catch (err) { addToast(err.response?.data?.error || 'Failed to pause', 'error'); }
     };
 
     const resumeCampaign = async (id, e) => {
         e.stopPropagation();
-        try { await axios.post(`/api/campaigns/${id}/resume`); addToast('Campaign resumed', 'success'); fetchCampaigns(); }
+        try { await axios.put(`/api/campaigns/${id}/resume`); addToast('Campaign resumed', 'success'); fetchCampaigns(); }
         catch (err) { addToast(err.response?.data?.error || 'Failed to resume', 'error'); }
     };
 

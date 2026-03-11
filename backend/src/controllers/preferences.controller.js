@@ -283,28 +283,68 @@ export async function analyzeProfileForPreferences(req, res) {
         }
 
         let profileMeta = {};
+
+        // 1) Try Phantom scrape first so Analyze is dynamic per URL every time (no cache)
         try {
-            const profileEnrichmentService = (await import('../services/profileEnrichment.service.js')).default;
-            const profile = await profileEnrichmentService.enrichProfileFromUrl(url);
-            if (profile) {
-                profileMeta = {
-                    title: profile.title || profile.headline,
-                    industry: profile.industry,
-                    company: profile.company,
-                    companySize: profile.companySize || profile.company_size,
-                };
+            const phantomService = (await import('../services/phantombuster.service.js')).default;
+            const scrape = await phantomService.scrapeProfile(url);
+            if (scrape && scrape.data) {
+                const d = scrape.data;
+                const title = d.title || d.headline || d.position || d.jobTitle || '';
+                const company = d.company || d.currentCompany || d.companyName || '';
+                const industry = d.industry || d.industryName || '';
+                let companySize = d.companySize || d.company_size || d.employees || d.companySizeRange || '';
+                if (companySize && typeof companySize === 'string') {
+                    // Normalize to SIZE_OPTIONS format (e.g. "51-200" or "201-500")
+                    const n = companySize.toLowerCase().replace(/\s*employees?\s*/gi, '').trim();
+                    if (/^1-10$|^1\s*to\s*10$/i.test(n)) companySize = '1-10';
+                    else if (/^11-50$|^11\s*to\s*50$/i.test(n)) companySize = '11-50';
+                    else if (/^51-200$|^51\s*to\s*200$/i.test(n)) companySize = '51-200';
+                    else if (/^201-500$|^201\s*to\s*500$/i.test(n)) companySize = '201-500';
+                    else if (/500\+|501\+|500\s*plus/i.test(n)) companySize = '500+';
+                }
+                profileMeta = { title, industry, company, companySize };
             }
         } catch (e) {
-            console.warn('[preferences] Analyze profile fetch failed:', e.message);
+            console.warn('[preferences] Analyze Phantom scrape failed (will try DB fallback):', e.message);
+        }
+
+        // 2) Fallback: profile from DB if not in leads / Phantom not configured or failed
+        if (!profileMeta.title && !profileMeta.industry) {
+            try {
+                const profileEnrichmentService = (await import('../services/profileEnrichment.service.js')).default;
+                const profile = await profileEnrichmentService.enrichProfileFromUrl(url);
+                if (profile) {
+                    profileMeta = {
+                        title: profile.title || profile.headline,
+                        industry: profile.industry,
+                        company: profile.company,
+                        companySize: profile.companySize || profile.company_size,
+                    };
+                }
+            } catch (e) {
+                console.warn('[preferences] Analyze profile fetch failed:', e.message);
+            }
         }
 
         const profileTitle = profileMeta.title ? String(profileMeta.title).trim() : '';
-        const profileIndustry = profileMeta.industry ? String(profileMeta.industry).trim() : '';
+        let profileIndustry = profileMeta.industry ? String(profileMeta.industry).trim() : '';
         const profileSize = profileMeta.companySize ? String(profileMeta.companySize).trim() : '';
 
         const { getIndustryLabels } = await import('../services/industryList.service.js');
         const industryLabels = await getIndustryLabels();
         const INDUSTRY_OPTIONS = industryLabels.length > 0 ? industryLabels : INDUSTRY_OPTIONS_FALLBACK;
+
+        // Match scraped industry to a known label so it appears in dropdown (best substring/token match)
+        if (profileIndustry && INDUSTRY_OPTIONS.length > 0) {
+            const pl = profileIndustry.toLowerCase();
+            const exact = INDUSTRY_OPTIONS.find(o => normaliseForDedup(o) === pl);
+            if (exact) profileIndustry = exact;
+            else {
+                const contained = INDUSTRY_OPTIONS.find(o => pl.includes(normaliseForDedup(o)) || normaliseForDedup(o).includes(pl));
+                if (contained) profileIndustry = contained;
+            }
+        }
 
         // Primary: 3–5 each, starting from profile (then fill from pools)
         const primaryTitles = ensureCount(

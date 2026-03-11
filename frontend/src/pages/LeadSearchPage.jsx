@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, Component } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Play, Sparkles, Upload, FileText, X, Info, Download } from 'lucide-react';
@@ -28,6 +28,29 @@ const IMPORT_SOURCE_OPTIONS = [
     { value: 'connections_export', label: 'Import My Connections', envLabel: 'CONNECTIONS_EXPORT_SOURCE', description: 'Your 1st-degree LinkedIn connections', icon: Share2 },
     { value: 'search_export', label: 'Explore Beyond My Network', envLabel: 'SEARCH_EXPORT_SOURCE', description: 'Find 2nd & 3rd-degree LinkedIn leads', icon: Search },
 ];
+
+class LeadSearchErrorBoundary extends Component {
+    state = { hasError: false, error: null };
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+    }
+    componentDidCatch(error, info) {
+        console.error('LeadSearchPage error:', error, info);
+    }
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="p-8 max-w-md mx-auto text-center space-y-4">
+                    <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
+                    <h2 className="text-xl font-semibold">Something went wrong</h2>
+                    <p className="text-sm text-muted-foreground">{this.state.error?.message || 'An error occurred on this page.'}</p>
+                    <Button onClick={() => window.location.reload()} variant="outline">Reload page</Button>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 export default function LeadSearchPage() {
     const { addToast } = useToast();
@@ -188,6 +211,7 @@ export default function LeadSearchPage() {
     };
 
     return (
+        <LeadSearchErrorBoundary>
         <TooltipProvider>
             <div className="space-y-6 page-enter">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -266,7 +290,7 @@ export default function LeadSearchPage() {
                             <div className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t border-border/50 gap-4">
                                 <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
                                     <Sparkles className="w-3.5 h-3.5 text-primary" />
-                                    Leads are saved with source <strong>{importSource}</strong>.
+                                    Leads are saved with source <strong>{importSource}</strong>. Phantom uses its own saved search URL and LinkedIn connection.
                                 </p>
                                 <Button size="lg" className="w-full sm:w-auto gap-2 font-semibold shadow-lg shadow-primary/20 btn-shimmer group" disabled={loading} onClick={handleSearch}>
                                     {loading ? (
@@ -519,5 +543,6 @@ export default function LeadSearchPage() {
                 )}
             </div>
         </TooltipProvider>
+        </LeadSearchErrorBoundary>
     );
 }

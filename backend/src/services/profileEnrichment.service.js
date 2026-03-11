@@ -44,7 +44,6 @@ class ProfileEnrichmentService {
             }
 
             // If not in database, try to scrape (future enhancement)
-            console.log('⚠️ Profile not found in database. Manual enrichment needed.');
             return null;
 
         } catch (error) {

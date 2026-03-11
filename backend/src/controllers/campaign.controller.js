@@ -135,6 +135,22 @@ export async function getCampaignById(req, res) {
             return res.status(404).json({ error: "Campaign not found" });
         }
 
+        let campaign = campaignResult.rows[0];
+
+        // Auto-heal: if campaign is "active" but all leads are completed/failed, set to draft so UI shows "Launch again"
+        if (campaign.status === "active") {
+            const pendingRes = await pool.query(
+                `SELECT COUNT(*)::int AS count FROM campaign_leads 
+                 WHERE campaign_id = $1 AND status NOT IN ('completed', 'failed', 'rejected')`,
+                [id]
+            );
+            const pendingCount = pendingRes.rows[0]?.count ?? 0;
+            if (pendingCount === 0) {
+                await pool.query("UPDATE campaigns SET status = 'draft' WHERE id = $1", [id]);
+                campaign = { ...campaign, status: "draft" };
+            }
+        }
+
         // Get sequences with variants
         const sequenceResult = await pool.query(`
             SELECT s.*, 
@@ -195,7 +211,7 @@ export async function getCampaignById(req, res) {
                 : null;
 
         return res.json({
-            ...campaignResult.rows[0],
+            ...campaign,
             sequences: sequenceResult.rows,
             stats
         });
@@ -625,8 +641,9 @@ async function addLaunchLog(campaignId, step, message, leadId = null) {
 
 // POST /api/campaigns/:id/launch
 export async function launchCampaign(req, res) {
+    const { id } = req.params;
+    process.stdout.write(`\n[LAUNCH] >>> Campaign launch started: id=${id}\n`);
     try {
-        const { id } = req.params;
         const bypassLimit = req.headers['x-bypass-limit'] === 'true' || req.body?.bypassLimit === true;
         await addLaunchLog(id, "start", "Campaign launch requested");
 
@@ -704,6 +721,16 @@ export async function launchCampaign(req, res) {
 
         const leadIds = pendingLeads.rows.map((l) => l.id);
 
+        try {
+        // ═══════════════════════════════════════════════════════════════════════
+        // PIPELINE ORDER (must run in sequence; campaign completes in finally):
+        // 1) Condition check: 1st degree → skip Auto Connect, add to Message Sender only.
+        // 2) Auto Connect: non-1st degree only. If it fails, we still continue.
+        // 3) Message Sender: all leads with approved message (1st + follow-up for 2nd/3rd).
+        // 4) Email: disabled for now (no-op).
+        // 5) finally: reset campaign to draft, mark leads completed → campaign stops; another can run.
+        // ═══════════════════════════════════════════════════════════════════════
+
         // 3. Fetch approved content for BOTH connection_request and message (so we have note + follow-up per lead)
         const approvedRes = await pool.query(
             `SELECT lead_id, step_type, generated_content
@@ -774,8 +801,8 @@ export async function launchCampaign(req, res) {
                     await phantomService.waitForCompletion(connResult.containerId, connResult.phantomId, 10);
                     await addLaunchLog(id, "autoconnect_done", `Auto Connect finished; starting Message Sender next`);
                 } catch (waitErr) {
-                    await addLaunchLog(id, "autoconnect_wait_error", `Auto Connect wait failed: ${waitErr.message}`);
-                    throw waitErr;
+                    await addLaunchLog(id, "autoconnect_wait_error", `Auto Connect wait failed: ${waitErr.message}. Continuing to Message Sender.`);
+                    console.warn("⚠️ Auto Connect failed (continuing to Message Sender):", waitErr.message);
                 }
             }
             const containerId = connResult?.containerId || null;
@@ -787,9 +814,12 @@ export async function launchCampaign(req, res) {
                 );
             }
             console.log(`✅ Auto Connect: ${connReqLeads.length} connection request(s) sent`);
+        } else {
+            await addLaunchLog(id, "autoconnect_skip", "All leads are 1st degree — Auto Connect skipped");
         }
 
         // 4b. Message Sender: 1st-degree now, then 2nd/3rd degree follow-up (after connection sent). If LinkedIn doesn't allow (e.g. not connected yet), CRM shows connection sent + message failed with reason.
+        // Uses same logic as POST /api/phantom/send-message-complete (test script): buildSpreadsheetOptions + phantomService.sendMessage. Requires BACKEND_PUBLIC_URL in .env so PhantomBuster can fetch CSV.
         if (msgLeads.length > 0) {
             await addLaunchLog(id, "message_sender_start", `Launching Message Sender for ${msgLeads.length} lead(s) (1st degree + follow-up for 2nd/3rd)`);
             for (let i = 0; i < msgLeads.length; i++) {
@@ -820,33 +850,23 @@ export async function launchCampaign(req, res) {
                 }
             }
             await addLaunchLog(id, "message_sender_done", `Message Sender completed: ${msgSent}/${msgLeads.length} sent`);
+        } else {
+            await addLaunchLog(id, "message_sender_skip", "No leads with approved message content — Message Sender skipped");
         }
 
-        // 5. Gmail: if approved, send mail or complete
+        // 5. Email: disabled for now — do not send; just log if approved emails exist (for future use).
         const gmailApproved = await pool.query(
             `SELECT 1 FROM approval_queue WHERE campaign_id = $1 AND step_type IN ('email','gmail_outreach') AND status = 'approved' LIMIT 1`,
             [id]
         );
         if (gmailApproved.rows.length > 0) {
-            await addLaunchLog(id, "gmail_approved", "Gmail approved — sending mail or completing");
+            await addLaunchLog(id, "gmail_skipped", "Gmail/email step approved but email sender is disabled for now");
         }
 
         const totalProcessed = connReqLeads.length + msgLeads.length;
 
-        // 6. Mark campaign as active (or completed when all done) and set launched_at
-        await pool.query("UPDATE campaigns SET status = 'active', launched_at = COALESCE(launched_at, NOW()) WHERE id = $1", [id]);
-
-        // 7. Mark campaign leads as completed
-        if (leadIds.length > 0) {
-            await pool.query(
-                `UPDATE campaign_leads
-                 SET status = 'completed', last_activity_at = NOW(), next_action_due = NULL
-                 WHERE campaign_id = $1 AND lead_id = ANY($2::int[])`,
-                [id, leadIds]
-            );
-        }
-
-        await addLaunchLog(id, "complete", `Campaign completed; Pause button hidden`);
+        // 6 & 7 moved to finally so we always reset and mark completed even on throw
+        await addLaunchLog(id, "complete", `Campaign run finished; reset to draft for Launch again`);
 
         const campaignName = campaignRes.rows[0]?.name || "Campaign";
         await NotificationService.create({
@@ -864,6 +884,19 @@ export async function launchCampaign(req, res) {
             messagesSent: msgSent,
             phantomResult: connResult,
         });
+
+        } finally {
+            // Campaign complete: reset to draft and mark all processed leads completed so this campaign stops and another campaign can run.
+            await pool.query("UPDATE campaigns SET status = 'draft', launched_at = COALESCE(launched_at, NOW()) WHERE id = $1", [id]);
+            if (leadIds.length > 0) {
+                await pool.query(
+                    `UPDATE campaign_leads
+                     SET status = 'completed', last_activity_at = NOW(), next_action_due = NULL
+                     WHERE campaign_id = $1 AND lead_id = ANY($2::int[])`,
+                    [id, leadIds]
+                );
+            }
+        }
 
     } catch (err) {
         console.error("Launch Error:", err);

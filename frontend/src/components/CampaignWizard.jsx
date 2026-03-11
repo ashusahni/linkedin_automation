@@ -8,6 +8,7 @@ import { FilterLogicBuilder } from './FilterLogicBuilder';
 import axios from 'axios';
 import { useToast } from './ui/toast';
 import { cn } from '../lib/utils';
+import { useNavigate } from 'react-router-dom';
 
 const CAMPAIGN_GOAL_OPTIONS = [
     {
@@ -64,6 +65,7 @@ const CAMPAIGN_GOAL_OPTIONS = [
 
 export default function CampaignWizard({ onClose, onCreate }) {
     const { addToast } = useToast();
+    const navigate = useNavigate();
     const [currentStep, setCurrentStep] = useState(1);
     const [loading, setLoading] = useState(false);
 
@@ -88,17 +90,10 @@ export default function CampaignWizard({ onClose, onCreate }) {
         timezone: 'UTC'
     });
 
-    // Audience estimation
+    // Audience estimation — only after user clicks Apply (linked to My Contacts filter apply)
     const [audienceCount, setAudienceCount] = useState(null);
     const [estimating, setEstimating] = useState(false);
     const [audiencePreview, setAudiencePreview] = useState([]);
-
-    // Estimate audience whenever filters change
-    useEffect(() => {
-        if (currentStep === 2 && campaignData.filters.groups.length > 0) {
-            estimateAudience();
-        }
-    }, [campaignData.filters, currentStep]);
 
     const estimateAudience = async () => {
         setEstimating(true);
@@ -114,6 +109,16 @@ export default function CampaignWizard({ onClose, onCreate }) {
         } finally {
             setEstimating(false);
         }
+    };
+
+    /** Apply current filters and count matching leads (same idea as Apply in My Contacts). */
+    const handleApplyFilters = () => {
+        const hasConditions = campaignData.filters.groups?.some(g => g.conditions?.length > 0 && g.conditions.some(c => c.value != null && String(c.value).trim() !== ''));
+        if (!hasConditions) {
+            addToast('Add at least one filter condition with a value', 'warning');
+            return;
+        }
+        estimateAudience();
     };
 
     const handleNext = () => {
@@ -168,6 +173,49 @@ export default function CampaignWizard({ onClose, onCreate }) {
             onClose();
         } catch (err) {
             console.error('Failed to create campaign:', err);
+            addToast(err.response?.data?.error || 'Failed to create campaign', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    /** Build payload for create (used by handleCreateAndSelectLeads). */
+    const buildCreatePayload = () => {
+        const selectedGoal = CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === campaignData.campaign_goal) || CAMPAIGN_GOAL_OPTIONS[0];
+        return {
+            name: campaignData.name.trim(),
+            type: selectedGoal.type,
+            goal: campaignData.campaign_goal,
+            description: campaignData.description.trim(),
+            target_audience: JSON.stringify(campaignData.filters),
+            schedule_start: campaignData.schedule_start || undefined,
+            schedule_end: campaignData.schedule_end || undefined,
+            daily_cap: campaignData.daily_cap ? parseInt(campaignData.daily_cap, 10) : 0,
+            timezone: campaignData.timezone || 'UTC',
+            tags: campaignData.tags.length ? campaignData.tags : undefined,
+            priority: campaignData.priority,
+            settings: (campaignData.registration_link?.trim() ? { registration_link: campaignData.registration_link.trim() } : undefined)
+        };
+    };
+
+    /** Create campaign and go to My Contacts with filters + campaignId to select leads. */
+    const handleCreateAndSelectLeads = async () => {
+        if (audienceCount === 0 || estimating) return;
+        const selectedGoal = CAMPAIGN_GOAL_OPTIONS.find((g) => g.value === campaignData.campaign_goal) || CAMPAIGN_GOAL_OPTIONS[0];
+        if (!campaignData.name.trim()) { addToast('Enter a campaign name (Step 1) first', 'warning'); return; }
+        if (!campaignData.description.trim()) { addToast('Enter a campaign description (Step 1) first', 'warning'); return; }
+        if (selectedGoal.needsRegistrationLink && !campaignData.registration_link?.trim()) { addToast('Registration link required (Step 1)', 'warning'); return; }
+        setLoading(true);
+        try {
+            const payload = buildCreatePayload();
+            const id = await onCreate(payload);
+            if (id) {
+                sessionStorage.setItem('campaignWizardAppliedFilters', JSON.stringify(campaignData.filters));
+                onClose();
+                navigate(`/my-contacts?campaignId=${id}&applyWizardFilters=1`);
+                addToast('Campaign created. Select leads below and click "Add to Campaign" to add them.', 'success');
+            }
+        } catch (err) {
             addToast(err.response?.data?.error || 'Failed to create campaign', 'error');
         } finally {
             setLoading(false);
@@ -360,13 +408,69 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                 </div>
                             </div>
 
-                            {/* Audience Count */}
-                            {audienceCount !== null && (
-                                <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20">
+                            {/* Filter Builder */}
+                            <FilterLogicBuilder
+                                filters={campaignData.filters}
+                                onChange={(newFilters) => updateField('filters', newFilters)}
+                            />
+
+                            {/* Apply — same as My Contacts: apply filters and count matching leads */}
+                            <div className="flex items-center gap-3 flex-wrap">
+                                <Button
+                                    type="button"
+                                    onClick={handleApplyFilters}
+                                    disabled={estimating || !campaignData.filters.groups?.some(g => g.conditions?.length > 0)}
+                                    className="gap-2"
+                                >
+                                    {estimating ? (
+                                        <>
+                                            <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin block" />
+                                            Applying...
+                                        </>
+                                    ) : (
+                                        'Apply'
+                                    )}
+                                </Button>
+                                <span className="text-xs text-muted-foreground">Apply to count leads matching the filters above.</span>
+                            </div>
+
+                            {/* Count only shown after Apply */}
+                            {audienceCount === null ? (
+                                <div className="rounded-lg border border-dashed border-muted bg-muted/20 p-6 text-center">
+                                    <p className="text-sm text-muted-foreground">Build filters above and click <strong>Apply</strong> to see how many leads match.</p>
+                                    <p className="text-xs text-muted-foreground mt-1">Then click the count to create the campaign and go to My Contacts to select leads.</p>
+                                </div>
+                            ) : (
+                            <>
+                            {/* Audience Count — clickable to create campaign and go to My Contacts */}
+                                <Card
+                                    className={cn(
+                                        "border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20",
+                                        audienceCount > 0 && !estimating && "cursor-pointer hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+                                    )}
+                                    onClick={() => {
+                                        if (audienceCount === 0 || estimating) return;
+                                        handleCreateAndSelectLeads();
+                                    }}
+                                    role="button"
+                                    tabIndex={audienceCount > 0 && !estimating ? 0 : undefined}
+                                    onKeyDown={(e) => {
+                                        if (audienceCount > 0 && !estimating && (e.key === 'Enter' || e.key === ' ')) {
+                                            e.preventDefault();
+                                            handleCreateAndSelectLeads();
+                                        }
+                                    }}
+                                >
                                     <CardContent className="pt-6">
                                         <div className="flex items-center justify-between">
                                             <div>
-                                                <div className="text-sm text-muted-foreground">Matching Leads</div>
+                                                <div className="text-sm text-muted-foreground">
+                                                    {audienceCount > 0 && !estimating ? (
+                                                        <span className="underline decoration-dotted">Matching leads (click to create campaign & select leads)</span>
+                                                    ) : (
+                                                        'Matching leads'
+                                                    )}
+                                                </div>
                                                 <div className="text-3xl font-bold text-green-600 dark:text-green-400">
                                                     {estimating ? '...' : audienceCount.toLocaleString()}
                                                 </div>
@@ -375,13 +479,8 @@ export default function CampaignWizard({ onClose, onCreate }) {
                                         </div>
                                     </CardContent>
                                 </Card>
+                            </>
                             )}
-
-                            {/* Filter Builder */}
-                            <FilterLogicBuilder
-                                filters={campaignData.filters}
-                                onChange={(newFilters) => updateField('filters', newFilters)}
-                            />
 
                             {/* Audience Preview */}
                             {audiencePreview.length > 0 && (

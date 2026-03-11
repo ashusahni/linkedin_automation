@@ -78,6 +78,8 @@ async function init() {
 
   app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
+    console.log(`   API base URL for frontend: http://localhost:${PORT}`);
+    console.log(`   Campaign launch logs will appear here when you click Launch.`);
   });
 }
 

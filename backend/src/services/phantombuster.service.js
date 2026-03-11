@@ -228,14 +228,78 @@ class PhantomBusterService {
       // It uses the configuration saved in PhantomBuster dashboard (search URL, limits, LinkedIn connection).
       // Sending ANY arguments (cookies, user agent, search params) causes "argument-invalid" error.
       //
-      // Message Sender phantom: Can use dashboard connection OR session cookie from .env
-      // If LINKEDIN_SESSION_COOKIE is set, we send it. Otherwise, phantom uses dashboard connection.
+      // allowSearchUrlForSearch: When set, we send ONLY the search URL (and result file names) so a
+      // per-instance Lead Source can run with its own URL. If the phantom rejects it, dashboard config is used instead.
 
       let launchArgs;
       let finalArgs;
       let hasLaunchArgs;
 
-      if (options.minimalArgsForSearch || options.minimalArgs) {
+      if (options.allowSearchUrlForSearch && additionalArgs && (additionalArgs.search || additionalArgs.searchUrl)) {
+        const searchUrl = (additionalArgs.search || additionalArgs.searchUrl || '').trim();
+        if (searchUrl && searchUrl.includes('linkedin.com/search/results/people')) {
+          // Lead Source: search URL + result file names + session cookie + user agent from .env
+          // Optional: numberOfResults / limit to cap profiles (stops phantom after N so it doesn't run more than selected)
+          const limit = additionalArgs.numberOfResults != null && additionalArgs.numberOfResults !== '' && Number(additionalArgs.numberOfResults) > 0
+            ? Number(additionalArgs.numberOfResults)
+            : (additionalArgs.limit != null && additionalArgs.limit !== '' && Number(additionalArgs.limit) > 0 ? Number(additionalArgs.limit) : null);
+          launchArgs = { ...resultFileArgs, search: searchUrl };
+          if (limit != null) {
+            // PhantomBuster LinkedIn Search Export uses numberOfResultsPerLaunch (confirmed via inspect-search-export-args.js)
+            launchArgs.numberOfResultsPerLaunch = limit;
+            launchArgs.numberOfResults = limit;
+            launchArgs.numberOfProfiles = limit;
+            launchArgs.profilesPerLaunch = limit;
+            launchArgs.numberOfProfilesPerLaunch = limit;
+            launchArgs.numberOfProfilesToScrape = limit;
+            launchArgs.maxResults = limit;
+            launchArgs.limit = limit;
+            // Some phantoms use "X profiles per page" and expect number of pages (e.g. 20 = 2 pages of 10)
+            const pages = Math.max(1, Math.ceil(limit / 10));
+            launchArgs.numberOfPages = pages;
+            launchArgs.numberOfPagesToScrape = pages;
+            console.log(`📌 Lead Source: Limiting to ${limit} profiles (numberOfResultsPerLaunch=${limit})`);
+          }
+          // Log phantom's expected args once so we can match the exact key name if limit still wrong
+          try {
+            const agent = await this.fetchAgent(phantomId);
+            const args = agent?.agent?.arguments || agent?.arguments;
+            if (args && typeof args === 'object') {
+              const keys = Object.keys(args);
+              const limitKeys = keys.filter((k) => /number|limit|profile|result|launch|scrape/i.test(k));
+              if (limitKeys.length > 0) {
+                console.log(`📌 Phantom argument keys that may control limit: ${limitKeys.join(', ')}`);
+              }
+            }
+          } catch (_) {}
+          let sessionCookie = process.env.LINKEDIN_SESSION_COOKIE || process.env[" LINKEDIN_SESSION_COOKIE"] || process.env["LINKEDIN_SESSION_COOKIE "] || "";
+          sessionCookie = typeof sessionCookie === "string" ? sessionCookie : "";
+          sessionCookie = sessionCookie.trim().replace(/\r?\n/g, "");
+          sessionCookie = sessionCookie.replace(/^["']|["']$/g, "");
+          if (sessionCookie.toLowerCase().startsWith("li_at=")) sessionCookie = sessionCookie.slice(6).trim();
+          if (sessionCookie) {
+            // PhantomBuster expects only the cookie value, not "li_at=value"
+            launchArgs.sessionCookie = sessionCookie;
+            launchArgs.linkedinSessionCookie = sessionCookie;
+          }
+          let ua = process.env.LINKEDIN_USER_AGENT || process.env[" LINKEDIN_USER_AGENT"] || process.env["LINKEDIN_USER_AGENT "] || "";
+          ua = typeof ua === "string" ? ua.trim() : "";
+          if (!ua) ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+          launchArgs.userAgent = ua;
+          if (launchArgs.sessionCookie) {
+            console.log("📌 Lead Source: Sending search + result files + session cookie + userAgent from .env");
+          } else {
+            console.log("📌 Lead Source: Sending search + result files + userAgent (no cookie in .env)");
+          }
+          finalArgs = launchArgs;
+          hasLaunchArgs = true;
+        } else {
+          console.log("📌 Search Export: No valid search URL – falling back to dashboard config (no args)");
+          launchArgs = {};
+          finalArgs = {};
+          hasLaunchArgs = false;
+        }
+      } else if (options.minimalArgsForSearch || options.minimalArgs) {
         // Search Export phantom REJECTS launch arguments ("argument invalid").
         // It MUST use only the configuration saved in PhantomBuster dashboard (Search URL, limit, LinkedIn connection).
         // Send ZERO arguments – no search URL, no cookie, nothing.
@@ -581,7 +645,10 @@ class PhantomBusterService {
           console.log("📊 Strategy 3: Checking agent storage (S3; 403 = private, use dashboard export)...");
           const base = container.uniqueResultBase;
           const candidates = [];
-          if (base) candidates.push(`${base}.json`, `${base}.csv`);
+          if (base) {
+            candidates.push(`${base}.json`, `${base}.csv`);
+            console.log(`   Using launch result base: ${base}.json / ${base}.csv`);
+          }
           candidates.push(
             "result.json", "database.json", "linkedinProfileScraper.json",
             "result.csv", "database.csv", "linkedinProfileScraper.csv",
@@ -631,10 +698,12 @@ class PhantomBusterService {
             }
           } else {
             console.log("⚠️  No CSV/JSON URL found in output logs");
-            // Try to find any URL in the output that might be a result URL
-            const urlMatches = output.match(/https?:\/\/[^\s"<>]+/g);
-            if (urlMatches && urlMatches.length > 0) {
-              console.log(`   💡 Found ${urlMatches.length} potential URLs in output:`);
+            // Log only URLs that could be result files (exclude docs, linkedin.com, a.co, etc.)
+            const urlMatches = (output.match(/https?:\/\/[^\s"<>]+/g) || []).filter(
+              (u) => /\.(json|csv)(\?|$)/i.test(u) || /phantombuster|phantombooster|cache\d*\./i.test(u)
+            );
+            if (urlMatches.length > 0) {
+              console.log(`   💡 Found ${urlMatches.length} potential result URLs in output:`);
               urlMatches.slice(0, 5).forEach((url, idx) => {
                 console.log(`      ${idx + 1}. ${url.substring(0, 100)}`);
               });
@@ -670,8 +739,10 @@ class PhantomBusterService {
       const fileType = isCSV ? 'CSV' : 'JSON';
       console.log(`📥 Downloading ${fileType} from: ${url.substring(0, 80)}...`);
       const headers = {};
-      if (getApiKey() && (url.includes('phantombuster.com') || url.includes('phantombuster.s3'))) {
-        headers["X-Phantombuster-Key"] = getApiKey();
+      const apiKey = getApiKey();
+      if (apiKey && (url.includes('phantombuster.com') || url.includes('phantombuster.s3'))) {
+        headers["X-Phantombuster-Key"] = apiKey;
+        headers["X-Phantombuster-Key-1"] = apiKey;
       }
       const response = await axios.get(url, {
         timeout: 60000,

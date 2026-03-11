@@ -29,6 +29,11 @@ app.use(express.urlencoded({ extended: true }));
 // Log every API request so you see traffic in the terminal (and spot 500s)
 app.use((req, res, next) => {
   const start = Date.now();
+  // Log campaign-related requests as soon as they arrive (so you see them even if handler hangs)
+  const url = req.originalUrl || req.url || "";
+  if (url.includes("/api/campaigns") && req.method !== "GET") {
+    process.stdout.write(`\n[Campaigns] ${req.method} ${url}\n`);
+  }
   res.on("finish", () => {
     const code = res.statusCode;
     const msg = code >= 500 ? `\x1b[31m${code}\x1b[0m` : code;

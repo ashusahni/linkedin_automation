@@ -5,6 +5,9 @@ import PageGuide from './PageGuide';
 import axios from 'axios';
 import { Search, MoreVertical, RefreshCw, Linkedin, Trash2, Edit2, Download, Filter, ChevronDown, ChevronUp, Loader2, Sparkles, MapPin, Building2, Briefcase, Target, Database, Eye, Check, X, Mail, Phone, UserPlus, Users, Network, Contact, Upload, AlertTriangle, Columns3, GripVertical, Clock, FileText, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
+
+/** Hunter.io / email finder icon (used for Enrich and email-in-contact context). */
+const HUNTER_EMAIL_ICON = '/hunter-email-icon.png';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
@@ -98,6 +101,10 @@ export default function LeadsTable({
     // Highlight state for deep-link notifications (e.g. ?highlight=1,2,3 or location.state.notificationLeadIds)
     const [highlightedLeads, setHighlightedLeads] = useState(new Set());
     const appliedNotificationDeepLinkRef = useRef(false);
+    /** When true, the next run of the activeQuickFilters effect should skip so we don't overwrite ?filters= results */
+    const skipNextQuickFiltersFetchRef = useRef(false);
+    /** When landing with ?campaignId= we auto-open Add to Campaign once */
+    const appliedCampaignIdFromUrlRef = useRef(false);
 
     // Combined Meta Filters (includes all filters)
     const [searchParams, setSearchParams] = useSearchParams();
@@ -358,7 +365,11 @@ export default function LeadsTable({
         const createdFrom = searchParams.get('createdFrom') || '';
         const createdTo = searchParams.get('createdTo') || '';
 
-        // Check if URL params differ from current state to determine if we need to update/fetch
+        // When URL has ?filters= (campaign wizard "Matching leads"), let the dedicated filters effect handle fetch—don't overwrite
+        if (searchParams.get('filters')) return;
+        if (searchParams.get('applyWizardFilters') === '1') return;
+
+        // Check if URL params differ
         const stateDiffers =
             connectionDegree !== metaFilters.connectionDegree ||
             quality !== (metaFilters.quality || '') ||
@@ -400,6 +411,59 @@ export default function LeadsTable({
         // Ensure we're at the top of the page after navigation or filter changes
         window.scrollTo(0, 0);
     }, [searchParams]); // Run whenever URL parameters change
+
+    // When landing with ?filters= (e.g. from campaign wizard "Matching leads"), apply advanced filter and load leads
+    useEffect(() => {
+        const filtersParam = searchParams.get('filters');
+        if (!filtersParam) return;
+        try {
+            const parsed = JSON.parse(decodeURIComponent(filtersParam));
+            if (parsed && parsed.groups && parsed.groups.length > 0) {
+                skipNextQuickFiltersFetchRef.current = true; // prevent activeQuickFilters effect from overwriting with unfiltered fetch
+                setAdvancedFilters(parsed);
+                setFilterMode('advanced');
+                fetchLeads(false, null, false, null, parsed);
+            }
+        } catch (e) {
+            console.warn('Invalid filters in URL', e);
+        }
+    }, [searchParams]);
+
+    // Apply filters from campaign wizard (saved in sessionStorage when user clicked count) so leads page shows only matching leads
+    useEffect(() => {
+        if (searchParams.get('applyWizardFilters') !== '1') return;
+        const stored = sessionStorage.getItem('campaignWizardAppliedFilters');
+        if (!stored) {
+            setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('applyWizardFilters'); return n; }, { replace: true });
+            return;
+        }
+        try {
+            const parsed = JSON.parse(stored);
+            if (!parsed?.groups?.length) {
+                sessionStorage.removeItem('campaignWizardAppliedFilters');
+                setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('applyWizardFilters'); return n; }, { replace: true });
+                return;
+            }
+            skipNextQuickFiltersFetchRef.current = true;
+            setAdvancedFilters(parsed);
+            setFilterMode('advanced');
+            fetchLeads(false, null, false, null, parsed);
+            sessionStorage.removeItem('campaignWizardAppliedFilters');
+            setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('applyWizardFilters'); return n; }, { replace: true });
+        } catch (e) {
+            console.warn('Failed to apply wizard filters', e);
+            sessionStorage.removeItem('campaignWizardAppliedFilters');
+            setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('applyWizardFilters'); return n; }, { replace: true });
+        }
+    }, [searchParams]);
+
+    // When landing with ?campaignId=, pre-select that campaign so when user selects leads and clicks Add to Campaign the dropdown has it selected (do not auto-open modal)
+    useEffect(() => {
+        const campaignIdParam = searchParams.get('campaignId');
+        if (!campaignIdParam || appliedCampaignIdFromUrlRef.current) return;
+        appliedCampaignIdFromUrlRef.current = true;
+        setSelectedCampaignId(String(campaignIdParam));
+    }, [searchParams]);
 
     // When landing with filter params in URL (e.g. from dashboard tier click), trigger one fetch
     // since sync effect may not run (state already matches URL).
@@ -561,6 +625,7 @@ export default function LeadsTable({
             setShowCampaignModal(false);
             fetchLeads();
             fetchStats();
+            navigate(`/campaigns/${selectedCampaignId}`);
         } catch (error) {
             console.error('Failed to add leads to campaign:', error);
             const data = error.response?.data;
@@ -576,7 +641,7 @@ export default function LeadsTable({
         }
     };
 
-    const fetchLeads = async (append = false, overrideFilters = null, silent = false, overrideIds = null) => {
+    const fetchLeads = async (append = false, overrideFilters = null, silent = false, overrideIds = null, overrideAdvancedFilters = null) => {
         let filtersToUse = overrideFilters ?? metaFilters;
 
         // When time filter applies (Dashboard + CRM), ensure every fetch uses the period range if no dates set
@@ -723,7 +788,9 @@ export default function LeadsTable({
 
             // Quick / Advanced Logic construction
             let advancedPayload = null;
-
+            if (overrideAdvancedFilters && overrideAdvancedFilters.groups && overrideAdvancedFilters.groups.length > 0) {
+                advancedPayload = { operator: overrideAdvancedFilters.operator || 'OR', groups: overrideAdvancedFilters.groups };
+            } else {
             // 1. Convert Quick Filters to Groups (OR logic between presets)
             // Use JSON.parse(JSON.stringify(...)) to deep copy to avoid mutation issues when appending conditions
             // Skip 'imported_only' — it only sets source param above, no conditions
@@ -801,10 +868,12 @@ export default function LeadsTable({
 
             // If we have either quick filters OR manual advanced filters (or the injected exclusion), send 'filters' param
             if (quickGroups.length > 0 || manualGroups.length > 0) {
-                params.set('filters', JSON.stringify({
-                    operator: 'OR', // Top level OR between Quick Presets and Manual Groups
-                    groups: [...quickGroups, ...manualGroups]
-                }));
+                advancedPayload = { operator: 'OR', groups: [...quickGroups, ...manualGroups] };
+            }
+            }
+
+            if (advancedPayload) {
+                params.set('filters', JSON.stringify(advancedPayload));
             }
 
             const res = await axios.get(`/api/leads?${params.toString()}`);
@@ -1083,7 +1152,10 @@ export default function LeadsTable({
 
     // Fetch when quick filters change
     useEffect(() => {
-        // Debounce slightly or just fetch
+        if (skipNextQuickFiltersFetchRef.current) {
+            skipNextQuickFiltersFetchRef.current = false;
+            return;
+        }
         fetchLeads();
         fetchStats();
     }, [activeQuickFilters]);
@@ -1708,7 +1780,7 @@ export default function LeadsTable({
                                             disabled={enriching || leads.length === 0}
                                             title={selectedLeads.size > 0 ? `Enrich ${selectedLeads.size} selected contact(s)` : "Find emails for up to 50 contacts (without email)"}
                                         >
-                                            <Contact className={cn("h-4 w-4", enriching && "animate-spin")} />
+                                            <img src={HUNTER_EMAIL_ICON} alt="Enrich" className={cn("h-4 w-4 object-contain", enriching && "animate-spin")} />
                                         </Button>
                                         <Button
                                             variant="outline"
@@ -2149,7 +2221,13 @@ export default function LeadsTable({
                                                             <select
                                                                 className={cn("w-full border border-input bg-background rounded-md px-3 py-2 text-sm h-9", metaFilters.status !== 'all' && "ring-2 ring-primary/30 border-primary/50 bg-primary/5")}
                                                                 value={metaFilters.status}
-                                                                onChange={(e) => setMetaFilters((f) => ({ ...f, status: e.target.value }))}
+                                                                onChange={(e) => {
+                                                                    const newStatus = e.target.value;
+                                                                    const newFilters = { ...metaFilters, status: newStatus };
+                                                                    setMetaFilters(newFilters);
+                                                                    fetchLeads(false, newFilters);
+                                                                    fetchStats({ metaFilters: newFilters });
+                                                                }}
                                                             >
                                                                 <option value="all">All Status</option>
                                                                 <option value="new">New</option>
@@ -2577,12 +2655,12 @@ export default function LeadsTable({
                                                         )}
                                                         {lead.email ? (
                                                             <div className="flex items-center gap-1.5 text-xs">
-                                                                <Mail className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                                                <img src={HUNTER_EMAIL_ICON} alt="" className="h-3.5 w-3.5 object-contain flex-shrink-0" />
                                                                 <span className="truncate font-medium" title={lead.email}>{lead.email}</span>
                                                             </div>
                                                         ) : (
                                                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                                                <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+                                                                <img src={HUNTER_EMAIL_ICON} alt="" className="h-3.5 w-3.5 object-contain flex-shrink-0" />
                                                                 {lead.hunter_attempted || ['completed', 'not_found', 'failed'].includes(lead.enrichment_status) ? (
                                                                     <span className="text-[10px]">Not available</span>
                                                                 ) : (
@@ -2607,7 +2685,7 @@ export default function LeadsTable({
                                                                         {lead.enrichment_status === 'processing' ? (
                                                                             <Loader2 className="h-3 w-3 animate-spin mr-1" />
                                                                         ) : (
-                                                                            <Contact className="h-3 w-3 mr-1" />
+                                                                            <img src={HUNTER_EMAIL_ICON} alt="" className="h-3 w-3 object-contain mr-1" />
                                                                         )}
                                                                         Enrich
                                                                     </Button>
@@ -2667,7 +2745,7 @@ export default function LeadsTable({
 
                                                         {showContact && (
                                                             <DropdownMenuItem onClick={() => openManualEmail(lead)}>
-                                                                <Mail className="mr-2 h-4 w-4" /> Edit email
+                                                                <img src={HUNTER_EMAIL_ICON} alt="" className="mr-2 h-4 w-4 object-contain" /> Edit email
                                                             </DropdownMenuItem>
                                                         )}
 

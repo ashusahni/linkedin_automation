@@ -342,7 +342,7 @@ export async function advanceStep(lead) {
         const pendingCount = parseInt(pendingCountRes.rows[0].count, 10);
 
         if (pendingCount === 0) {
-            await pool.query("UPDATE campaigns SET status = 'completed' WHERE id = $1 AND status = 'active'", [lead.campaign_id]);
+            await pool.query("UPDATE campaigns SET status = 'draft' WHERE id = $1 AND status = 'active'", [lead.campaign_id]);
 
             const campaignRes = await pool.query("SELECT name FROM campaigns WHERE id = $1", [lead.campaign_id]);
             const campaignName = campaignRes.rows[0]?.name || 'Campaign';

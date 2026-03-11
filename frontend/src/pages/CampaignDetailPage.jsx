@@ -712,18 +712,22 @@ export default function CampaignDetailPage() {
             addToast(`Daily limit reached (${launchesToday.limit} campaigns/day). You can still create and edit campaigns.`, 'warning');
             return;
         }
-        const previousStatus = campaign?.status;
         setLaunchInProgress(true);
-        setCampaign((prev) => (prev ? { ...prev, status: 'active' } : prev));
         setLaunchesToday((prev) => ({ ...prev, count: prev.count + 1 }));
         try {
-            await axios.post(`/api/campaigns/${id}/launch`, limitEnforced ? {} : { bypassLimit: true });
-            addToast('Campaign activated. Scheduler will begin processing leads.', 'success');
-            fetchCampaignDetails();
+            const res = await axios.post(`/api/campaigns/${id}/launch`, limitEnforced ? {} : { bypassLimit: true });
+            const connCount = res.data?.connectionRequests ?? 0;
+            const msgCount = res.data?.messagesSent ?? 0;
+            addToast(
+                connCount + msgCount > 0
+                    ? `Campaign launched. ${connCount} connection request(s), ${msgCount} message(s) sent. You can Launch again when ready.`
+                    : 'Campaign launched. You can Launch again when ready.',
+                'success'
+            );
+            await fetchCampaignDetails();
             fetchRecentActivity();
             setActiveTab('overview');
         } catch (error) {
-            setCampaign((prev) => (prev ? { ...prev, status: previousStatus } : prev));
             setLaunchesToday((prev) => ({ ...prev, count: Math.max(0, prev.count - 1) }));
             const data = error.response?.data;
             if (data?.code === 'CAMPAIGN_ALREADY_RUNNING') {
@@ -738,6 +742,7 @@ export default function CampaignDetailPage() {
             }
             const errorMsg = data?.message || data?.error || error.message || 'Launch failed. Please check your settings.';
             addToast(errorMsg, 'error', data?.helpUrl ? { helpUrl: data.helpUrl } : {});
+            await fetchCampaignDetails();
         } finally {
             setLaunchInProgress(false);
         }
@@ -899,20 +904,61 @@ export default function CampaignDetailPage() {
                         {campaign.status === 'active' ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button onClick={handlePause} size="icon" className="h-9 w-9 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 border border-orange-500/30 hover:border-orange-500/50">
-                                        <Pause className="w-3.5 h-3.5" />
-                                    </Button>
+                                    <span className="inline-flex">
+                                        <Button
+                                            onClick={handleLaunch}
+                                            size="sm"
+                                            disabled={atLaunchLimit || launchInProgress}
+                                            className="gap-1.5 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white border-0 shadow-lg shadow-emerald-500/25 disabled:opacity-60 disabled:pointer-events-none"
+                                        >
+                                            {launchInProgress ? (
+                                                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Launching...</>
+                                            ) : (
+                                                <><Play className="w-3.5 h-3.5" /> Launch again</>
+                                            )}
+                                        </Button>
+                                    </span>
                                 </TooltipTrigger>
-                                <TooltipContent side="bottom">Pause Campaign</TooltipContent>
+                                <TooltipContent side="bottom">
+                                    {launchInProgress ? 'Campaign is launching…' : atLaunchLimit ? `Limit reached (${launchesToday.limit}/day or ${launchesToday.limitWeek}/week). You can still create campaigns.` : 'Run campaign again (campaign will reset to draft when done)'}
+                                </TooltipContent>
                             </Tooltip>
-                        ) : campaign.status === 'completed' ? null : campaign.status === 'paused' ? (
+                        ) : campaign.status === 'completed' ? (
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button onClick={handleResume} size="icon" className="h-9 w-9 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 hover:border-emerald-500/50">
-                                        <Play className="w-3.5 h-3.5" />
-                                    </Button>
+                                    <span className="inline-flex">
+                                        <Button
+                                            onClick={handleLaunch}
+                                            size="sm"
+                                            disabled={atLaunchLimit || launchInProgress}
+                                            className="gap-1.5 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white border-0 shadow-lg shadow-emerald-500/25 disabled:opacity-60 disabled:pointer-events-none"
+                                        >
+                                            {launchInProgress ? (
+                                                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Launching...</>
+                                            ) : (
+                                                <><Play className="w-3.5 h-3.5" /> Launch again</>
+                                            )}
+                                        </Button>
+                                    </span>
                                 </TooltipTrigger>
-                                <TooltipContent side="bottom">Resume Campaign</TooltipContent>
+                                <TooltipContent side="bottom">
+                                    {launchInProgress ? 'Campaign is launching…' : atLaunchLimit ? `Limit reached (${launchesToday.limit}/day or ${launchesToday.limitWeek}/week). You can still create campaigns.` : 'Launch campaign again'}
+                                </TooltipContent>
+                            </Tooltip>
+                        ) : campaign.status === 'paused' ? (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span className="inline-flex">
+                                        <Button
+                                            onClick={handleResume}
+                                            size="sm"
+                                            className="gap-1.5 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white border-0 shadow-lg shadow-emerald-500/25"
+                                        >
+                                            <Play className="w-3.5 h-3.5" /> Launch again
+                                        </Button>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">Resume and run campaign again</TooltipContent>
                             </Tooltip>
                         ) : (
                             <Tooltip>
@@ -927,13 +973,13 @@ export default function CampaignDetailPage() {
                                             {launchInProgress ? (
                                                 <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Launching...</>
                                             ) : (
-                                                <><Play className="w-3.5 h-3.5" /> Launch</>
+                                                <><Play className="w-3.5 h-3.5" /> {campaign.launched_at ? 'Launch again' : 'Launch'}</>
                                             )}
                                         </Button>
                                     </span>
                                 </TooltipTrigger>
                                 <TooltipContent side="bottom">
-                                    {launchInProgress ? 'Campaign is launching…' : atLaunchLimit ? `Limit reached (${launchesToday.limit}/day or ${launchesToday.limitWeek}/week). You can still create campaigns.` : 'Launch Campaign'}
+                                    {launchInProgress ? 'Campaign is launching…' : atLaunchLimit ? `Limit reached (${launchesToday.limit}/day or ${launchesToday.limitWeek}/week). You can still create campaigns.` : (campaign.launched_at ? 'Launch campaign again' : 'Launch Campaign')}
                                 </TooltipContent>
                             </Tooltip>
                         )}
@@ -1373,7 +1419,7 @@ export default function CampaignDetailPage() {
                                             </span>
                                             <ChevronRight className="w-3 h-3 text-muted-foreground self-center" />
                                             <span className="px-2 py-1 rounded-md bg-white/5 text-muted-foreground border border-white/5">
-                                                3️⃣ <strong className="text-white">Press Play</strong>
+                                                3️⃣ <strong className="text-white">Launch</strong> (or Launch again when re-running)
                                             </span>
                                             <ChevronRight className="w-3 h-3 text-muted-foreground self-center" />
                                             <span className="px-2 py-1 rounded-md bg-green-500/10 text-green-400 border border-green-500/20">
@@ -2614,7 +2660,7 @@ export default function CampaignDetailPage() {
                                 </div>
                                 <div className="flex items-start gap-2">
                                     <span className="text-green-400 mt-0.5">✓</span>
-                                    <span>Come back and press <strong className="text-white">Play</strong> to start the campaign</span>
+                                    <span>Come back and click <strong className="text-white">Launch again</strong> to start the campaign</span>
                                 </div>
                             </div>
                         </div>

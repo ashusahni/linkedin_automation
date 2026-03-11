@@ -14,6 +14,7 @@ import {
 import phantomService from "../services/phantombuster.service.js";
 import pool from "../db.js";
 import { NotificationService } from "../services/notification.service.js";
+import LinkedInSearchSheetService from "../services/linkedinSearchSheet.service.js";
 
 const router = express.Router();
 
@@ -69,7 +70,7 @@ router.post("/search-import", async (req, res) => {
     }
 
     const additionalArgs = { search: finalSearchUrl };
-    const result = await phantomService.launchPhantom(phantomId, additionalArgs, { minimalArgsForSearch: true });
+    const result = await phantomService.launchPhantom(phantomId, additionalArgs, { allowSearchUrlForSearch: true, useDashboardCookie: true });
 
     activeJobs.set(result.containerId, {
       status: 'running',
@@ -89,6 +90,187 @@ router.post("/search-import", async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+// ============================================
+// LEAD SOURCE INSTANCES (Google Sheet + Run Engine per instance)
+// ============================================
+
+/**
+ * GET /api/phantom/lead-sources
+ * List all lead source instances from the sheet.
+ */
+router.get("/lead-sources", async (req, res) => {
+  try {
+    if (!process.env.LINKEDIN_SEARCH_SHEET_ID?.trim()) {
+      return res.status(503).json({
+        success: false,
+        error: "LINKEDIN_SEARCH_SHEET_ID is not configured. Add it in backend .env and restart the backend server.",
+        instances: [],
+      });
+    }
+    const instances = await LinkedInSearchSheetService.getAllInstances();
+    return res.json({ success: true, instances });
+  } catch (error) {
+    console.error("❌ Lead sources list error:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      instances: [],
+    });
+  }
+});
+
+/**
+ * POST /api/phantom/lead-sources
+ * Create a new lead source instance (append row to sheet).
+ * Body: { title, search, industry?, country?, connection_degree? }
+ */
+router.post("/lead-sources", async (req, res) => {
+  try {
+    if (!process.env.LINKEDIN_SEARCH_SHEET_ID?.trim()) {
+      return res.status(503).json({
+        success: false,
+        error: "LINKEDIN_SEARCH_SHEET_ID is not configured. Add it in backend .env and restart the backend server.",
+      });
+    }
+    const { title, search, industry = "", country = "", connection_degree = "2nd", limit = 20 } = req.body || {};
+    const searchUrl = (search || "").trim();
+    if (!searchUrl) {
+      return res.status(400).json({ success: false, error: "Search (LinkedIn search URL) is required." });
+    }
+    if (!searchUrl.includes("linkedin.com/search/results/people")) {
+      return res.status(400).json({
+        success: false,
+        error: "Search URL must contain linkedin.com/search/results/people",
+      });
+    }
+    const limitNum = limit != null && limit !== "" && Number(limit) > 0 ? Math.min(Number(limit), 1000) : 20;
+    const result = await LinkedInSearchSheetService.appendInstance({
+      title: (title || "").trim() || "Untitled",
+      search: searchUrl,
+      industry,
+      country,
+      connection_degree: connection_degree || "2nd",
+      limit: limitNum,
+    });
+    return res.json({
+      success: true,
+      id: result.id,
+      updatedRange: result.updatedRange,
+      created_at: result.created_at,
+      status: result.status,
+      message: "Lead source created.",
+    });
+  } catch (error) {
+    console.error("❌ Lead source create error:", error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/phantom/lead-sources/:id
+ * Delete a lead source instance (removes the row from the Google Sheet).
+ */
+router.delete("/lead-sources/:id", async (req, res) => {
+  try {
+    const rowId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(rowId) || rowId < 1) {
+      return res.status(400).json({ success: false, error: "Invalid instance id." });
+    }
+    if (!process.env.LINKEDIN_SEARCH_SHEET_ID?.trim()) {
+      return res.status(503).json({
+        success: false,
+        error: "LINKEDIN_SEARCH_SHEET_ID is not configured.",
+      });
+    }
+    const instance = await LinkedInSearchSheetService.getInstanceByRow(rowId);
+    if (!instance) {
+      return res.status(404).json({ success: false, error: "Lead source instance not found." });
+    }
+    await LinkedInSearchSheetService.deleteInstance(rowId);
+    return res.json({ success: true, message: "Lead source instance deleted." });
+  } catch (error) {
+    console.error("❌ Lead source delete error:", error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/phantom/lead-sources/:id/run
+ * Run the Phantom for this instance only (by row id). Updates sheet status: running → completed/failed.
+ */
+router.post("/lead-sources/:id/run", async (req, res) => {
+  try {
+    const rowId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(rowId) || rowId < 1) {
+      return res.status(400).json({ success: false, error: "Invalid instance id." });
+    }
+    if (!process.env.LINKEDIN_SEARCH_SHEET_ID?.trim()) {
+      return res.status(503).json({
+        success: false,
+        error: "LINKEDIN_SEARCH_SHEET_ID is not configured.",
+      });
+    }
+    const phantomId = process.env.SEARCH_EXPORT_PHANTOM_ID || process.env.SEARCH_LEADS_PHANTOM_ID;
+    if (!phantomId) {
+      return res.status(400).json({
+        success: false,
+        error: "SEARCH_EXPORT_PHANTOM_ID not configured. Set it in .env.",
+      });
+    }
+
+    const instance = await LinkedInSearchSheetService.getInstanceByRow(rowId);
+    if (!instance) {
+      return res.status(404).json({ success: false, error: "Lead source instance not found." });
+    }
+    const searchUrl = (instance.search || "").trim();
+    if (!searchUrl || !searchUrl.includes("linkedin.com/search/results/people")) {
+      return res.status(400).json({
+        success: false,
+        error: "Instance search URL is invalid or missing linkedin.com/search/results/people",
+      });
+    }
+
+    // Optional limit: use instance's saved limit so API/sheet run matches manual (e.g. 20). Override via body if needed.
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const limit = body.limit != null && body.limit !== "" && Number.isFinite(Number(body.limit)) && Number(body.limit) > 0
+      ? Math.min(Number(body.limit), 1000)
+      : (instance.limit != null && instance.limit > 0 ? instance.limit : null);
+
+    await LinkedInSearchSheetService.updateStatus(rowId, "running");
+
+    // Pass session cookie and limit so Phantom fetches only that many profiles (same as manual 20 limit)
+    const result = await phantomService.launchPhantom(
+      phantomId,
+      { search: searchUrl, ...(limit != null && { numberOfResults: limit, limit }) },
+      { allowSearchUrlForSearch: true }
+    );
+
+    activeJobs.set(result.containerId, {
+      status: "running",
+      startTime: new Date(),
+      phantomId,
+      type: "lead-source-run",
+      rowId,
+      uniqueResultBase: result.uniqueResultBase,
+    });
+
+    return res.json({
+      success: true,
+      jobId: result.containerId,
+      message: "Engine started for this lead source. This may take 2–5 minutes.",
+    });
+  } catch (error) {
+    console.error("❌ Lead source run error:", error);
+    try {
+      const rowId = parseInt(req.params.id, 10);
+      if (Number.isFinite(rowId) && rowId >= 1) {
+        await LinkedInSearchSheetService.updateStatus(rowId, "failed");
+      }
+    } catch (e) {}
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -128,7 +310,11 @@ router.get("/status/:jobId", async (req, res) => {
 
         (async () => {
           try {
-            const containerForFetch = { ...phantomStatus, agentId: jobInfo.phantomId };
+            const containerForFetch = {
+              ...phantomStatus,
+              agentId: jobInfo.phantomId,
+              ...(jobInfo.uniqueResultBase && { uniqueResultBase: jobInfo.uniqueResultBase }),
+            };
             const resultData = await phantomService.fetchResultData(containerForFetch);
             if (resultData && resultData.length > 0) {
               let savedCount = 0;
@@ -189,11 +375,25 @@ router.get("/status/:jobId", async (req, res) => {
                 data: { jobId, savedCount, duplicateCount, type: 'search_export', link: '/leads' },
               });
             }
+            if (jobInfo.rowId) {
+              try {
+                await LinkedInSearchSheetService.updateStatus(jobInfo.rowId, 'completed');
+              } catch (e) {
+                console.error('Failed to update lead source sheet status:', e.message);
+              }
+            }
             jobInfo.processing = false;
             jobInfo.completed = true;
           } catch (error) {
             jobInfo.error = error.message;
             jobInfo.processing = false;
+            if (jobInfo.rowId) {
+              try {
+                await LinkedInSearchSheetService.updateStatus(jobInfo.rowId, 'failed');
+              } catch (e) {
+                console.error('Failed to update lead source sheet status:', e.message);
+              }
+            }
             await NotificationService.create({
               type: 'phantom_failed',
               title: 'Lead import failed',
@@ -223,6 +423,13 @@ router.get("/status/:jobId", async (req, res) => {
       progress = 0;
       status = 'error';
       message = 'Import failed. Check PhantomBuster configuration.';
+      if (jobInfo.rowId) {
+        try {
+          await LinkedInSearchSheetService.updateStatus(jobInfo.rowId, 'failed');
+        } catch (e) {
+          console.error('Failed to update lead source sheet status:', e.message);
+        }
+      }
       await NotificationService.create({
         type: 'phantom_failed',
         title: 'Lead import failed',

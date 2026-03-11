@@ -35,7 +35,9 @@ CORS_ORIGIN=https://your-app.vercel.app
 PHANTOMBUSTER_API_KEY=your_key_here
 CONNECTIONS_EXPORT_PHANTOM_ID=your_id_here
 SEARCH_EXPORT_PHANTOM_ID=your_id_here
-# Required for phantom to run the search (not just launch)
+# Lead Source instances (Explore Beyond My Network) – Google Sheet ID for storing search instances
+# Sheet columns: title, search, industry, country, connection_degree, status, created_at
+# LINKEDIN_SEARCH_SHEET_ID=your_google_sheet_id_here
 SEARCH_EXPORT_DEFAULT_URL=https://www.linkedin.com/search/results/people/?keywords=CEO&origin=GLOBAL_SEARCH_HEADER
 SEARCH_EXPORT_DEFAULT_LIMIT=50
 MESSAGE_SENDER_PHANTOM_ID=your_id_here
