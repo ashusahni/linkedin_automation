@@ -168,45 +168,68 @@ async function runActivitiesSchema() {
 }
 
 /**
- * Run all pending migrations
+ * Run all pending migrations (with retry for Render/cloud DB wake-up)
  */
-export async function runMigrations() {
-  try {
-    logger.info('🔄 Starting database migrations...');
+async function runMigrationsOnce() {
+  logger.info('🔄 Starting database migrations...');
 
-    // Run base schema first
-    await runBaseSchema();
+  // Run base schema first
+  await runBaseSchema();
 
-    // Run activities schema
-    await runActivitiesSchema();
+  // Run activities schema
+  await runActivitiesSchema();
 
-    // Get all migrations
-    const migrations = getMigrationFiles();
+  // Get all migrations
+  const migrations = getMigrationFiles();
 
-    if (migrations.length === 0) {
-      logger.info('No migrations found');
-      return;
-    }
-
-    logger.info(`Found ${migrations.length} migration(s)`);
-
-    // Run each pending migration
-    for (const migration of migrations) {
-      const isRun = await isMigrationRun(migration.number);
-
-      if (isRun) {
-        logger.info(`⏭️  Skipping ${migration.filename} (already run)`);
-        continue;
-      }
-
-      await runMigration(migration);
-    }
-
-    logger.success('✅ All migrations completed');
-  } catch (error) {
-    logger.error('❌ Migration failed:', error);
-    throw error;
+  if (migrations.length === 0) {
+    logger.info('No migrations found');
+    return;
   }
+
+  logger.info(`Found ${migrations.length} migration(s)`);
+
+  // Run each pending migration
+  for (const migration of migrations) {
+    const isRun = await isMigrationRun(migration.number);
+
+    if (isRun) {
+      logger.info(`⏭️  Skipping ${migration.filename} (already run)`);
+      continue;
+    }
+
+    await runMigration(migration);
+  }
+
+  logger.success('✅ All migrations completed');
+}
+
+const RETRY_DELAY_MS = 8000;
+const MAX_MIGRATION_ATTEMPTS = 4;
+const INITIAL_DELAY_MS = 3000;
+
+export async function runMigrations() {
+  // Give Render/cloud DB a moment to accept connections (helps when instance is waking)
+  await new Promise((r) => setTimeout(r, INITIAL_DELAY_MS));
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_MIGRATION_ATTEMPTS; attempt++) {
+    try {
+      await runMigrationsOnce();
+      return;
+    } catch (error) {
+      lastError = error;
+      const isConnectionDropped =
+        /Connection terminated unexpectedly|ECONNRESET|ETIMEDOUT|connection closed/i.test(error?.message || '');
+      if (isConnectionDropped && attempt < MAX_MIGRATION_ATTEMPTS) {
+        logger.warn(`Migration attempt ${attempt} failed (connection issue). Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      } else {
+        break;
+      }
+    }
+  }
+  logger.error('❌ Migration failed:', lastError);
+  throw lastError;
 }
 
 /**

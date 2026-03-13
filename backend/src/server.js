@@ -25,7 +25,9 @@ logger.info("🚀 Server starting...");
 logger.info(`🔑 PB KEY PRESENT: ${!!config.phantombuster.apiKey}`);
 logger.info(`🔍 SEARCH PHANTOM ID (Lead Search): ${config.phantombuster.phantomIds.searchExport ? "set" : "MISSING – set SEARCH_EXPORT_PHANTOM_ID in .env"}`);
 logger.info(`🍪 LINKEDIN SESSION COOKIE: ${config.phantombuster.sessionCookie ? "set" : "MISSING – required for PhantomBuster"}`);
-logger.info(`🗄️  DB HOST: ${config.database.host}`);
+const dbUrl = process.env.DATABASE_URL || '';
+const dbHost = dbUrl ? (() => { try { return new URL(dbUrl).hostname; } catch { return config.database.host; } })() : config.database.host;
+logger.info(`🗄️  DB HOST: ${dbHost}${dbUrl.includes('ohio-') ? ' (⚠️ Ohio – use Oregon URL in .env)' : dbUrl.includes('oregon-') ? ' (Oregon ✓)' : ''}`);
 
 async function init() {
   try {
