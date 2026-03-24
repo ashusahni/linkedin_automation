@@ -143,6 +143,10 @@ function scoreIndustryMatch(leadIndustry, tiers, industryLabelToTopLevel = null)
     : [leadIndustry].filter(Boolean);
   if (candidates.length === 0) return { score: 0, tier: null };
 
+  const primaryIndustries = tiers.primary?.industries || [];
+  const secondaryIndustries = tiers.secondary?.industries || [];
+  const tertiaryIndustries = tiers.tertiary?.industries || [];
+
   const expandPrefIndustry = (prefLabel) => {
     const list = [prefLabel];
     if (industryLabelToTopLevel && prefLabel) {
@@ -152,28 +156,24 @@ function scoreIndustryMatch(leadIndustry, tiers, industryLabelToTopLevel = null)
     return list;
   };
 
-  const primaryIndustries = tiers.primary?.industries || [];
-  const secondaryIndustries = tiers.secondary?.industries || [];
-  const tertiaryIndustries = tiers.tertiary?.industries || [];
+  // Prioritize manually input values (lead.industry is candidates[0])
+  // We check each candidate across all tiers (Primary -> Secondary -> Tertiary)
+  // so a manual match in ANY tier is preferred over an AI-resolved match in a BETTER tier.
+  for (const c of candidates) {
+    for (const i of primaryIndustries) {
+      const toMatch = expandPrefIndustry(i);
+      if (toMatch.some((m) => matchesAny(c, [m]))) return { score: TIER_SCORE.primary.industry, tier: 'primary' };
+    }
+    for (const i of secondaryIndustries) {
+      const toMatch = expandPrefIndustry(i);
+      if (toMatch.some((m) => matchesAny(c, [m]))) return { score: TIER_SCORE.secondary.industry, tier: 'secondary' };
+    }
+    for (const i of tertiaryIndustries) {
+      const toMatch = expandPrefIndustry(i);
+      if (toMatch.some((m) => matchesAny(c, [m]))) return { score: TIER_SCORE.tertiary.industry, tier: 'tertiary' };
+    }
+  }
 
-  for (const i of primaryIndustries) {
-    const toMatch = expandPrefIndustry(i);
-    if (candidates.some((c) => toMatch.some((m) => matchesAny(c, [m])))) {
-      return { score: TIER_SCORE.primary.industry, tier: 'primary' };
-    }
-  }
-  for (const i of secondaryIndustries) {
-    const toMatch = expandPrefIndustry(i);
-    if (candidates.some((c) => toMatch.some((m) => matchesAny(c, [m])))) {
-      return { score: TIER_SCORE.secondary.industry, tier: 'secondary' };
-    }
-  }
-  for (const i of tertiaryIndustries) {
-    const toMatch = expandPrefIndustry(i);
-    if (candidates.some((c) => toMatch.some((m) => matchesAny(c, [m])))) {
-      return { score: TIER_SCORE.tertiary.industry, tier: 'tertiary' };
-    }
-  }
   return { score: 0, tier: null };
 }
 
@@ -221,6 +221,13 @@ export function calculateScore(lead, prefs, industryLabelToTopLevel = null) {
     return { score: 0, tier: null };
   }
 
+  // CRM Restructure: Check if user has entered any industries in settings.
+  // Requirement: "only include those leads what industeries entered in setiing"
+  const primaryIndustries = tiers.primary?.industries || [];
+  const secondaryIndustries = tiers.secondary?.industries || [];
+  const tertiaryIndustries = tiers.tertiary?.industries || [];
+  const hasIndustryCriteria = primaryIndustries.length > 0 || secondaryIndustries.length > 0 || tertiaryIndustries.length > 0;
+
   const leadTitle = lead.title || '';
   const industryFromLead = lead.industry || '';
   const industryFromKeywords = resolveIndustry(lead.company || '', lead.title || '');
@@ -229,8 +236,15 @@ export function calculateScore(lead, prefs, industryLabelToTopLevel = null) {
     .filter(Boolean);
   const leadCompanySize = lead.company_size || null;
 
-  const titleResult = scoreTitleMatch(leadTitle, tiers);
+  // First score industry; it serves as a strict filter if hasIndustryCriteria is true.
   const industryResult = scoreIndustryMatch(leadIndustryCandidates, tiers, industryLabelToTopLevel);
+
+  // If industries are defined but lead matches none, exclude it from tiers (returns score 0, tier null).
+  if (hasIndustryCriteria && !industryResult.tier) {
+    return { score: 0, tier: null };
+  }
+
+  const titleResult = scoreTitleMatch(leadTitle, tiers);
   const companySizeResult = scoreCompanySizeMatch(leadCompanySize, tiers);
 
   const score = titleResult.score + industryResult.score + companySizeResult.score;
@@ -245,7 +259,9 @@ export function calculateScore(lead, prefs, industryLabelToTopLevel = null) {
  * Tiers (Primary/Secondary/Tertiary) stay dynamic for all leads; My Contacts lists only Primary so it is not dominated by secondary.
  */
 export function applyPriorityRule(score, tier, prefs, overrideIsPriority = null) {
-  let isPriority = tier === 'primary';
+  // My Contacts: all tiered leads are prioritized (Primary, Secondary, Tertiary)
+  // Ensures data from leads goes to all tiers in the priority list.
+  let isPriority = (tier === 'primary' || tier === 'secondary' || tier === 'tertiary');
   if (overrideIsPriority !== null) {
     isPriority = overrideIsPriority;
   }
@@ -450,15 +466,8 @@ export async function recalculateAllScores() {
     }
   }
 
-  // When Paused (or Active but no manual tiers): use profile-based tiering so all leads get a tier from your profile industry
-  let profileForTier = null;
-  if (!useManualTiers) {
-    try {
-      profileForTier = await getProfileForTiering(prefs);
-    } catch (err) {
-      console.warn('[scoring] Profile for tiering failed, using fallback:', err?.message);
-    }
-  }
+  // Always try to load profile for AI fallback if possible
+  const profileForTier = await getProfileForTiering(prefs);
 
   let offset = 0;
   const PAGE = 1000;
@@ -475,18 +484,35 @@ export async function recalculateAllScores() {
     if (rows.length === 0) break;
     for (const lead of rows) {
       let score, tier;
+      
+      // 1. Try manual match if active
+      let manualResult = null;
       if (useManualTiers) {
-        const out = calculateScore(lead, prefs, industryLabelToTopLevel);
-        score = out.score;
-        tier = out.tier;
-      } else if (profileForTier) {
-        const out = calculateScoreFromProfile(lead, profileForTier.userTopLevel, profileForTier.userSub);
-        score = out.score;
-        tier = out.tier;
+        manualResult = calculateScore(lead, prefs, industryLabelToTopLevel);
+      }
+
+      // 2. Try AI/Profile match fallback
+      let aiResult = null;
+      if (profileForTier) {
+        aiResult = calculateScoreFromProfile(lead, profileForTier.userTopLevel, profileForTier.userSub);
+      }
+
+      // 3. Merged logic: Manual Primary > Manual Other > AI Fallback (Strict Primary)
+      if (manualResult && manualResult.tier === 'primary') {
+        score = manualResult.score;
+        tier = 'primary';
+      } else if (manualResult && manualResult.tier) {
+        score = manualResult.score;
+        tier = manualResult.tier;
+      } else if (aiResult && aiResult.tier) {
+        score = aiResult.score;
+        // Downgrade AI Primary to Secondary if no manual match (keeping Primary "most accurate")
+        tier = aiResult.tier === 'primary' ? 'secondary' : aiResult.tier;
       } else {
-        score = defaultQualityScore(lead);
+        score = manualResult?.score ?? aiResult?.score ?? defaultQualityScore(lead);
         tier = null;
       }
+
       allUpdates.push({
         id: lead.id,
         preference_score: score,
@@ -500,20 +526,11 @@ export async function recalculateAllScores() {
 
   if (allUpdates.length === 0) return { updated: 0 };
 
-  let finalUpdates = allUpdates;
-  if (useManualTiers) {
-    finalUpdates = allUpdates.map((u) => ({
-      ...u,
-      preference_tier: u.preference_tier || 'tertiary',
-    }));
-  } else if (profileForTier) {
-    finalUpdates = allUpdates.map((u) => ({
-      ...u,
-      preference_tier: u.preference_tier || 'tertiary',
-    }));
-  } else {
-    finalUpdates = allUpdates.map((u) => ({ ...u, preference_tier: 'tertiary' }));
-  }
+  // Use calculated tier (allowing NULL for untiered leads even in manual mode)
+  const finalUpdates = allUpdates.map((u) => ({
+    ...u,
+    preference_tier: u.preference_tier,
+  }));
 
   finalUpdates.forEach(u => {
     const effectiveTier = u.manual_tier || u.preference_tier;
@@ -576,24 +593,36 @@ export async function scoreAndClassifyLead(lead) {
   const useManualTiers = preferenceActive && hasTierCriteria;
 
   let score, tier;
+  
+  // 1. Try manual match if enabled
+  let manualResult = null;
   if (useManualTiers) {
     let industryLabelToTopLevel = null;
-    try {
-      industryLabelToTopLevel = await getIndustryLabelToTopLevelMap();
-    } catch (_) {}
-    const out = calculateScore(lead, prefs, industryLabelToTopLevel);
-    score = out.score;
-    tier = out.tier;
+    try { industryLabelToTopLevel = await getIndustryLabelToTopLevelMap(); } catch (_) {}
+    manualResult = calculateScore(lead, prefs, industryLabelToTopLevel);
+  }
+
+  // 2. Try AI/Profile match (keep it running as fallback)
+  let aiResult = null;
+  const profileForTier = await getProfileForTiering(prefs);
+  if (profileForTier) {
+    aiResult = calculateScoreFromProfile(lead, profileForTier.userTopLevel, profileForTier.userSub);
+  }
+
+  // 3. Merged logic: Manual Primary > Manual Other > AI Fallback (Strict Primary)
+  if (manualResult && manualResult.tier === 'primary') {
+    score = manualResult.score;
+    tier = 'primary';
+  } else if (manualResult && manualResult.tier) {
+    score = manualResult.score;
+    tier = manualResult.tier;
+  } else if (aiResult && aiResult.tier) {
+    score = aiResult.score;
+    // Strict Primary: AI Primary is downgraded if it didn't match manual Primary
+    tier = aiResult.tier === 'primary' ? 'secondary' : aiResult.tier;
   } else {
-    const profileForTier = await getProfileForTiering(prefs);
-    if (profileForTier) {
-      const out = calculateScoreFromProfile(lead, profileForTier.userTopLevel, profileForTier.userSub);
-      score = out.score;
-      tier = out.tier;
-    } else {
-      score = defaultQualityScore(lead);
-      tier = null;
-    }
+    score = manualResult?.score ?? aiResult?.score ?? defaultQualityScore(lead);
+    tier = null;
   }
 
   const { isPriority, reviewStatus } = applyPriorityRule(score, tier, prefs);

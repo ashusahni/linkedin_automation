@@ -206,7 +206,7 @@ export async function saveLead(lead) {
     safeTruncate(lead.connectionDegree || lead.connection_degree, 50),
     safeTruncate(initialReviewStatus, 50),
     score,
-    tier || 'tertiary',
+    tier,
     !!initialIsPriority,
     phantomMetadataJson,
     safeTruncate(lead.industry, 255),
