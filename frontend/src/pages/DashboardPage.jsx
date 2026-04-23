@@ -435,13 +435,13 @@ export default function DashboardPage() {
             : 0,
         contextLabel: parent.name,
       }))
-      .filter((s) => s.value > 0)
       .sort((a, b) => {
+        if ((a.value || 0) !== (b.value || 0)) return (b.value || 0) - (a.value || 0);
         const isOtherA = a.name === "Other" || a.name === "Others";
         const isOtherB = b.name === "Other" || b.name === "Others";
         if (isOtherA && !isOtherB) return 1;
         if (!isOtherA && isOtherB) return -1;
-        return b.value - a.value;
+        return (a.name || "").localeCompare(b.name || "");
       });
 
     if (slices.length > 0) {
@@ -512,7 +512,7 @@ export default function DashboardPage() {
   const singleSelectedIndustry =
     selectedIndustries.size === 1 ? Array.from(selectedIndustries)[0] : null;
   const activeSubIndustryData = singleSelectedIndustry
-    ? subIndustryMap[singleSelectedIndustry] || null
+    ? (subIndustryMap[singleSelectedIndustry] || []).filter((s) => s.value > 0)
     : null;
   const chartData =
     activeSubIndustryData && activeSubIndustryData.length > 0
@@ -1297,7 +1297,7 @@ export default function DashboardPage() {
                                         Sub-categories ({subSlices.length})
                                       </p>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        {subSlices.slice(0, 6).map((sub) => (
+                                        {subSlices.map((sub) => (
                                           <div
                                             key={sub.name}
                                             className="flex items-center justify-between rounded-md bg-background/80 border border-border/60 px-2.5 py-1.5"

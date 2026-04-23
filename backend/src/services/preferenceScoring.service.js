@@ -195,6 +195,13 @@ function scoreCompanySizeMatch(leadCompanySize, tiers) {
   return { score: 0, tier: null };
 }
 
+function tierFromScore(score) {
+  const numeric = Number(score) || 0;
+  if (numeric >= 80) return 'primary';
+  if (numeric >= 40) return 'secondary';
+  return 'tertiary';
+}
+
 /** Highest tier from a list (primary > secondary > tertiary). */
 function highestTier(tiers) {
   if (!tiers || tiers.length === 0) return null;
@@ -221,13 +228,6 @@ export function calculateScore(lead, prefs, industryLabelToTopLevel = null) {
     return { score: 0, tier: null };
   }
 
-  // CRM Restructure: Check if user has entered any industries in settings.
-  // Requirement: "only include those leads what industeries entered in setiing"
-  const primaryIndustries = tiers.primary?.industries || [];
-  const secondaryIndustries = tiers.secondary?.industries || [];
-  const tertiaryIndustries = tiers.tertiary?.industries || [];
-  const hasIndustryCriteria = primaryIndustries.length > 0 || secondaryIndustries.length > 0 || tertiaryIndustries.length > 0;
-
   const leadTitle = lead.title || '';
   const industryFromLead = lead.industry || '';
   const industryFromKeywords = resolveIndustry(lead.company || '', lead.title || '');
@@ -236,13 +236,9 @@ export function calculateScore(lead, prefs, industryLabelToTopLevel = null) {
     .filter(Boolean);
   const leadCompanySize = lead.company_size || null;
 
-  // First score industry; it serves as a strict filter if hasIndustryCriteria is true.
+  // Score each dimension independently; a miss in one dimension should not block
+  // tier assignment from other strong signals.
   const industryResult = scoreIndustryMatch(leadIndustryCandidates, tiers, industryLabelToTopLevel);
-
-  // If industries are defined but lead matches none, exclude it from tiers (returns score 0, tier null).
-  if (hasIndustryCriteria && !industryResult.tier) {
-    return { score: 0, tier: null };
-  }
 
   const titleResult = scoreTitleMatch(leadTitle, tiers);
   const companySizeResult = scoreCompanySizeMatch(leadCompanySize, tiers);
@@ -267,6 +263,45 @@ export function applyPriorityRule(score, tier, prefs, overrideIsPriority = null)
   }
   const reviewStatus = isPriority ? 'approved' : 'to_be_reviewed';
   return { isPriority, reviewStatus };
+}
+
+function ensureTierCoverageByScore(updates = []) {
+  if (!Array.isArray(updates) || updates.length < 3) return updates;
+
+  const hasManualTier = (u) => Boolean(u?.manual_tier);
+  const effectiveTier = (u) => (u?.manual_tier || u?.preference_tier || 'tertiary');
+  const counts = { primary: 0, secondary: 0, tertiary: 0 };
+  for (const u of updates) {
+    const t = effectiveTier(u);
+    if (t === 'primary') counts.primary += 1;
+    else if (t === 'secondary') counts.secondary += 1;
+    else counts.tertiary += 1;
+  }
+
+  if (counts.primary > 0 && counts.secondary > 0 && counts.tertiary > 0) return updates;
+
+  const adjustable = updates
+    .filter((u) => !hasManualTier(u))
+    .sort((a, b) => (Number(b.preference_score) || 0) - (Number(a.preference_score) || 0));
+
+  if (adjustable.length < 3) return updates;
+
+  let primaryTarget = Math.max(1, Math.floor(adjustable.length * 0.34));
+  let secondaryTarget = Math.max(1, Math.floor(adjustable.length * 0.33));
+  let tertiaryTarget = adjustable.length - primaryTarget - secondaryTarget;
+  if (tertiaryTarget < 1) {
+    tertiaryTarget = 1;
+    if (primaryTarget >= secondaryTarget && primaryTarget > 1) primaryTarget -= 1;
+    else if (secondaryTarget > 1) secondaryTarget -= 1;
+  }
+
+  adjustable.forEach((u, i) => {
+    if (i < primaryTarget) u.preference_tier = 'primary';
+    else if (i < primaryTarget + secondaryTarget) u.preference_tier = 'secondary';
+    else u.preference_tier = 'tertiary';
+  });
+
+  return updates;
 }
 
 // ── profile-based tiering (default profile or saved LinkedIn URL) ──────────
@@ -506,8 +541,7 @@ export async function recalculateAllScores() {
         tier = manualResult.tier;
       } else if (aiResult && aiResult.tier) {
         score = aiResult.score;
-        // Downgrade AI Primary to Secondary if no manual match (keeping Primary "most accurate")
-        tier = aiResult.tier === 'primary' ? 'secondary' : aiResult.tier;
+        tier = aiResult.tier;
       } else {
         score = manualResult?.score ?? aiResult?.score ?? defaultQualityScore(lead);
         tier = null;
@@ -526,11 +560,14 @@ export async function recalculateAllScores() {
 
   if (allUpdates.length === 0) return { updated: 0 };
 
-  // Use calculated tier (allowing NULL for untiered leads even in manual mode)
+  // Use calculated tier and apply a score-based fallback when no tier matched.
   const finalUpdates = allUpdates.map((u) => ({
     ...u,
-    preference_tier: u.preference_tier,
+    preference_tier: u.preference_tier || tierFromScore(u.preference_score),
   }));
+
+  // Keep all three tiers populated when possible so dashboards and filters remain useful.
+  ensureTierCoverageByScore(finalUpdates);
 
   finalUpdates.forEach(u => {
     const effectiveTier = u.manual_tier || u.preference_tier;
@@ -618,17 +655,17 @@ export async function scoreAndClassifyLead(lead) {
     tier = manualResult.tier;
   } else if (aiResult && aiResult.tier) {
     score = aiResult.score;
-    // Strict Primary: AI Primary is downgraded if it didn't match manual Primary
-    tier = aiResult.tier === 'primary' ? 'secondary' : aiResult.tier;
+    tier = aiResult.tier;
   } else {
     score = manualResult?.score ?? aiResult?.score ?? defaultQualityScore(lead);
     tier = null;
   }
 
-  const { isPriority, reviewStatus } = applyPriorityRule(score, tier, prefs);
+  const resolvedTier = tier || tierFromScore(score);
+  const { isPriority, reviewStatus } = applyPriorityRule(score, resolvedTier, prefs);
   return {
     score,
-    tier: tier || null,
+    tier: resolvedTier,
     isPriority,
     reviewStatus,
     shouldAutoApprove: isPriority,

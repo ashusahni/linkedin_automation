@@ -1,5 +1,6 @@
 import pool from "../db.js";
 import { INDUSTRY_KEYWORDS as industryKeywords, SUB_INDUSTRY_KEYWORDS } from '../config/industries.js';
+import { getIndustryList } from "../services/industryList.service.js";
 
 // Simple in-memory cache for LinkedIn industry metadata
 let INDUSTRY_METADATA_CACHE = null;
@@ -12,18 +13,17 @@ async function loadIndustryMetadata() {
   if (INDUSTRY_METADATA_CACHE) return INDUSTRY_METADATA_CACHE;
 
   try {
-    // Query all industries from database
-    const result = await pool.query(`
-      SELECT code, name, hierarchy, description, top_level_industry, sub_category
-      FROM linkedin_industries
-      ORDER BY code
-    `);
+    const industryList = await getIndustryList();
 
     const topLevel = {};
     const subcategoriesByTop = {};
 
-    for (const row of result.rows) {
-      const topName = row.top_level_industry;
+    for (const row of industryList) {
+      const parts = String(row.hierarchy || "")
+        .split(">")
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const topName = row.top_level_industry || parts[0] || null;
       if (!topName) continue;
 
       // Build top-level industry map
@@ -31,13 +31,13 @@ async function loadIndustryMetadata() {
         topLevel[topName] = {
           code: row.code,
           name: topName,
-          description: row.description,
+          description: null,
         };
       }
 
       // Build sub-categories map
-      if (row.sub_category) {
-        const subName = row.sub_category;
+      const subName = row.sub_category || (parts.length >= 2 ? parts[1] : null);
+      if (subName) {
         if (!subcategoriesByTop[topName]) {
           subcategoriesByTop[topName] = {};
         }
@@ -54,7 +54,7 @@ async function loadIndustryMetadata() {
     INDUSTRY_METADATA_CACHE = { topLevel, subcategoriesByTop };
   } catch (err) {
     console.error(
-      "[analytics.controller] Failed to load LinkedIn industry metadata from database:",
+      "[analytics.controller] Failed to load LinkedIn industry metadata:",
       err.message
     );
     INDUSTRY_METADATA_CACHE = {
@@ -294,21 +294,26 @@ export async function getDashboardAnalytics(req, res) {
     const industryDistribution = Object.entries(industryCounts)
       .map(([name, count]) => {
         const subCounts = subIndustryCounts[name] || {};
-        const subCategories = Object.entries(subCounts)
-          .map(([subName, subCount]) => ({
+        const knownSubs = subcategoriesByTop[name] || {};
+        const allSubNames = Array.from(
+          new Set([...Object.keys(knownSubs), ...Object.keys(subCounts)])
+        );
+
+        const subCategories = allSubNames
+          .map((subName) => ({
             name: subName,
-            count: subCount,
+            count: subCounts[subName] || 0,
             code:
               subcategoriesByTop[name]?.[subName]?.code ||
               null,
           }))
-          .filter((s) => s.count > 0)
           .sort((a, b) => {
+            if ((a.count || 0) !== (b.count || 0)) return (b.count || 0) - (a.count || 0);
             const isOtherA = a.name === "Other" || a.name === "Others";
             const isOtherB = b.name === "Other" || b.name === "Others";
             if (isOtherA && !isOtherB) return 1;
             if (!isOtherA && isOtherB) return -1;
-            return b.count - a.count;
+            return (a.name || "").localeCompare(b.name || "");
           });
 
         if (req.query.preferences === 'true' && name === 'Other') {

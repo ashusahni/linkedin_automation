@@ -11,7 +11,23 @@ import pool from '../db.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const JSON_PATH = path.resolve(__dirname, '../config/linkedin_industry_code_v2_all_eng.json');
+const DEFAULT_JSON_FILENAME = 'linkedin_industry_code_v2_all_eng.json';
+const JSON_PATH_CANDIDATES = [
+    process.env.INDUSTRY_JSON_PATH,
+    path.resolve(__dirname, `../config/${DEFAULT_JSON_FILENAME}`),
+    path.resolve(__dirname, `../../config/${DEFAULT_JSON_FILENAME}`),
+    path.resolve(__dirname, `../../${DEFAULT_JSON_FILENAME}`),
+    path.resolve(process.cwd(), `src/config/${DEFAULT_JSON_FILENAME}`),
+    path.resolve(process.cwd(), `config/${DEFAULT_JSON_FILENAME}`),
+    path.resolve(process.cwd(), DEFAULT_JSON_FILENAME),
+].filter(Boolean);
+
+function getExistingIndustryJsonPath() {
+    for (const p of JSON_PATH_CANDIDATES) {
+        if (fs.existsSync(p)) return p;
+    }
+    return null;
+}
 
 let cache = null;
 
@@ -42,13 +58,14 @@ export async function getIndustryList() {
 
     console.warn('[industries] linkedin_industries table is empty in DB! Falling back to JSON file.');
 
-    if (!fs.existsSync(JSON_PATH)) {
-        console.error('[industries] Industry JSON file fallback NOT FOUND at:', JSON_PATH);
+    const jsonPath = getExistingIndustryJsonPath();
+    if (!jsonPath) {
+        console.error('[industries] Industry JSON file fallback NOT FOUND. Checked paths:', JSON_PATH_CANDIDATES);
         cache = [];
         return cache;
     }
 
-    const raw = fs.readFileSync(JSON_PATH, 'utf8');
+    const raw = fs.readFileSync(jsonPath, 'utf8');
     const list = JSON.parse(raw);
     if (!Array.isArray(list)) {
         console.error('[industries] Industry JSON file is not an array!');
