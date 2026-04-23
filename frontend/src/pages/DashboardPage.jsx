@@ -881,7 +881,7 @@ export default function DashboardPage() {
                     </p>
                     <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
                       Connection degree is set when importing from
-                      PhantomBuster. CSV/Excel imports may not include it. Clear
+                      the automation engine. CSV/Excel imports may not include it. Clear
                       the filter to see all leads.
                     </p>
                   </div>

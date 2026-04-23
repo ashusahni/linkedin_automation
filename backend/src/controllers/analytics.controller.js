@@ -243,25 +243,49 @@ export async function getDashboardAnalytics(req, res) {
       }
     }
 
-    // ── Lead Quality Distribution (primary/secondary/tertiary; respects scope) ──────
-    const tierResult = await pool.query(
+    // ── Lead Quality Distribution (primary/secondary/tertiary) ──────────────
+    // Query ALL leads (ignore date filter) so tiers are never empty regardless of selected period.
+    // scope filter still applies so My Contacts vs All Leads is respected.
+    const tierScopeFilter = scopeFilter; // e.g. " AND is_priority = TRUE" or ""
+    const tierConnFilter = connFilter;   // e.g. degree filter if active
+
+    const tierAllResult = await pool.query(
       `SELECT COALESCE(manual_tier, preference_tier, 'tertiary') AS effective_tier, COUNT(*) AS cnt
          FROM leads
-        WHERE ${leadWhere}
+        WHERE 1=1${tierScopeFilter}${tierConnFilter}
         GROUP BY COALESCE(manual_tier, preference_tier, 'tertiary')`,
-      leadWhereParams
+      [] // No date params — all-time
     );
 
     let primaryCount = 0;
     let secondaryCount = 0;
     let tertiaryCount = 0;
 
-    for (const row of tierResult.rows) {
+    for (const row of tierAllResult.rows) {
       const c = parseInt(row.cnt, 10);
       const tier = (row.effective_tier || '').toLowerCase();
       if (tier === 'primary') primaryCount = c;
       else if (tier === 'secondary') secondaryCount = c;
       else tertiaryCount += c;
+    }
+
+    // Safety: if all tiers are 0 (e.g. scope=my_contacts with no priority leads),
+    // fall back to unscoped all-leads count so the UI never shows 3 empty tiers.
+    if (primaryCount === 0 && secondaryCount === 0 && tertiaryCount === 0) {
+      const fallbackTierResult = await pool.query(
+        `SELECT COALESCE(manual_tier, preference_tier, 'tertiary') AS effective_tier, COUNT(*) AS cnt
+           FROM leads
+          WHERE 1=1
+          GROUP BY COALESCE(manual_tier, preference_tier, 'tertiary')`,
+        []
+      );
+      for (const row of fallbackTierResult.rows) {
+        const c = parseInt(row.cnt, 10);
+        const tier = (row.effective_tier || '').toLowerCase();
+        if (tier === 'primary') primaryCount = c;
+        else if (tier === 'secondary') secondaryCount = c;
+        else tertiaryCount += c;
+      }
     }
 
     const totalScored = primaryCount + secondaryCount + tertiaryCount;
@@ -313,15 +337,15 @@ export async function getDashboardAnalytics(req, res) {
       leadWhereParams
     );
 
-    // Connection type breakdown
-    const connectionBreakdownResult = await pool.query(`
-      SELECT
-        connection_degree,
-        COUNT(*) as count
-      FROM leads
-      WHERE connection_degree IS NOT NULL AND connection_degree != '' AND ${leadWhere}
-      GROUP BY connection_degree
-    `, leadWhereParams);
+    // Connection type breakdown — query ALL leads (all-time) so counts are never 0
+    // due to a time-period filter. scope + degree filters still apply.
+    const connectionBreakdownResult = await pool.query(
+      `SELECT connection_degree, COUNT(*) as count
+         FROM leads
+        WHERE connection_degree IS NOT NULL AND connection_degree != ''${tierScopeFilter}${tierConnFilter}
+        GROUP BY connection_degree`,
+      [] // No date params — all-time
+    );
 
     const connectionBreakdown = {
       firstDegree: 0,
@@ -329,11 +353,9 @@ export async function getDashboardAnalytics(req, res) {
       thirdDegree: 0,
     };
 
-    // Map the results to our breakdown object
     connectionBreakdownResult.rows.forEach(row => {
       const degree = (row.connection_degree || '').toLowerCase().trim();
       const count = parseInt(row.count, 10);
-
       if (degree.includes('1st') || degree === '1') {
         connectionBreakdown.firstDegree += count;
       } else if (degree.includes('2nd') || degree === '2') {
@@ -342,6 +364,24 @@ export async function getDashboardAnalytics(req, res) {
         connectionBreakdown.thirdDegree += count;
       }
     });
+
+    // If all degrees are 0 (e.g. no degree data at all for scope), fall back to unscoped
+    if (connectionBreakdown.firstDegree === 0 && connectionBreakdown.secondDegree === 0 && connectionBreakdown.thirdDegree === 0) {
+      const fallbackDegreeResult = await pool.query(
+        `SELECT connection_degree, COUNT(*) as count
+           FROM leads
+          WHERE connection_degree IS NOT NULL AND connection_degree != ''
+          GROUP BY connection_degree`,
+        []
+      );
+      fallbackDegreeResult.rows.forEach(row => {
+        const degree = (row.connection_degree || '').toLowerCase().trim();
+        const count = parseInt(row.count, 10);
+        if (degree.includes('1st') || degree === '1') connectionBreakdown.firstDegree += count;
+        else if (degree.includes('2nd') || degree === '2') connectionBreakdown.secondDegree += count;
+        else if (degree.includes('3rd') || degree === '3') connectionBreakdown.thirdDegree += count;
+      });
+    }
 
     // —— Campaign Analytics ——
     // When connection_degree filter is active, restrict to campaigns that have leads in that degree

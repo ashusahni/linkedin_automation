@@ -311,7 +311,7 @@ export default function LeadSearchPage() {
                             <div className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t border-border/50 gap-4">
                                 <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
                                     <Sparkles className="w-3.5 h-3.5 text-primary" />
-                                    Leads are saved with source <strong>{importSource}</strong>. Phantom uses its own saved search URL and LinkedIn connection.
+                                    Leads are saved with source <strong>{importSource}</strong>. The engine uses its own saved search URL and LinkedIn connection.
                                 </p>
                                 <Button size="lg" className="w-full sm:w-auto gap-2 font-semibold shadow-lg shadow-primary/20 btn-shimmer group" disabled={loading} onClick={handleSearch}>
                                     {loading ? (

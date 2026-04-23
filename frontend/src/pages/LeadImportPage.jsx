@@ -123,7 +123,7 @@ export default function LeadImportPage() {
             <div>
                 <h1 className="text-3xl font-bold text-foreground mb-2">Lead Search & Import</h1>
                 <p className="text-muted-foreground">
-                    Manually import leads from your LinkedIn connections or search results using PhantomBuster
+                    Manually import leads from your LinkedIn connections or search results using the automation engine
                 </p>
             </div>
 
@@ -242,7 +242,7 @@ export default function LeadImportPage() {
 
                         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                             <p className="text-sm text-blue-800">
-                                <strong>Note:</strong> Configure your search URL and limit in PhantomBuster dashboard before running.
+                                <strong>Note:</strong> Configure your search URL and limit in the automation dashboard before running.
                             </p>
                         </div>
 
@@ -301,15 +301,15 @@ export default function LeadImportPage() {
                 <ul className="space-y-2 text-sm text-muted-foreground">
                     <li className="flex gap-2">
                         <span className="text-primary font-bold">•</span>
-                        <span>Make sure your PhantomBuster account is properly configured with your LinkedIn session</span>
+                        <span>Make sure your automation account is properly configured with your LinkedIn session</span>
                     </li>
                     <li className="flex gap-2">
                         <span className="text-primary font-bold">•</span>
-                        <span>Phantom IDs must be set in your backend .env file (CONNECTIONS_EXPORT_PHANTOM_ID and SEARCH_EXPORT_PHANTOM_ID)</span>
+                        <span>Agent IDs must be set in your backend .env file (CONNECTIONS_EXPORT_PHANTOM_ID and SEARCH_EXPORT_PHANTOM_ID)</span>
                     </li>
                     <li className="flex gap-2">
                         <span className="text-primary font-bold">•</span>
-                        <span>For Search Leads, configure your search URL in PhantomBuster dashboard before running</span>
+                        <span>For Search Leads, configure your search URL in the automation dashboard before running</span>
                     </li>
                     <li className="flex gap-2">
                         <span className="text-primary font-bold">•</span>

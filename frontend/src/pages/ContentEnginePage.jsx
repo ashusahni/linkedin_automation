@@ -741,7 +741,7 @@ function ItemDetailModal({ item, ctaTemplates, onClose, onUpdated, onDeleted }) 
                                         disabled={retrying}
                                     >
                                         {retrying ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                                        {retrying ? 'Retrying…' : '🔄 Retry Phantom Send'}
+                                        {retrying ? 'Retrying…' : '🔄 Retry Send'}
                                     </Button>
                                 )}
                             </div>
