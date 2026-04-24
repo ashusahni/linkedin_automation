@@ -297,7 +297,7 @@ router.get("/status/:jobId", async (req, res) => {
 
     if (phantomStatus.status === 'running') {
       const elapsed = Date.now() - jobInfo.startTime.getTime();
-      progress = Math.min(Math.floor((elapsed / 180000) * 70), 70);
+      progress = Math.min(Math.floor((elapsed / 1800000) * 70), 70);
       message = 'Extracting LinkedIn search results...';
       status = 'running';
     } else if (phantomStatus.status === 'finished' || phantomStatus.exitCode === 0) {

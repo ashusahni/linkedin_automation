@@ -100,7 +100,7 @@ export default function LeadSearchPage() {
                 ? '/api/phantom/export-connections-complete'
                 : '/api/phantom/search-leads-complete';
 
-            const response = await axios.post(endpoint, {}, { timeout: 180000 });
+            const response = await axios.post(endpoint, {}, { timeout: 1800000 });
             setResults(response.data);
 
             if (importSource === 'connections_export') {

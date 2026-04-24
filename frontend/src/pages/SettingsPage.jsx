@@ -495,7 +495,7 @@ const SettingsPage = () => {
       const res = await axios.post(
         "/api/phantom/export-connections-complete",
         {},
-        { timeout: 180000 },
+        { timeout: 1800000 },
       );
       if (!res.data?.success) {
         throw new Error(res.data?.error || "Failed to sync primary network");
@@ -541,7 +541,7 @@ const SettingsPage = () => {
       const res = await axios.post(
         "/api/phantom/search-leads-complete",
         {},
-        { timeout: 180000 },
+        { timeout: 1800000 },
       );
       if (!res.data?.success) {
         throw new Error(
