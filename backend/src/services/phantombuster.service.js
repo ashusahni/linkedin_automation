@@ -373,7 +373,8 @@ class PhantomBusterService {
   // ============================================
   // WAIT FOR COMPLETION
   // ============================================
-  async waitForCompletion(containerId, phantomId, maxMinutes = 15) {
+  async waitForCompletion(containerId, phantomId, maxMinutes = 30, options = {}) {
+    const allowPartialOnFailure = options?.allowPartialOnFailure === true;
     const maxWaitTime = maxMinutes * 60 * 1000;
     const startTime = Date.now();
     const checkInterval = 10000; // 10 seconds
@@ -412,6 +413,16 @@ class PhantomBusterService {
           if (!msg || msg === "Unknown error") {
             const outputSnippet = await this.fetchContainerOutput(containerId);
             msg = outputSnippet || "Unknown error (check PhantomBuster dashboard for this container)";
+          }
+          const canContinueWithPartialResult =
+            allowPartialOnFailure &&
+            (exitCode === 137 || /killed|oom|out of memory|timeout/i.test(String(msg)));
+          if (canContinueWithPartialResult) {
+            console.warn(`⚠️ Container exited with ${exitCode}; attempting partial result import...`);
+            container.agentId = phantomId;
+            container.partialFailure = true;
+            container.partialFailureMessage = msg;
+            return container;
           }
           const hint = /cookie|session|login|li_at|invalid argument/i.test(String(msg))
             ? " For Search Export: connect LinkedIn in PhantomBuster dashboard for this agent (do not pass cookie in .env for this phantom)."
@@ -959,7 +970,7 @@ class PhantomBusterService {
       // often fails if ANY arguments are passed.
       console.log("📌 Connection Export: Using LinkedIn account from PhantomBuster dashboard (no args sent)");
       const { containerId, uniqueResultBase } = await this.launchPhantom(phantomId, {}, { minimalArgs: true });
-      const container = await this.waitForCompletion(containerId, phantomId);
+      const container = await this.waitForCompletion(containerId, phantomId, 30, { allowPartialOnFailure: true });
       container.uniqueResultBase = uniqueResultBase;
       container.agentId = phantomId;
 
@@ -1169,7 +1180,7 @@ class PhantomBusterService {
       // Use minimal args so we don't send params this phantom doesn't accept (avoids "Invalid argument")
       const { containerId, uniqueResultBase } = await this.launchPhantom(phantomId, additionalArgs, { minimalArgsForSearch: true });
 
-      const container = await this.waitForCompletion(containerId, phantomId);
+      const container = await this.waitForCompletion(containerId, phantomId, 30, { allowPartialOnFailure: true });
       container.uniqueResultBase = uniqueResultBase;
       let data = await this.fetchResultData(container);
       if (data.length === 0) {
