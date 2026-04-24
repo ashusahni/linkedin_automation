@@ -26,7 +26,7 @@ const InfoTooltip = ({ content }) => (
 
 const IMPORT_SOURCE_OPTIONS = [
     { value: 'connections_export', label: 'Import My Connections', envLabel: 'CONNECTIONS_EXPORT_SOURCE', description: 'Your 1st-degree LinkedIn connections', icon: Share2 },
-    { value: 'search_export', label: 'Explore Beyond My Network', envLabel: 'SEARCH_EXPORT_SOURCE', description: 'Find 2nd & 3rd-degree LinkedIn leads', icon: Search },
+    { value: 'search_export', label: "Explore Bhavya's Connections", envLabel: 'SEARCH_EXPORT_SOURCE', description: 'Find 2nd & 3rd-degree LinkedIn leads', icon: Search },
 ];
 
 class LeadSearchErrorBoundary extends Component {
