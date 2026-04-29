@@ -11,6 +11,9 @@ import { cn } from '../lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 
+const CONNECTIONS_AUTO_SYNC_STORAGE_KEY = 'connectionsAutoSync_v1';
+const CONNECTIONS_AUTO_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 const InfoTooltip = ({ content }) => (
     <Tooltip>
         <TooltipTrigger asChild>
@@ -68,6 +71,37 @@ export default function LeadSearchPage() {
     // 1st degree (Phantom) import stats for widget: { saved, totalLeads, timestamp }
     const [firstDegreeImportStats, setFirstDegreeImportStats] = useState(null);
     const [firstDegreeImportLoading, setFirstDegreeImportLoading] = useState(false);
+    const [isConnectionsAutoMode, setIsConnectionsAutoMode] = useState(() => {
+        try {
+            const raw = localStorage.getItem(CONNECTIONS_AUTO_SYNC_STORAGE_KEY);
+            if (!raw) return false;
+            const parsed = JSON.parse(raw);
+            return parsed?.enabled === true;
+        } catch (_) {
+            return false;
+        }
+    });
+    const [nextConnectionsRunAt, setNextConnectionsRunAt] = useState(() => {
+        try {
+            const raw = localStorage.getItem(CONNECTIONS_AUTO_SYNC_STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const ts = Number(parsed?.nextRunAt);
+            return Number.isFinite(ts) && ts > Date.now() ? ts : null;
+        } catch (_) {
+            return null;
+        }
+    });
+    const [countdownText, setCountdownText] = useState('');
+    const [autoConnectionsRunning, setAutoConnectionsRunning] = useState(false);
+
+    const formatRemaining = (ms) => {
+        const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    };
 
     const fetchFirstDegreeImportStats = () => {
         setFirstDegreeImportLoading(true);
@@ -89,21 +123,24 @@ export default function LeadSearchPage() {
             .finally(() => setFirstDegreeImportLoading(false));
     };
 
-    const handleSearch = async (e) => {
-        if (e && e.preventDefault) e.preventDefault();
-        setLoading(true);
-        setError(null);
-        setResults(null);
+    const runImport = async (source, options = {}) => {
+        const { silent = false } = options;
+        if (!silent) {
+            setLoading(true);
+            setError(null);
+            setResults(null);
+        }
 
         try {
-            const endpoint = importSource === 'connections_export'
+            const endpoint = source === 'connections_export'
                 ? '/api/phantom/export-connections-complete'
                 : '/api/phantom/search-leads-complete';
 
             const response = await axios.post(endpoint, {}, { timeout: 1800000 });
-            setResults(response.data);
 
-            if (importSource === 'connections_export') {
+            if (!silent) setResults(response.data);
+
+            if (source === 'connections_export') {
                 fetchFirstDegreeImportStats();
             }
 
@@ -117,16 +154,82 @@ export default function LeadSearchPage() {
             const errorMsg = (backend && (backend.message || backend.error)) || err.message || 'Failed to search leads';
             const errorCode = backend?.code;
             const helpUrl = backend?.helpUrl || null;
-            setError({
-                message: errorMsg,
-                code: errorCode || null,
-                tips: backend?.tips || null,
-                helpUrl,
-            });
+
+            if (!silent) {
+                setError({
+                    message: errorMsg,
+                    code: errorCode || null,
+                    tips: backend?.tips || null,
+                    helpUrl,
+                });
+            }
             addToast(errorCode ? `[${errorCode}] ${errorMsg}` : errorMsg, 'error', helpUrl ? { helpUrl } : {});
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
+    };
+
+    const handleSearch = async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (importSource === 'connections_export' && isConnectionsAutoMode) return;
+        await runImport(importSource);
+    };
+
+    useEffect(() => {
+        const payload = JSON.stringify({
+            enabled: isConnectionsAutoMode,
+            nextRunAt: isConnectionsAutoMode ? nextConnectionsRunAt : null,
+        });
+        localStorage.setItem(CONNECTIONS_AUTO_SYNC_STORAGE_KEY, payload);
+    }, [isConnectionsAutoMode, nextConnectionsRunAt]);
+
+    useEffect(() => {
+        if (!isConnectionsAutoMode) {
+            setCountdownText('');
+            return;
+        }
+
+        if (!nextConnectionsRunAt || nextConnectionsRunAt <= Date.now()) {
+            setNextConnectionsRunAt(Date.now() + CONNECTIONS_AUTO_SYNC_INTERVAL_MS);
+            return;
+        }
+
+        const timer = window.setInterval(() => {
+            const remaining = nextConnectionsRunAt - Date.now();
+            if (remaining <= 0) {
+                setCountdownText('00:00:00');
+                return;
+            }
+            setCountdownText(formatRemaining(remaining));
+        }, 1000);
+
+        return () => window.clearInterval(timer);
+    }, [isConnectionsAutoMode, nextConnectionsRunAt]);
+
+    useEffect(() => {
+        if (!isConnectionsAutoMode || !nextConnectionsRunAt || loading || autoConnectionsRunning) return;
+        if (Date.now() < nextConnectionsRunAt) return;
+
+        // Schedule the next cycle immediately to avoid duplicate triggers while this run is in flight.
+        setAutoConnectionsRunning(true);
+        setNextConnectionsRunAt(Date.now() + CONNECTIONS_AUTO_SYNC_INTERVAL_MS);
+        runImport('connections_export', { silent: true }).finally(() => {
+            setAutoConnectionsRunning(false);
+        });
+    }, [isConnectionsAutoMode, nextConnectionsRunAt, loading, autoConnectionsRunning]);
+
+    const toggleConnectionsAutoMode = () => {
+        setIsConnectionsAutoMode((prev) => {
+            if (!prev) {
+                setNextConnectionsRunAt(Date.now() + CONNECTIONS_AUTO_SYNC_INTERVAL_MS);
+                addToast('Auto mode enabled for Import My Connections (runs every 6 hours).', 'success');
+                return true;
+            }
+            setNextConnectionsRunAt(null);
+            setCountdownText('');
+            addToast('Auto mode disabled. You can run manually now.', 'warning');
+            return false;
+        });
     };
 
     // Fetch latest 1st degree import stats when "Import My Connections" is selected (and keep refetching so it stays current)
@@ -288,23 +391,53 @@ export default function LeadSearchPage() {
 
                             {importSource === 'connections_export' && (
                                 <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
-                                    {firstDegreeImportLoading ? (
-                                        <span className="inline-flex items-center gap-2 text-muted-foreground">
-                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                            Loading latest import…
-                                        </span>
-                                    ) : firstDegreeImportStats ? (
-                                        <span className="font-medium tabular-nums">
-                                            {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st degree connections imported
-                                            {firstDegreeImportStats.timestamp
-                                                ? ` as of ${new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
-                                                : ''}
-                                        </span>
-                                    ) : (
-                                        <span className="text-muted-foreground">
-                                            No 1st degree import yet. Run Engine to import your connections.
-                                        </span>
-                                    )}
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div>
+                                            {firstDegreeImportLoading ? (
+                                                <span className="inline-flex items-center gap-2 text-muted-foreground">
+                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    Loading latest import…
+                                                </span>
+                                            ) : firstDegreeImportStats ? (
+                                                <span className="font-medium tabular-nums">
+                                                    {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st degree connections imported
+                                                    {firstDegreeImportStats.timestamp
+                                                        ? ` as of ${new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+                                                        : ''}
+                                                </span>
+                                            ) : (
+                                                <span className="text-muted-foreground">
+                                                    No 1st degree import yet. Run Engine to import your connections.
+                                                </span>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={toggleConnectionsAutoMode}
+                                            className={cn(
+                                                'relative flex h-9 w-36 items-center rounded-full border px-1 transition-all duration-300',
+                                                isConnectionsAutoMode
+                                                    ? 'border-emerald-500/50 bg-emerald-500/15'
+                                                    : 'border-border/70 bg-background/80'
+                                            )}
+                                            aria-pressed={isConnectionsAutoMode}
+                                        >
+                                            <span
+                                                className={cn(
+                                                    'absolute top-1 bottom-1 w-[48%] rounded-full transition-all duration-300',
+                                                    isConnectionsAutoMode
+                                                        ? 'translate-x-[88%] bg-emerald-500 shadow-lg shadow-emerald-500/20'
+                                                        : 'translate-x-0 bg-muted'
+                                                )}
+                                            />
+                                            <span className={cn('z-10 w-1/2 text-[11px] font-semibold', !isConnectionsAutoMode ? 'text-foreground' : 'text-muted-foreground')}>
+                                                Manual
+                                            </span>
+                                            <span className={cn('z-10 w-1/2 text-[11px] font-semibold', isConnectionsAutoMode ? 'text-emerald-950' : 'text-muted-foreground')}>
+                                                Auto
+                                            </span>
+                                        </button>
+                                    </div>
                                 </div>
                             )}
 
@@ -313,11 +446,21 @@ export default function LeadSearchPage() {
                                     <Sparkles className="w-3.5 h-3.5 text-primary" />
                                     Leads are saved with source <strong>{importSource}</strong>. The engine uses its own saved search URL and LinkedIn connection.
                                 </p>
-                                <Button size="lg" className="w-full sm:w-auto gap-2 font-semibold shadow-lg shadow-primary/20 btn-shimmer group" disabled={loading} onClick={handleSearch}>
+                                <Button
+                                    size="lg"
+                                    className="w-full sm:w-auto gap-2 font-semibold shadow-lg shadow-primary/20 btn-shimmer group"
+                                    disabled={loading || (importSource === 'connections_export' && isConnectionsAutoMode)}
+                                    onClick={handleSearch}
+                                >
                                     {loading ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" />
                                             Syncing Data...
+                                        </>
+                                    ) : (importSource === 'connections_export' && isConnectionsAutoMode) ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4" />
+                                            Auto in {countdownText || '06:00:00'}
                                         </>
                                     ) : (
                                         <>
