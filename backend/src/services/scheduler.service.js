@@ -272,9 +272,24 @@ async function executeStepForLead(lead) {
                 }
             } catch (messageError) {
                 console.error(`❌ Failed to send LinkedIn message:`, messageError.message);
+                const { classifyLinkedInMessagingFailure } = await import('../utils/linkedinMessagingErrors.js');
+                const classified = classifyLinkedInMessagingFailure(messageError.message);
                 await pool.query(
                     `INSERT INTO automation_logs (campaign_id, lead_id, action, status, details) VALUES ($1, $2, $3, $4, $5)`,
-                    [lead.campaign_id, lead.lead_id, 'send_message', 'failed', JSON.stringify({ error: messageError.message })]
+                    [
+                        lead.campaign_id,
+                        lead.lead_id,
+                        'send_message',
+                        'failed',
+                        JSON.stringify({
+                            error: messageError.message,
+                            ...(classified && {
+                                failureReason: classified.failureReason,
+                                userMessage: classified.message,
+                                code: classified.code,
+                            }),
+                        }),
+                    ]
                 );
                 // Continue despite failure? Original code continued.
                 // We'll advance step to prevent stuck loop.

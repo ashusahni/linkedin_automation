@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, Component } from 'react';
+import { useState, useRef, useEffect, Component, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Play, Sparkles, Upload, FileText, X, Info, Download } from 'lucide-react';
@@ -13,6 +13,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 const CONNECTIONS_AUTO_SYNC_STORAGE_KEY = 'connectionsAutoSync_v1';
 const CONNECTIONS_AUTO_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const LEAD_SEARCH_ENGINE_RUN_KEY = 'leadSearchEngineRun_v1';
+const ENGINE_RESTORE_MAX_MS = 35 * 60 * 1000;
+const ENGINE_POLL_MS = 5000;
+const ENGINE_NO_RUNNING_GIVEUP_MS = 3 * 60 * 1000;
 
 const InfoTooltip = ({ content }) => (
     <Tooltip>
@@ -94,6 +98,12 @@ export default function LeadSearchPage() {
     });
     const [countdownText, setCountdownText] = useState('');
     const [autoConnectionsRunning, setAutoConnectionsRunning] = useState(false);
+    /** True when loading state was restored after leaving the page mid-import */
+    const [restoredEngineRun, setRestoredEngineRun] = useState(false);
+    const importSourceRef = useRef(importSource);
+    useEffect(() => {
+        importSourceRef.current = importSource;
+    }, [importSource]);
 
     const formatRemaining = (ms) => {
         const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -103,7 +113,7 @@ export default function LeadSearchPage() {
         return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
     };
 
-    const fetchFirstDegreeImportStats = () => {
+    const fetchFirstDegreeImportStats = useCallback(() => {
         setFirstDegreeImportLoading(true);
         axios.get('/api/leads/imports?limit=50')
             .then((res) => {
@@ -121,7 +131,7 @@ export default function LeadSearchPage() {
             })
             .catch(() => setFirstDegreeImportStats(null))
             .finally(() => setFirstDegreeImportLoading(false));
-    };
+    }, []);
 
     const runImport = async (source, options = {}) => {
         const { silent = false } = options;
@@ -129,6 +139,14 @@ export default function LeadSearchPage() {
             setLoading(true);
             setError(null);
             setResults(null);
+            try {
+                sessionStorage.setItem(
+                    LEAD_SEARCH_ENGINE_RUN_KEY,
+                    JSON.stringify({ source, startedAt: Date.now() })
+                );
+            } catch (_) {
+                /* ignore */
+            }
         }
 
         try {
@@ -165,15 +183,113 @@ export default function LeadSearchPage() {
             }
             addToast(errorCode ? `[${errorCode}] ${errorMsg}` : errorMsg, 'error', helpUrl ? { helpUrl } : {});
         } finally {
-            if (!silent) setLoading(false);
+            if (!silent) {
+                setLoading(false);
+                try {
+                    sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+                } catch (_) {
+                    /* ignore */
+                }
+            }
         }
     };
 
     const handleSearch = async (e) => {
         if (e && e.preventDefault) e.preventDefault();
         if (importSource === 'connections_export' && isConnectionsAutoMode) return;
+        setRestoredEngineRun(false);
         await runImport(importSource);
     };
+
+    // Restore "engine running" UI if user left Lead Search while an import was in progress
+    useEffect(() => {
+        try {
+            const raw = sessionStorage.getItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+            if (!raw) return;
+            const data = JSON.parse(raw);
+            if (!data?.source || !data?.startedAt) {
+                sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+                return;
+            }
+            const age = Date.now() - Number(data.startedAt);
+            if (age > ENGINE_RESTORE_MAX_MS) {
+                sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+                return;
+            }
+            setImportSource(data.source);
+            setLoading(true);
+            setRestoredEngineRun(true);
+        } catch (_) {
+            try {
+                sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+            } catch (__) {
+                /* ignore */
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!(restoredEngineRun && loading)) return undefined;
+
+        let cancelled = false;
+        const sawRunningRef = { current: false };
+        const pollStartedAt = Date.now();
+
+        const pollOnce = async () => {
+            try {
+                const res = await axios.get('/api/phantom/status-check');
+                if (cancelled) return;
+                const src = importSourceRef.current;
+                const running =
+                    src === 'connections_export'
+                        ? res.data?.statuses?.connections?.status === 'running'
+                        : res.data?.statuses?.search?.status === 'running';
+
+                if (running) sawRunningRef.current = true;
+
+                if (sawRunningRef.current && !running) {
+                    try {
+                        sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+                    } catch (_) {
+                        /* ignore */
+                    }
+                    setLoading(false);
+                    setRestoredEngineRun(false);
+                    addToast('Import finished while you were away. Stats updated.', 'success');
+                    if (importSourceRef.current === 'connections_export') {
+                        fetchFirstDegreeImportStats();
+                    }
+                    return;
+                }
+
+                if (!sawRunningRef.current && Date.now() - pollStartedAt > ENGINE_NO_RUNNING_GIVEUP_MS) {
+                    try {
+                        sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+                    } catch (_) {
+                        /* ignore */
+                    }
+                    setLoading(false);
+                    setRestoredEngineRun(false);
+                    addToast(
+                        'Could not confirm import status from here. Check PhantomBuster or run the engine again if needed.',
+                        'warning'
+                    );
+                    if (importSourceRef.current === 'connections_export') {
+                        fetchFirstDegreeImportStats();
+                    }
+                }
+            } catch (_) {
+                /* keep polling */
+            }
+        };
+
+        pollOnce();
+        const id = window.setInterval(pollOnce, ENGINE_POLL_MS);
+        return () => {
+            cancelled = true;
+            window.clearInterval(id);
+        };
+    }, [restoredEngineRun, loading, addToast, fetchFirstDegreeImportStats]);
 
     useEffect(() => {
         const payload = JSON.stringify({
@@ -239,7 +355,7 @@ export default function LeadSearchPage() {
             return;
         }
         fetchFirstDegreeImportStats();
-    }, [importSource]);
+    }, [importSource, fetchFirstDegreeImportStats]);
 
     const handleFileSelect = (type) => {
         setImportType(type);
@@ -356,15 +472,21 @@ export default function LeadSearchPage() {
                     </CardHeader>
                     <CardContent className="relative z-10">
                         <div className="space-y-6">
+                            {restoredEngineRun && loading && (
+                                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
+                                    An import was still running when you left this page. Showing the same phase until PhantomBuster finishes or we can confirm status.
+                                </div>
+                            )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {IMPORT_SOURCE_OPTIONS.map((opt) => (
                                     <motion.button
-                                        whileHover={{ scale: 1.01 }}
-                                        whileTap={{ scale: 0.98 }}
+                                        whileHover={{ scale: loading ? 1 : 1.01 }}
+                                        whileTap={{ scale: loading ? 1 : 0.98 }}
                                         key={opt.value}
                                         type="button"
-                                        onClick={() => setImportSource(opt.value)}
-                                        className={`relative flex items-start gap-4 p-5 rounded-2xl border-2 text-left transition-all overflow-hidden ${importSource === opt.value
+                                        disabled={loading}
+                                        onClick={() => !loading && setImportSource(opt.value)}
+                                        className={`relative flex items-start gap-4 p-5 rounded-2xl border-2 text-left transition-all overflow-hidden disabled:opacity-70 disabled:pointer-events-none ${importSource === opt.value
                                             ? 'border-primary bg-primary/5 shadow-glow-sm shadow-primary/20'
                                             : 'border-border/60 hover:border-primary/40 hover:bg-muted/30 bg-card/40'
                                             }`}

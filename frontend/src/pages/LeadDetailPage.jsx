@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { ArrowLeft, Linkedin, Save, Check, X, Edit2, ExternalLink, Zap, Sparkles, MessageCircle, Loader2, Mail } from 'lucide-react';
+import { ArrowLeft, Linkedin, Save, Check, X, Edit2, ExternalLink, Zap, Sparkles, MessageCircle, Loader2, Mail, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -27,6 +27,8 @@ export default function LeadDetailPage() {
     const [messageContent, setMessageContent] = useState('');
     const [sendingMessage, setSendingMessage] = useState(false);
     const [generatingMessage, setGeneratingMessage] = useState(false);
+    /** Last send failure: user-facing message + optional reason code from API */
+    const [messageSendError, setMessageSendError] = useState(null);
 
     // Gmail draft state
     const [gmailDraft, setGmailDraft] = useState(null); // { subject, body }
@@ -185,17 +187,26 @@ export default function LeadDetailPage() {
         }
         try {
             setSendingMessage(true);
+            setMessageSendError(null);
             await axios.post('/api/phantom/send-message-complete', {
                 leadId: Number(id),
                 linkedinUrl: lead.linkedin_url,
                 message: messageContent.trim()
-            }, { timeout: 120000 });
+            }, { timeout: 1800000 });
             addToast('LinkedIn message sent successfully!', 'success');
             setShowSendMessage(false);
             setMessageContent('');
         } catch (error) {
-            const msg = error.response?.data?.message || error.response?.data?.error || error.message;
-            addToast(msg || 'Failed to send message', 'error');
+            const data = error.response?.data;
+            const userMsg =
+                data?.message ||
+                data?.error ||
+                error.message ||
+                'Failed to send message';
+            const reason = data?.failureReason;
+            const tips = Array.isArray(data?.tips) ? data.tips : [];
+            setMessageSendError({ message: userMsg, failureReason: reason || null, tips, helpUrl: data?.helpUrl || null });
+            addToast(reason ? `${userMsg} (${reason})` : userMsg, 'error', data?.helpUrl ? { helpUrl: data.helpUrl } : {});
         } finally {
             setSendingMessage(false);
         }
@@ -397,13 +408,46 @@ export default function LeadDetailPage() {
                                 <>
                                     <Button
                                         className="w-full gap-2 bg-[#0A66C2] hover:bg-[#004182] text-white"
-                                        onClick={() => setShowSendMessage(!showSendMessage)}
+                                        onClick={() => {
+                                            setShowSendMessage(!showSendMessage);
+                                            setMessageSendError(null);
+                                        }}
                                     >
                                         <MessageCircle className="h-4 w-4" />
                                         Send LinkedIn Message
                                     </Button>
                                     {showSendMessage && (
                                         <div className="space-y-2 p-3 border rounded-lg bg-muted/30">
+                                            {messageSendError && (
+                                                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm space-y-2">
+                                                    <div className="flex items-start gap-2 font-medium text-destructive">
+                                                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                                                        <span>{messageSendError.message}</span>
+                                                    </div>
+                                                    {messageSendError.failureReason && (
+                                                        <p className="text-xs text-muted-foreground pl-6">
+                                                            Reason code: <code className="rounded bg-muted px-1">{messageSendError.failureReason}</code>
+                                                        </p>
+                                                    )}
+                                                    {messageSendError.tips?.length > 0 && (
+                                                        <ul className="list-disc list-inside text-xs text-muted-foreground pl-2 space-y-1">
+                                                            {messageSendError.tips.map((t, i) => (
+                                                                <li key={i}>{t}</li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                    {messageSendError.helpUrl && (
+                                                        <a
+                                                            href={messageSendError.helpUrl}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-xs font-semibold text-primary underline pl-6 inline-block"
+                                                        >
+                                                            Open automation dashboard
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            )}
                                             <label className="text-sm font-medium text-muted-foreground">Message</label>
                                             <textarea
                                                 value={messageContent}

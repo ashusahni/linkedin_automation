@@ -9,6 +9,7 @@ import { getSearchCriteriaFromCrm, pushLeadsToCrm, isCrmConfigured } from "../se
 import { buildLinkedInSearchUrl, buildSearchQueryFromCriteria } from "../utils/linkedinSearchUrl.js";
 import pool from "../db.js";
 import { NotificationService } from "../services/notification.service.js";
+import { classifyLinkedInMessagingFailure } from "../utils/linkedinMessagingErrors.js";
 
 // Link shown to user when sign-in or connection needs to be refreshed (no technical wording in UI)
 const FIX_CONNECTION_URL = "https://app.phantombuster.com";
@@ -20,6 +21,21 @@ const FIX_CONNECTION_URL = "https://app.phantombuster.com";
  */
 export function getPhantomErrorPayload(error) {
   const msg = String(error.message || "");
+
+  const messagingClassified = classifyLinkedInMessagingFailure(msg);
+  if (messagingClassified) {
+    return {
+      status: messagingClassified.status,
+      payload: {
+        success: false,
+        code: messagingClassified.code,
+        message: messagingClassified.message,
+        failureReason: messagingClassified.failureReason,
+        ...(messagingClassified.tips && { tips: messagingClassified.tips }),
+        helpUrl: FIX_CONNECTION_URL,
+      },
+    };
+  }
 
   // Sign-in expired or session/cookie missing — user-friendly message + link only
   if (
