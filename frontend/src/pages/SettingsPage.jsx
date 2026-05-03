@@ -31,8 +31,14 @@ import {
   Sparkles,
   ChevronRight,
   ChevronDown,
+  RefreshCw,
 } from "lucide-react";
 import PageGuide from "../components/PageGuide";
+import {
+  readLeadSearchPipelineStorage,
+  writeLeadSearchPipelineStorage,
+  LEAD_SEARCH_PIPELINE_SYNC_EVENT,
+} from "@/lib/leadSearchPipelineStorage.js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -194,6 +200,22 @@ const SettingsPage = () => {
     }
   });
   const [countdownLabel, setCountdownLabel] = useState("");
+
+  const [leadAutoSyncEnabled, setLeadAutoSyncEnabled] = useState(() =>
+    readLeadSearchPipelineStorage().enabled,
+  );
+
+  useEffect(() => {
+    const onLeadPipelineStorage = () => {
+      setLeadAutoSyncEnabled(readLeadSearchPipelineStorage().enabled);
+    };
+    window.addEventListener(LEAD_SEARCH_PIPELINE_SYNC_EVENT, onLeadPipelineStorage);
+    window.addEventListener("storage", onLeadPipelineStorage);
+    return () => {
+      window.removeEventListener(LEAD_SEARCH_PIPELINE_SYNC_EVENT, onLeadPipelineStorage);
+      window.removeEventListener("storage", onLeadPipelineStorage);
+    };
+  }, []);
 
   useEffect(() => {
     axios
@@ -842,7 +864,63 @@ const SettingsPage = () => {
         </p>
       </div>
 
-
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border/70 bg-muted/25 px-4 py-3">
+        <div className="flex items-start sm:items-center gap-3 min-w-0">
+          <div className="mt-0.5 sm:mt-0 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <RefreshCw className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-sm font-semibold text-foreground leading-tight">
+              Automated lead synchronization
+            </p>
+            <p className="text-xs text-muted-foreground leading-snug">
+              When on, the Lead Search page runs the connections import then the search import on a 6-hour cycle after each full run completes. Leave the timing as-is or turn it off anytime.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center justify-end shrink-0 pt-1 sm:pt-0">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={leadAutoSyncEnabled}
+            aria-label="Toggle automated lead synchronization"
+            onClick={() => {
+              const next = !leadAutoSyncEnabled;
+              writeLeadSearchPipelineStorage({ enabled: next });
+              setLeadAutoSyncEnabled(next);
+              addToast(
+                next
+                  ? "Automated lead sync is on."
+                  : "Automated lead sync is off.",
+                next ? "success" : "warning",
+              );
+            }}
+            className={`relative flex h-9 w-36 cursor-pointer items-center rounded-full border px-1 transition-all duration-300 ${
+              leadAutoSyncEnabled
+                ? "border-emerald-500/50 bg-emerald-500/15"
+                : "border-border/70 bg-background/80"
+            }`}
+          >
+            <span
+              className={`pointer-events-none absolute top-1 bottom-1 w-[48%] rounded-full transition-all duration-300 ${
+                leadAutoSyncEnabled
+                  ? "translate-x-[88%] bg-emerald-500 shadow-lg shadow-emerald-500/20"
+                  : "translate-x-0 bg-muted"
+              }`}
+            />
+            <span
+              className={`relative z-10 w-1/2 text-center text-[11px] font-semibold ${!leadAutoSyncEnabled ? "text-foreground" : "text-muted-foreground"}`}
+            >
+              Off
+            </span>
+            <span
+              className={`relative z-10 w-1/2 text-center text-[11px] font-semibold ${leadAutoSyncEnabled ? "text-emerald-950 dark:text-emerald-100" : "text-muted-foreground"}`}
+            >
+              On
+            </span>
+          </button>
+        </div>
+      </div>
 
       {/* 🆕 Automated Contact Sync Section - HIDDEN */}
       {false && (

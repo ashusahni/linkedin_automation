@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, Component, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
-import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Play, Sparkles, Upload, FileText, X, Info, Download } from 'lucide-react';
+import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Sparkles, Upload, FileText, X, Info, Download } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -10,11 +10,16 @@ import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../components/ui/tooltip';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
+import {
+    readLeadSearchPipelineStorage,
+    writeLeadSearchPipelineStorage,
+    LEAD_SEARCH_PIPELINE_SYNC_EVENT,
+} from '../lib/leadSearchPipelineStorage.js';
 
-const CONNECTIONS_AUTO_SYNC_STORAGE_KEY = 'connectionsAutoSync_v1';
-const CONNECTIONS_AUTO_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const PIPELINE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours between full cycles (after both phantoms finish)
 const LEAD_SEARCH_ENGINE_RUN_KEY = 'leadSearchEngineRun_v1';
-const ENGINE_RESTORE_MAX_MS = 35 * 60 * 1000;
+const LEAD_SEARCH_PIPELINE_RUN_KEY = 'leadSearchPipelineRun_v1';
+const PIPELINE_RESTORE_MAX_MS = 6 * 60 * 60 * 1000;
 const ENGINE_POLL_MS = 5000;
 const ENGINE_NO_RUNNING_GIVEUP_MS = 3 * 60 * 1000;
 
@@ -33,7 +38,7 @@ const InfoTooltip = ({ content }) => (
 
 const IMPORT_SOURCE_OPTIONS = [
     { value: 'connections_export', label: 'Import My Connections', envLabel: 'CONNECTIONS_EXPORT_SOURCE', description: 'Your 1st-degree LinkedIn connections', icon: Share2 },
-    { value: 'search_export', label: "Explore Bhavya's Connections", envLabel: 'SEARCH_EXPORT_SOURCE', description: 'Find 2nd & 3rd-degree LinkedIn leads', icon: Search },
+    { value: 'search_export', label: "Explore Bhavya's Connections", envLabel: 'SEARCH_EXPORT_SOURCE', description: 'Find 1st degree connections', icon: Search },
 ];
 
 class LeadSearchErrorBoundary extends Component {
@@ -59,10 +64,18 @@ class LeadSearchErrorBoundary extends Component {
     }
 }
 
+const initialPipeline = readLeadSearchPipelineStorage();
+
 export default function LeadSearchPage() {
     const { addToast } = useToast();
-    const [importSource, setImportSource] = useState('search_export');
-    const [loading, setLoading] = useState(false);
+    /** 'cooldown' = waiting for next cycle; 'connections' | 'search' = running that phantom */
+    const [pipelinePhase, setPipelinePhase] = useState('cooldown');
+    const [nextPipelineRunAt, setNextPipelineRunAt] = useState(initialPipeline.nextRunAt);
+    const [pipelineAutoSyncEnabled, setPipelineAutoSyncEnabled] = useState(initialPipeline.enabled);
+    const [countdownText, setCountdownText] = useState('');
+    const pipelineInFlightRef = useRef(false);
+    const [pipelineUiHint, setPipelineUiHint] = useState('');
+
     const [results, setResults] = useState(null);
     const [error, setError] = useState(null);
 
@@ -75,35 +88,8 @@ export default function LeadSearchPage() {
     // 1st degree (Phantom) import stats for widget: { saved, totalLeads, timestamp }
     const [firstDegreeImportStats, setFirstDegreeImportStats] = useState(null);
     const [firstDegreeImportLoading, setFirstDegreeImportLoading] = useState(false);
-    const [isConnectionsAutoMode, setIsConnectionsAutoMode] = useState(() => {
-        try {
-            const raw = localStorage.getItem(CONNECTIONS_AUTO_SYNC_STORAGE_KEY);
-            if (!raw) return false;
-            const parsed = JSON.parse(raw);
-            return parsed?.enabled === true;
-        } catch (_) {
-            return false;
-        }
-    });
-    const [nextConnectionsRunAt, setNextConnectionsRunAt] = useState(() => {
-        try {
-            const raw = localStorage.getItem(CONNECTIONS_AUTO_SYNC_STORAGE_KEY);
-            if (!raw) return null;
-            const parsed = JSON.parse(raw);
-            const ts = Number(parsed?.nextRunAt);
-            return Number.isFinite(ts) && ts > Date.now() ? ts : null;
-        } catch (_) {
-            return null;
-        }
-    });
-    const [countdownText, setCountdownText] = useState('');
-    const [autoConnectionsRunning, setAutoConnectionsRunning] = useState(false);
-    /** True when loading state was restored after leaving the page mid-import */
-    const [restoredEngineRun, setRestoredEngineRun] = useState(false);
-    const importSourceRef = useRef(importSource);
-    useEffect(() => {
-        importSourceRef.current = importSource;
-    }, [importSource]);
+    /** True when loading state was restored after leaving the page mid-pipeline */
+    const [restoredPipelineRun, setRestoredPipelineRun] = useState(false);
 
     const formatRemaining = (ms) => {
         const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -133,10 +119,28 @@ export default function LeadSearchPage() {
             .finally(() => setFirstDegreeImportLoading(false));
     }, []);
 
-    const runImport = async (source, options = {}) => {
-        const { silent = false } = options;
+    useEffect(() => {
+        fetchFirstDegreeImportStats();
+    }, [fetchFirstDegreeImportStats]);
+
+    useEffect(() => {
+        const sync = () => {
+            const cfg = readLeadSearchPipelineStorage();
+            setNextPipelineRunAt(cfg.nextRunAt);
+            setPipelineAutoSyncEnabled(cfg.enabled);
+        };
+        window.addEventListener(LEAD_SEARCH_PIPELINE_SYNC_EVENT, sync);
+        window.addEventListener('storage', sync);
+        return () => {
+            window.removeEventListener(LEAD_SEARCH_PIPELINE_SYNC_EVENT, sync);
+            window.removeEventListener('storage', sync);
+        };
+    }, []);
+
+    /** @returns {Promise<boolean>} true if HTTP success and no thrown error */
+    const runImport = useCallback(async (source, options = {}) => {
+        const { silent = false, quietToast = false } = options;
         if (!silent) {
-            setLoading(true);
             setError(null);
             setResults(null);
             try {
@@ -162,11 +166,14 @@ export default function LeadSearchPage() {
                 fetchFirstDegreeImportStats();
             }
 
-            if (response.data.totalLeads > 0) {
-                addToast(`✅ Found ${response.data.totalLeads} leads and saved ${response.data.savedToDatabase} to database!`, 'success');
-            } else {
-                addToast('⚠️ No new Leads found', 'warning');
+            if (!quietToast) {
+                if (response.data.totalLeads > 0) {
+                    addToast(`✅ Found ${response.data.totalLeads} leads and saved ${response.data.savedToDatabase} to database!`, 'success');
+                } else {
+                    addToast('⚠️ No new Leads found', 'warning');
+                }
             }
+            return true;
         } catch (err) {
             const backend = err.response?.data;
             const errorMsg = (backend && (backend.message || backend.error)) || err.message || 'Failed to search leads';
@@ -182,9 +189,9 @@ export default function LeadSearchPage() {
                 });
             }
             addToast(errorCode ? `[${errorCode}] ${errorMsg}` : errorMsg, 'error', helpUrl ? { helpUrl } : {});
+            return false;
         } finally {
             if (!silent) {
-                setLoading(false);
                 try {
                     sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
                 } catch (_) {
@@ -192,36 +199,130 @@ export default function LeadSearchPage() {
                 }
             }
         }
-    };
+    }, [addToast, fetchFirstDegreeImportStats]);
 
-    const handleSearch = async (e) => {
-        if (e && e.preventDefault) e.preventDefault();
-        if (importSource === 'connections_export' && isConnectionsAutoMode) return;
-        setRestoredEngineRun(false);
-        await runImport(importSource);
-    };
+    const finishCooldown = useCallback(() => {
+        const next = Date.now() + PIPELINE_INTERVAL_MS;
+        setPipelinePhase('cooldown');
+        setNextPipelineRunAt(next);
+        setPipelineUiHint('');
+        writeLeadSearchPipelineStorage({ nextRunAt: next });
+        pipelineInFlightRef.current = false;
+        try {
+            sessionStorage.removeItem(LEAD_SEARCH_PIPELINE_RUN_KEY);
+        } catch (_) {
+            /* ignore */
+        }
+        fetchFirstDegreeImportStats();
+    }, [fetchFirstDegreeImportStats]);
 
-    // Restore "engine running" UI if user left Lead Search while an import was in progress
+    const runFullPipeline = useCallback(async () => {
+        if (!pipelineAutoSyncEnabled) {
+            pipelineInFlightRef.current = false;
+            return;
+        }
+        if (pipelineInFlightRef.current) return;
+        pipelineInFlightRef.current = true;
+        setError(null);
+        setResults(null);
+        setPipelineUiHint('');
+
+        const writeRun = (step) => {
+            try {
+                sessionStorage.setItem(
+                    LEAD_SEARCH_PIPELINE_RUN_KEY,
+                    JSON.stringify({ pipeline: true, step, startedAt: Date.now() })
+                );
+            } catch (_) {
+                /* ignore */
+            }
+        };
+
+        let okAll = true;
+        try {
+            setPipelinePhase('connections');
+            setPipelineUiHint('Step 1 of 2: Import My Connections (1st degree)…');
+            writeRun('connections');
+            const ok1 = await runImport('connections_export', { silent: true, quietToast: true });
+            if (!ok1) okAll = false;
+
+            setPipelinePhase('search');
+            setPipelineUiHint("Step 2 of 2: Explore Bhavya's Connections (1st degree)…");
+            writeRun('search');
+            const ok2 = await runImport('search_export', { silent: true, quietToast: true });
+            if (!ok2) okAll = false;
+
+            if (okAll) {
+                addToast('Lead search pipeline completed (connections + search). Next cycle in 6 hours.', 'success');
+            } else {
+                addToast('Pipeline finished with errors on one or more steps. Next cycle in 6 hours.', 'warning');
+            }
+        } finally {
+            finishCooldown();
+        }
+    }, [addToast, finishCooldown, runImport, pipelineAutoSyncEnabled]);
+
+    useEffect(() => {
+        if (pipelinePhase !== 'cooldown') {
+            setCountdownText('');
+            return undefined;
+        }
+        const tick = () => {
+            const remaining = nextPipelineRunAt - Date.now();
+            if (remaining <= 0) {
+                setCountdownText('00:00:00');
+                return;
+            }
+            setCountdownText(formatRemaining(remaining));
+        };
+        tick();
+        const timer = window.setInterval(tick, 1000);
+        return () => window.clearInterval(timer);
+    }, [pipelinePhase, nextPipelineRunAt]);
+
+    useEffect(() => {
+        if (!pipelineAutoSyncEnabled) return;
+        if (pipelinePhase !== 'cooldown') return;
+        if (restoredPipelineRun) return;
+        if (pipelineInFlightRef.current) return;
+        if (!Number.isFinite(nextPipelineRunAt)) return;
+        if (Date.now() < nextPipelineRunAt) return;
+        void runFullPipeline();
+    }, [pipelinePhase, nextPipelineRunAt, restoredPipelineRun, runFullPipeline, pipelineAutoSyncEnabled]);
+
     useEffect(() => {
         try {
-            const raw = sessionStorage.getItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+            const raw = sessionStorage.getItem(LEAD_SEARCH_PIPELINE_RUN_KEY);
             if (!raw) return;
             const data = JSON.parse(raw);
-            if (!data?.source || !data?.startedAt) {
-                sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+            if (!data?.pipeline || !data?.step || !data?.startedAt) {
+                sessionStorage.removeItem(LEAD_SEARCH_PIPELINE_RUN_KEY);
+                return;
+            }
+            if (!readLeadSearchPipelineStorage().enabled) {
+                try {
+                    sessionStorage.removeItem(LEAD_SEARCH_PIPELINE_RUN_KEY);
+                } catch (_) {
+                    /* ignore */
+                }
                 return;
             }
             const age = Date.now() - Number(data.startedAt);
-            if (age > ENGINE_RESTORE_MAX_MS) {
-                sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+            if (age > PIPELINE_RESTORE_MAX_MS) {
+                sessionStorage.removeItem(LEAD_SEARCH_PIPELINE_RUN_KEY);
                 return;
             }
-            setImportSource(data.source);
-            setLoading(true);
-            setRestoredEngineRun(true);
+            pipelineInFlightRef.current = true;
+            setRestoredPipelineRun(true);
+            setPipelinePhase(data.step === 'search' ? 'search' : 'connections');
+            setPipelineUiHint(
+                data.step === 'search'
+                    ? "Resuming: Explore Bhavya's Connections…"
+                    : 'Resuming: Import My Connections…'
+            );
         } catch (_) {
             try {
-                sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+                sessionStorage.removeItem(LEAD_SEARCH_PIPELINE_RUN_KEY);
             } catch (__) {
                 /* ignore */
             }
@@ -229,54 +330,77 @@ export default function LeadSearchPage() {
     }, []);
 
     useEffect(() => {
-        if (!(restoredEngineRun && loading)) return undefined;
+        if (!restoredPipelineRun) return undefined;
 
         let cancelled = false;
-        const sawRunningRef = { current: false };
+        const stepRef = { current: 'connections' };
+        try {
+            const raw = sessionStorage.getItem(LEAD_SEARCH_PIPELINE_RUN_KEY);
+            const data = raw ? JSON.parse(raw) : null;
+            stepRef.current = data?.step === 'search' ? 'search' : 'connections';
+        } catch (_) {
+            stepRef.current = 'connections';
+        }
+
+        const sawConnRunning = { current: false };
+        const sawSearchRunning = { current: false };
         const pollStartedAt = Date.now();
 
         const pollOnce = async () => {
             try {
-                const res = await axios.get('/api/phantom/status-check');
-                if (cancelled) return;
-                const src = importSourceRef.current;
-                const running =
-                    src === 'connections_export'
-                        ? res.data?.statuses?.connections?.status === 'running'
-                        : res.data?.statuses?.search?.status === 'running';
-
-                if (running) sawRunningRef.current = true;
-
-                if (sawRunningRef.current && !running) {
+                if (!readLeadSearchPipelineStorage().enabled) {
                     try {
-                        sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
+                        sessionStorage.removeItem(LEAD_SEARCH_PIPELINE_RUN_KEY);
                     } catch (_) {
                         /* ignore */
                     }
-                    setLoading(false);
-                    setRestoredEngineRun(false);
-                    addToast('Import finished while you were away. Stats updated.', 'success');
-                    if (importSourceRef.current === 'connections_export') {
-                        fetchFirstDegreeImportStats();
+                    pipelineInFlightRef.current = false;
+                    setRestoredPipelineRun(false);
+                    setPipelinePhase('cooldown');
+                    return;
+                }
+                const res = await axios.get('/api/phantom/status-check');
+                if (cancelled) return;
+                const connRun = res.data?.statuses?.connections?.status === 'running';
+                const searchRun = res.data?.statuses?.search?.status === 'running';
+
+                if (connRun) sawConnRunning.current = true;
+                if (searchRun) sawSearchRunning.current = true;
+
+                const connDoneGuess =
+                    stepRef.current === 'connections' &&
+                    !connRun &&
+                    (sawConnRunning.current ||
+                        Date.now() - pollStartedAt > ENGINE_NO_RUNNING_GIVEUP_MS);
+
+                if (stepRef.current === 'connections' && connDoneGuess) {
+                    try {
+                        sessionStorage.setItem(
+                            LEAD_SEARCH_PIPELINE_RUN_KEY,
+                            JSON.stringify({ pipeline: true, step: 'search', startedAt: Date.now() })
+                        );
+                    } catch (_) {
+                        /* ignore */
                     }
+                    setPipelinePhase('search');
+                    setPipelineUiHint("Step 2 of 2: Explore Bhavya's Connections…");
+                    await runImport('search_export', { silent: true, quietToast: true });
+                    finishCooldown();
+                    setRestoredPipelineRun(false);
+                    addToast('Lead search pipeline resumed and finished.', 'success');
                     return;
                 }
 
-                if (!sawRunningRef.current && Date.now() - pollStartedAt > ENGINE_NO_RUNNING_GIVEUP_MS) {
-                    try {
-                        sessionStorage.removeItem(LEAD_SEARCH_ENGINE_RUN_KEY);
-                    } catch (_) {
-                        /* ignore */
-                    }
-                    setLoading(false);
-                    setRestoredEngineRun(false);
-                    addToast(
-                        'Could not confirm import status from here. Check PhantomBuster or run the engine again if needed.',
-                        'warning'
-                    );
-                    if (importSourceRef.current === 'connections_export') {
-                        fetchFirstDegreeImportStats();
-                    }
+                const searchDoneGuess =
+                    stepRef.current === 'search' &&
+                    !searchRun &&
+                    (sawSearchRunning.current ||
+                        Date.now() - pollStartedAt > ENGINE_NO_RUNNING_GIVEUP_MS);
+
+                if (searchDoneGuess) {
+                    finishCooldown();
+                    setRestoredPipelineRun(false);
+                    addToast('Lead search pipeline finished while you were away.', 'success');
                 }
             } catch (_) {
                 /* keep polling */
@@ -289,73 +413,7 @@ export default function LeadSearchPage() {
             cancelled = true;
             window.clearInterval(id);
         };
-    }, [restoredEngineRun, loading, addToast, fetchFirstDegreeImportStats]);
-
-    useEffect(() => {
-        const payload = JSON.stringify({
-            enabled: isConnectionsAutoMode,
-            nextRunAt: isConnectionsAutoMode ? nextConnectionsRunAt : null,
-        });
-        localStorage.setItem(CONNECTIONS_AUTO_SYNC_STORAGE_KEY, payload);
-    }, [isConnectionsAutoMode, nextConnectionsRunAt]);
-
-    useEffect(() => {
-        if (!isConnectionsAutoMode) {
-            setCountdownText('');
-            return;
-        }
-
-        if (!nextConnectionsRunAt || nextConnectionsRunAt <= Date.now()) {
-            setNextConnectionsRunAt(Date.now() + CONNECTIONS_AUTO_SYNC_INTERVAL_MS);
-            return;
-        }
-
-        const timer = window.setInterval(() => {
-            const remaining = nextConnectionsRunAt - Date.now();
-            if (remaining <= 0) {
-                setCountdownText('00:00:00');
-                return;
-            }
-            setCountdownText(formatRemaining(remaining));
-        }, 1000);
-
-        return () => window.clearInterval(timer);
-    }, [isConnectionsAutoMode, nextConnectionsRunAt]);
-
-    useEffect(() => {
-        if (!isConnectionsAutoMode || !nextConnectionsRunAt || loading || autoConnectionsRunning) return;
-        if (Date.now() < nextConnectionsRunAt) return;
-
-        // Schedule the next cycle immediately to avoid duplicate triggers while this run is in flight.
-        setAutoConnectionsRunning(true);
-        setNextConnectionsRunAt(Date.now() + CONNECTIONS_AUTO_SYNC_INTERVAL_MS);
-        runImport('connections_export', { silent: true }).finally(() => {
-            setAutoConnectionsRunning(false);
-        });
-    }, [isConnectionsAutoMode, nextConnectionsRunAt, loading, autoConnectionsRunning]);
-
-    const toggleConnectionsAutoMode = () => {
-        setIsConnectionsAutoMode((prev) => {
-            if (!prev) {
-                setNextConnectionsRunAt(Date.now() + CONNECTIONS_AUTO_SYNC_INTERVAL_MS);
-                addToast('Auto mode enabled for Import My Connections (runs every 6 hours).', 'success');
-                return true;
-            }
-            setNextConnectionsRunAt(null);
-            setCountdownText('');
-            addToast('Auto mode disabled. You can run manually now.', 'warning');
-            return false;
-        });
-    };
-
-    // Fetch latest 1st degree import stats when "Import My Connections" is selected (and keep refetching so it stays current)
-    useEffect(() => {
-        if (importSource !== 'connections_export') {
-            setFirstDegreeImportStats(null);
-            return;
-        }
-        fetchFirstDegreeImportStats();
-    }, [importSource, fetchFirstDegreeImportStats]);
+    }, [restoredPipelineRun, addToast, finishCooldown, runImport]);
 
     const handleFileSelect = (type) => {
         setImportType(type);
@@ -464,133 +522,125 @@ export default function LeadSearchPage() {
                             <div className="p-2 bg-[#0077b5]/10 rounded-xl mr-1">
                                 <Linkedin className="h-5 w-5 text-[#0077b5]" />
                             </div>
-                            Select Data Source
+                            Automated lead pipeline
                         </CardTitle>
                         <CardDescription className="text-sm">
-                            Choose which data strategy to run. Configuration is managed in your external provider settings.
+                            Every 6 hours (after the previous cycle fully finishes): Import My Connections runs first, then Explore Bhavya’s Connections. PhantomBuster uses your saved search and LinkedIn session. Turn automation on or off from{' '}
+                            <Link to="/settings" className="text-primary font-medium underline underline-offset-2 hover:no-underline">
+                                Settings
+                            </Link>
+                            .
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="relative z-10">
                         <div className="space-y-6">
-                            {restoredEngineRun && loading && (
+                            {!pipelineAutoSyncEnabled && (
+                                <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-foreground">
+                                    <span className="font-medium">Automated sync is off.</span>{' '}
+                                    Enable &quot;Automated lead synchronization&quot; at the top of{' '}
+                                    <Link to="/settings" className="text-primary underline underline-offset-2 hover:no-underline">
+                                        Settings
+                                    </Link>{' '}
+                                    to resume scheduled imports.
+                                </div>
+                            )}
+                            {restoredPipelineRun && (
                                 <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
-                                    An import was still running when you left this page. Showing the same phase until PhantomBuster finishes or we can confirm status.
+                                    A pipeline run was in progress when you left this page. Resuming after PhantomBuster status is confirmed.
                                 </div>
                             )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {IMPORT_SOURCE_OPTIONS.map((opt) => (
-                                    <motion.button
-                                        whileHover={{ scale: loading ? 1 : 1.01 }}
-                                        whileTap={{ scale: loading ? 1 : 0.98 }}
-                                        key={opt.value}
-                                        type="button"
-                                        disabled={loading}
-                                        onClick={() => !loading && setImportSource(opt.value)}
-                                        className={`relative flex items-start gap-4 p-5 rounded-2xl border-2 text-left transition-all overflow-hidden disabled:opacity-70 disabled:pointer-events-none ${importSource === opt.value
-                                            ? 'border-primary bg-primary/5 shadow-glow-sm shadow-primary/20'
-                                            : 'border-border/60 hover:border-primary/40 hover:bg-muted/30 bg-card/40'
-                                            }`}
-                                    >
-                                        {importSource === opt.value && (
-                                            <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent pointer-events-none" />
-                                        )}
-                                        <div className={`p-3 rounded-xl transition-all ${importSource === opt.value ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/30' : 'bg-muted text-muted-foreground'}`}>
-                                            <opt.icon className="h-6 w-6" />
-                                        </div>
-                                        <div className="min-w-0 flex-1 relative z-10">
-                                            <div className="flex items-center justify-between mb-1">
-                                                <span className="font-bold text-base text-foreground block">{opt.label}</span>
-                                                {importSource === opt.value && <CheckCircle2 className="h-5 w-5 text-primary shrink-0 animate-scale-in" />}
+                                {IMPORT_SOURCE_OPTIONS.map((opt, idx) => {
+                                    const stepOrder = idx + 1;
+                                    const active =
+                                        (opt.value === 'connections_export' && pipelinePhase === 'connections') ||
+                                        (opt.value === 'search_export' && pipelinePhase === 'search');
+                                    return (
+                                        <motion.div
+                                            key={opt.value}
+                                            className={cn(
+                                                'relative flex items-start gap-4 p-5 rounded-2xl border-2 text-left overflow-hidden',
+                                                active
+                                                    ? 'border-primary bg-primary/5 shadow-glow-sm shadow-primary/20'
+                                                    : 'border-border/60 bg-card/40'
+                                            )}
+                                        >
+                                            {active && (
+                                                <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent pointer-events-none" />
+                                            )}
+                                            <div
+                                                className={cn(
+                                                    'p-3 rounded-xl transition-all shrink-0',
+                                                    active ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/30' : 'bg-muted text-muted-foreground'
+                                                )}
+                                            >
+                                                <opt.icon className="h-6 w-6" />
                                             </div>
-                                            <span className="inline-block text-[10px] font-mono font-medium text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full mb-2">
-                                                {opt.envLabel}
-                                            </span>
-                                            <p className="text-xs text-muted-foreground leading-relaxed">{opt.description}</p>
-                                        </div>
-                                    </motion.button>
-                                ))}
+                                            <div className="min-w-0 flex-1 relative z-10">
+                                                <div className="flex items-center justify-between mb-1 gap-2">
+                                                    <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+                                                        Step {stepOrder}
+                                                    </Badge>
+                                                    {active && <Loader2 className="h-5 w-5 text-primary shrink-0 animate-spin" />}
+                                                </div>
+                                                <span className="font-bold text-base text-foreground block">{opt.label}</span>
+                                                <span className="inline-block text-[10px] font-mono font-medium text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full my-2">
+                                                    {opt.envLabel}
+                                                </span>
+                                                <p className="text-xs text-muted-foreground leading-relaxed">{opt.description}</p>
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })}
                             </div>
 
-                            {importSource === 'connections_export' && (
-                                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
-                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                        <div>
-                                            {firstDegreeImportLoading ? (
-                                                <span className="inline-flex items-center gap-2 text-muted-foreground">
-                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                    Loading latest import…
-                                                </span>
-                                            ) : firstDegreeImportStats ? (
-                                                <span className="font-medium tabular-nums">
-                                                    {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st degree connections imported
-                                                    {firstDegreeImportStats.timestamp
-                                                        ? ` as of ${new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
-                                                        : ''}
-                                                </span>
-                                            ) : (
-                                                <span className="text-muted-foreground">
-                                                    No 1st degree import yet. Run Engine to import your connections.
-                                                </span>
-                                            )}
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={toggleConnectionsAutoMode}
-                                            className={cn(
-                                                'relative flex h-9 w-36 items-center rounded-full border px-1 transition-all duration-300',
-                                                isConnectionsAutoMode
-                                                    ? 'border-emerald-500/50 bg-emerald-500/15'
-                                                    : 'border-border/70 bg-background/80'
-                                            )}
-                                            aria-pressed={isConnectionsAutoMode}
-                                        >
-                                            <span
-                                                className={cn(
-                                                    'absolute top-1 bottom-1 w-[48%] rounded-full transition-all duration-300',
-                                                    isConnectionsAutoMode
-                                                        ? 'translate-x-[88%] bg-emerald-500 shadow-lg shadow-emerald-500/20'
-                                                        : 'translate-x-0 bg-muted'
-                                                )}
-                                            />
-                                            <span className={cn('z-10 w-1/2 text-[11px] font-semibold', !isConnectionsAutoMode ? 'text-foreground' : 'text-muted-foreground')}>
-                                                Manual
-                                            </span>
-                                            <span className={cn('z-10 w-1/2 text-[11px] font-semibold', isConnectionsAutoMode ? 'text-emerald-950' : 'text-muted-foreground')}>
-                                                Auto
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
+                            <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+                                {firstDegreeImportLoading ? (
+                                    <span className="inline-flex items-center gap-2 text-muted-foreground">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        Loading latest 1st-degree import…
+                                    </span>
+                                ) : firstDegreeImportStats ? (
+                                    <span className="font-medium tabular-nums">
+                                        {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st degree connections imported
+                                        {firstDegreeImportStats.timestamp
+                                            ? ` as of ${new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+                                            : ''}
+                                    </span>
+                                ) : (
+                                    <span className="text-muted-foreground">No 1st degree import recorded yet — stats will appear after the first connections step completes.</span>
+                                )}
+                            </div>
 
-                            <div className="flex flex-col sm:flex-row items-center justify-between pt-6 border-t border-border/50 gap-4">
-                                <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                                    <Sparkles className="w-3.5 h-3.5 text-primary" />
-                                    Leads are saved with source <strong>{importSource}</strong>. The engine uses its own saved search URL and LinkedIn connection.
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between pt-6 border-t border-border/50 gap-4">
+                                <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-1 min-w-0">
+                                    <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                                    <span>
+                                        Leads use sources <strong className="text-foreground">connections_export</strong> then{' '}
+                                        <strong className="text-foreground">search_export</strong>. Next 6-hour window starts only after both steps finish.
+                                    </span>
                                 </p>
-                                <Button
-                                    size="lg"
-                                    className="w-full sm:w-auto gap-2 font-semibold shadow-lg shadow-primary/20 btn-shimmer group"
-                                    disabled={loading || (importSource === 'connections_export' && isConnectionsAutoMode)}
-                                    onClick={handleSearch}
-                                >
-                                    {loading ? (
-                                        <>
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                            Syncing Data...
-                                        </>
-                                    ) : (importSource === 'connections_export' && isConnectionsAutoMode) ? (
-                                        <>
-                                            <Loader2 className="h-4 w-4" />
-                                            Auto in {countdownText || '06:00:00'}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Play className="h-4 w-4 fill-current group-hover:scale-110 transition-transform" />
-                                            Run Engine
-                                        </>
+                                <div className="flex flex-col items-stretch sm:items-end gap-1 shrink-0 w-full sm:w-auto min-w-[200px]">
+                                    {(pipelinePhase !== 'cooldown' || restoredPipelineRun) && (
+                                        <div className="flex items-center gap-2 justify-center sm:justify-end text-sm font-medium text-foreground">
+                                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                            <span className="text-center sm:text-right">{pipelineUiHint || 'Running pipeline…'}</span>
+                                        </div>
                                     )}
-                                </Button>
+                                    {pipelinePhase === 'cooldown' && !restoredPipelineRun && pipelineAutoSyncEnabled && (
+                                        <div className="rounded-lg border border-primary/30 bg-background/80 px-4 py-3 text-center sm:text-right">
+                                            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Next full cycle in</div>
+                                            <div className="text-xl font-bold tabular-nums text-primary tracking-tight">
+                                                {countdownText || formatRemaining(Math.max(0, nextPipelineRunAt - Date.now()))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {pipelinePhase === 'cooldown' && !restoredPipelineRun && !pipelineAutoSyncEnabled && (
+                                        <div className="rounded-lg border border-border bg-muted/50 px-4 py-3 text-center sm:text-right text-sm text-muted-foreground">
+                                            Scheduled sync paused
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </CardContent>
@@ -762,7 +812,10 @@ export default function LeadSearchPage() {
                                     Import Completed Successfully
                                 </CardTitle>
                                 <CardDescription className="flex items-center gap-2 mt-1">
-                                    Data Source: <Badge variant="outline" className="font-mono bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">{importSource}</Badge>
+                                    Data Source:{' '}
+                                    <Badge variant="outline" className="font-mono bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">
+                                        connections_export → search_export
+                                    </Badge>
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
