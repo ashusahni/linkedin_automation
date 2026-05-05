@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, Component, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
-import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Sparkles, Upload, FileText, X, Info, Download } from 'lucide-react';
+import { Search, Linkedin, Loader2, CheckCircle2, AlertCircle, Share2, Sparkles, Upload, FileText, X, Info, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -88,6 +88,7 @@ export default function LeadSearchPage() {
     // 1st degree (Phantom) import stats for widget: { saved, totalLeads, timestamp }
     const [firstDegreeImportStats, setFirstDegreeImportStats] = useState(null);
     const [firstDegreeImportLoading, setFirstDegreeImportLoading] = useState(false);
+    const [showImportBreakdown, setShowImportBreakdown] = useState(false);
     /** True when loading state was restored after leaving the page mid-pipeline */
     const [restoredPipelineRun, setRestoredPipelineRun] = useState(false);
 
@@ -106,13 +107,20 @@ export default function LeadSearchPage() {
                 const rows = res.data || [];
                 const last = rows.find((r) => r.source === 'connections_export');
                 if (last) {
+                    const totalLeads = Number(last.total_leads ?? 0);
+                    const saved = Number(last.saved ?? 0);
+                    const duplicates = Number.isFinite(Number(last.duplicates))
+                        ? Number(last.duplicates)
+                        : Math.max(0, totalLeads - saved);
                     setFirstDegreeImportStats({
-                        saved: last.saved ?? 0,
-                        totalLeads: last.total_leads ?? 0,
+                        saved,
+                        totalLeads,
+                        duplicates,
                         timestamp: last.timestamp,
                     });
                 } else {
                     setFirstDegreeImportStats(null);
+                    setShowImportBreakdown(false);
                 }
             })
             .catch(() => setFirstDegreeImportStats(null))
@@ -601,12 +609,49 @@ export default function LeadSearchPage() {
                                         Loading latest 1st-degree import…
                                     </span>
                                 ) : firstDegreeImportStats ? (
-                                    <span className="font-medium tabular-nums">
-                                        {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st degree connections imported
-                                        {firstDegreeImportStats.timestamp
-                                            ? ` as of ${new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
-                                            : ''}
-                                    </span>
+                                    <div className="space-y-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowImportBreakdown((prev) => !prev)}
+                                            className="w-full flex items-center justify-between gap-3 text-left rounded-md hover:bg-primary/10 px-2 py-1.5 transition-colors"
+                                        >
+                                            <span className="font-medium tabular-nums">
+                                                {firstDegreeImportStats.saved} / {firstDegreeImportStats.totalLeads} 1st degree connections imported
+                                                {firstDegreeImportStats.timestamp
+                                                    ? ` as of ${new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+                                                    : ''}
+                                            </span>
+                                            {showImportBreakdown ? (
+                                                <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                            ) : (
+                                                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                            )}
+                                        </button>
+                                        {showImportBreakdown && (
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                                                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                                                    <div className="text-muted-foreground">New leads</div>
+                                                    <div className="font-semibold tabular-nums">{firstDegreeImportStats.totalLeads}</div>
+                                                </div>
+                                                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                                                    <div className="text-muted-foreground">Saved leads</div>
+                                                    <div className="font-semibold tabular-nums">{firstDegreeImportStats.saved}</div>
+                                                </div>
+                                                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                                                    <div className="text-muted-foreground">Duplicate leads</div>
+                                                    <div className="font-semibold tabular-nums">{firstDegreeImportStats.duplicates}</div>
+                                                </div>
+                                                <div className="rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+                                                    <div className="text-muted-foreground">Imported last time</div>
+                                                    <div className="font-semibold">
+                                                        {firstDegreeImportStats.timestamp
+                                                            ? new Date(firstDegreeImportStats.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+                                                            : 'N/A'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 ) : (
                                     <span className="text-muted-foreground">No 1st degree import recorded yet — stats will appear after the first connections step completes.</span>
                                 )}
