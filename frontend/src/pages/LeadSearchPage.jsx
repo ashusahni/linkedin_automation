@@ -196,6 +196,11 @@ export default function LeadSearchPage() {
                     helpUrl,
                 });
             }
+            // If something is already running in PhantomBuster, don't show scary/technical errors.
+            if (silent && errorCode === 'PB_MAX_PARALLELISM') {
+                setPipelineUiHint('Lead extraction is already running…');
+                return false;
+            }
             addToast(errorCode ? `[${errorCode}] ${errorMsg}` : errorMsg, 'error', helpUrl ? { helpUrl } : {});
             return false;
         } finally {
@@ -249,21 +254,22 @@ export default function LeadSearchPage() {
         let okAll = true;
         try {
             setPipelinePhase('connections');
-            setPipelineUiHint('Step 1 of 2: Import My Connections (1st degree)…');
+            setPipelineUiHint('Extracting leads from your connections…');
             writeRun('connections');
             const ok1 = await runImport('connections_export', { silent: true, quietToast: true });
             if (!ok1) okAll = false;
 
             setPipelinePhase('search');
-            setPipelineUiHint("Step 2 of 2: Explore Bhavya's Connections (1st degree)…");
+            setPipelineUiHint("Extracting leads from Bhavya’s connections…");
             writeRun('search');
             const ok2 = await runImport('search_export', { silent: true, quietToast: true });
             if (!ok2) okAll = false;
 
             if (okAll) {
-                addToast('Lead search pipeline completed (connections + search). Next cycle in 6 hours.', 'success');
+                addToast('Lead extraction completed. Next cycle starts in 6 hours.', 'success');
             } else {
-                addToast('Pipeline finished with errors on one or more steps. Next cycle in 6 hours.', 'warning');
+                // Keep calm + non-technical, and use a green theme as requested.
+                addToast('Lead extraction finished with some issues. Next cycle starts in 6 hours.', 'success');
             }
         } finally {
             finishCooldown();
@@ -530,10 +536,10 @@ export default function LeadSearchPage() {
                             <div className="p-2 bg-[#0077b5]/10 rounded-xl mr-1">
                                 <Linkedin className="h-5 w-5 text-[#0077b5]" />
                             </div>
-                            Automated lead pipeline
+                            Automated lead extraction
                         </CardTitle>
                         <CardDescription className="text-sm">
-                            Every 6 hours (after the previous cycle fully finishes): Import My Connections runs first, then Explore Bhavya’s Connections. PhantomBuster uses your saved search and LinkedIn session. Turn automation on or off from{' '}
+                            Every 6 hours (after the previous cycle fully finishes): we extract leads from your connections first, then from Bhavya’s connections. Qualified leads are saved and added to your CRM (if connected). Turn automation on or off from{' '}
                             <Link to="/settings" className="text-primary font-medium underline underline-offset-2 hover:no-underline">
                                 Settings
                             </Link>
@@ -554,7 +560,7 @@ export default function LeadSearchPage() {
                             )}
                             {restoredPipelineRun && (
                                 <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
-                                    A pipeline run was in progress when you left this page. Resuming after PhantomBuster status is confirmed.
+                                    Lead extraction is currently running. New qualified leads will be saved automatically, and added to your CRM if it’s connected.
                                 </div>
                             )}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -661,15 +667,15 @@ export default function LeadSearchPage() {
                                 <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-1 min-w-0">
                                     <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
                                     <span>
-                                        Leads use sources <strong className="text-foreground">connections_export</strong> then{' '}
-                                        <strong className="text-foreground">search_export</strong>. Next 6-hour window starts only after both steps finish.
+                                        Sources: <strong className="text-foreground">1) Your connections</strong>, then{' '}
+                                        <strong className="text-foreground">2) Bhavya’s connections</strong>. The next 6-hour cycle starts only after both steps finish.
                                     </span>
                                 </p>
                                 <div className="flex flex-col items-stretch sm:items-end gap-1 shrink-0 w-full sm:w-auto min-w-[200px]">
                                     {(pipelinePhase !== 'cooldown' || restoredPipelineRun) && (
                                         <div className="flex items-center gap-2 justify-center sm:justify-end text-sm font-medium text-foreground">
                                             <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                                            <span className="text-center sm:text-right">{pipelineUiHint || 'Running pipeline…'}</span>
+                                            <span className="text-center sm:text-right">{pipelineUiHint || 'Lead extraction is running…'}</span>
                                         </div>
                                     )}
                                     {pipelinePhase === 'cooldown' && !restoredPipelineRun && pipelineAutoSyncEnabled && (
